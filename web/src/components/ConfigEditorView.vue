@@ -2424,13 +2424,22 @@
                       <span class="visual-section-title"
                         >分流路由规则列表 (rules)</span
                       >
-                      <button
-                        class="btn btn-secondary"
-                        style="padding: 0.3rem 0.6rem; font-size: 0.8rem"
-                        @click="addRouteRule"
-                      >
-                        + 添加路由规则
-                      </button>
+                      <div class="flex gap-2">
+                        <button
+                          class="btn btn-primary"
+                          style="padding: 0.3rem 0.6rem; font-size: 0.8rem"
+                          @click="openDomainWizard"
+                        >
+                          ⚡ 快捷域名分流推荐
+                        </button>
+                        <button
+                          class="btn btn-secondary"
+                          style="padding: 0.3rem 0.6rem; font-size: 0.8rem"
+                          @click="addRouteRule"
+                        >
+                          + 添加路由规则
+                        </button>
+                      </div>
                     </div>
 
                     <!-- Duplicate Route Rules Warning Box -->
@@ -5926,6 +5935,373 @@
         </div>
       </div>
     </div>
+
+    <!-- 域名分流推荐 (最佳实践) Modal -->
+    <div
+      class="modal"
+      :class="{ active: domainWizardModal.show }"
+      @click.self="domainWizardModal.show = false"
+    >
+      <div class="modal-card" style="max-width: 680px; width: 95%">
+        <div class="modal-header">
+          <span>⚡ 快捷域名分流推荐 (最佳实践)</span>
+          <svg
+            style="cursor: pointer"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            @click="domainWizardModal.show = false"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </div>
+
+        <div class="modal-body">
+          <!-- Description & Tip -->
+          <div
+            style="
+              margin-bottom: 1.25rem;
+              padding: 0.75rem 1rem;
+              background: rgba(99, 102, 241, 0.08);
+              border-left: 4px solid var(--primary);
+              border-radius: 4px;
+              font-size: 0.85rem;
+              color: var(--text-muted);
+              line-height: 1.4;
+            "
+          >
+            <strong>💡 最佳实践建议:</strong>
+            输入一个或多个域名。系统将智能分析并测试您的可用节点延迟，然后为您推荐最合适的
+            <strong>URLTest 策略组</strong> 或 <strong>特定代理节点</strong>。
+          </div>
+
+          <!-- Domains Textarea -->
+          <div class="input-group" style="margin-bottom: 1rem">
+            <label
+              style="font-weight: 600; margin-bottom: 0.4rem; display: block"
+            >
+              待配置域名 (每行或以逗号/空格分隔一个域名)
+            </label>
+            <textarea
+              v-model="domainWizardModal.inputText"
+              class="input-control"
+              style="
+                height: 100px;
+                font-family: var(--font-mono);
+                font-size: 0.9rem;
+                padding: 0.6rem;
+                border-radius: 6px;
+                background: rgba(0, 0, 0, 0.2);
+                color: var(--text-main);
+              "
+              placeholder="例如：&#10;www.google.com&#10;drive.google.com"
+            ></textarea>
+          </div>
+
+          <!-- Analysis Results & Validation Error -->
+          <div style="margin-bottom: 1.25rem">
+            <div
+              v-if="domainWizardModal.errorMsg"
+              style="
+                padding: 0.75rem 1rem;
+                background: rgba(239, 68, 68, 0.1);
+                border-radius: 6px;
+                color: var(--danger);
+                font-size: 0.85rem;
+              "
+            >
+              ⚠️ {{ domainWizardModal.errorMsg }}
+            </div>
+
+            <div
+              v-else-if="
+                domainWizardModal.inputText.trim() &&
+                domainWizardModal.detectedType
+              "
+              style="
+                padding: 0.75rem 1rem;
+                background: rgba(16, 185, 129, 0.08);
+                border: 1px solid rgba(16, 185, 129, 0.2);
+                border-radius: 6px;
+                font-size: 0.85rem;
+                color: var(--text-main);
+              "
+            >
+              <div class="flex items-center gap-2 mb-1">
+                <span
+                  class="badge badge-success"
+                  style="font-size: 0.75rem; padding: 0.1rem 0.4rem"
+                >
+                  {{
+                    domainWizardModal.detectedType === "precise"
+                      ? "精确域名"
+                      : "范域名 (同后缀)"
+                  }}
+                </span>
+                <span>分析成功</span>
+              </div>
+              <div
+                v-if="domainWizardModal.detectedType === 'precise'"
+                style="color: var(--text-muted)"
+              >
+                写入配置：域名
+                <strong>{{ domainWizardModal.testUrl }}</strong> (匹配规则字段:
+                <code>domain</code>)
+              </div>
+              <div
+                v-else-if="domainWizardModal.detectedType === 'wildcard'"
+                style="color: var(--text-muted)"
+              >
+                检测到公共域名后缀：<strong style="color: var(--success)">{{
+                  domainWizardModal.extractedSuffix
+                }}</strong>
+                (匹配规则字段: <code>domain_suffix</code>)
+                <div
+                  style="
+                    font-size: 0.8rem;
+                    margin-top: 0.25rem;
+                    color: var(--text-muted);
+                  "
+                >
+                  测试测速所用域名：<code>{{ domainWizardModal.testUrl }}</code>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Latency Testing Action and Status -->
+          <div
+            v-if="
+              domainWizardModal.inputText.trim() && !domainWizardModal.errorMsg
+            "
+            style="
+              margin-bottom: 1.25rem;
+              padding: 1rem;
+              background: rgba(255, 255, 255, 0.02);
+              border: 1px solid var(--border-color);
+              border-radius: 6px;
+            "
+          >
+            <div class="flex justify-between items-center mb-3">
+              <span style="font-size: 0.9rem; font-weight: 600"
+                >⚡ 节点延迟智能测试</span
+              >
+              <button
+                class="btn"
+                :class="
+                  domainWizardModal.isTesting ? 'btn-secondary' : 'btn-primary'
+                "
+                style="padding: 0.35rem 0.8rem; font-size: 0.85rem"
+                :disabled="domainWizardModal.isTesting"
+                @click="startLatencyTest"
+              >
+                {{
+                  domainWizardModal.isTesting
+                    ? "测试中..."
+                    : "开始测试并生成推荐"
+                }}
+              </button>
+            </div>
+
+            <!-- Testing Progress Bar -->
+            <div
+              v-if="
+                domainWizardModal.isTesting ||
+                domainWizardModal.testProgress > 0
+              "
+              style="margin-bottom: 0.75rem"
+            >
+              <div
+                class="flex justify-between"
+                style="
+                  font-size: 0.8rem;
+                  color: var(--text-muted);
+                  margin-bottom: 0.3rem;
+                "
+              >
+                <span
+                  >测速进度: {{ domainWizardModal.testProgress }} /
+                  {{ domainWizardModal.testTotal }}</span
+                >
+                <span
+                  >{{
+                    Math.round(
+                      (domainWizardModal.testProgress /
+                        domainWizardModal.testTotal) *
+                        100,
+                    )
+                  }}%</span
+                >
+              </div>
+              <div
+                style="
+                  height: 6px;
+                  background: rgba(255, 255, 255, 0.05);
+                  border-radius: 3px;
+                  overflow: hidden;
+                "
+              >
+                <div
+                  style="
+                    height: 100%;
+                    background: linear-gradient(
+                      90deg,
+                      var(--primary),
+                      var(--secondary)
+                    );
+                    border-radius: 3px;
+                    transition: width 0.1s ease;
+                  "
+                  :style="{
+                    width:
+                      (domainWizardModal.testProgress /
+                        domainWizardModal.testTotal) *
+                        100 +
+                      '%',
+                  }"
+                ></div>
+              </div>
+            </div>
+
+            <!-- Live Logs / Results console -->
+            <div
+              v-if="domainWizardModal.testLogs.length > 0"
+              style="
+                height: 110px;
+                overflow-y: auto;
+                background: #000;
+                font-family: var(--font-mono);
+                font-size: 0.75rem;
+                padding: 0.5rem;
+                border-radius: 4px;
+                color: #a7f3d0;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+              "
+            >
+              <div
+                v-for="(log, lIdx) in domainWizardModal.testLogs"
+                :key="lIdx"
+                style="margin-bottom: 0.2rem"
+              >
+                {{ log }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Configuration target dropdown and recommendations -->
+          <div
+            v-if="
+              Object.keys(domainWizardModal.testResults).length > 0 ||
+              domainWizardModal.recommendedOutbound
+            "
+            style="
+              margin-bottom: 1rem;
+              padding: 1rem;
+              background: rgba(99, 102, 241, 0.03);
+              border: 1px solid rgba(99, 102, 241, 0.1);
+              border-radius: 6px;
+            "
+          >
+            <div class="input-group" style="margin-bottom: 1rem">
+              <label
+                style="font-weight: 600; margin-bottom: 0.4rem; display: block"
+                >选择目标出站 (Outbound)</label
+              >
+              <select
+                v-model="domainWizardModal.selectedOutbound"
+                class="input-control"
+                style="font-weight: 600"
+              >
+                <option
+                  v-for="opt in sortedOutboundsForSelect"
+                  :key="opt.tag"
+                  :value="opt.tag"
+                >
+                  {{ opt.isRecommended ? "🔥 [系统推荐] " : ""
+                  }}{{ opt.tag }} ({{ opt.latencyText }})
+                </option>
+              </select>
+            </div>
+
+            <!-- Rule Action Choice (Merge/Create) -->
+            <div class="input-group">
+              <label
+                style="font-weight: 600; margin-bottom: 0.4rem; display: block"
+                >分流规则写入方式</label
+              >
+              <div class="flex gap-4" style="margin-top: 0.25rem">
+                <label
+                  class="flex items-center gap-2"
+                  style="cursor: pointer; font-size: 0.85rem"
+                >
+                  <input
+                    v-model="domainWizardModal.targetRuleAction"
+                    type="radio"
+                    value="append"
+                    :disabled="!matchingExistingRule"
+                  />
+                  <span>合并到已有规则</span>
+                  <span
+                    v-if="matchingExistingRule"
+                    style="color: var(--text-muted); font-size: 0.75rem"
+                  >
+                    (追加匹配列表)
+                  </span>
+                  <span
+                    v-else
+                    style="color: var(--text-muted); font-size: 0.75rem"
+                  >
+                    (无此出站的简单规则)
+                  </span>
+                </label>
+                <label
+                  class="flex items-center gap-2"
+                  style="cursor: pointer; font-size: 0.85rem"
+                >
+                  <input
+                    v-model="domainWizardModal.targetRuleAction"
+                    type="radio"
+                    value="create"
+                  />
+                  <span>创建新路由规则</span>
+                  <span style="color: var(--text-muted); font-size: 0.75rem">
+                    (插入在最前，优先级最高)
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="domainWizardModal.isTesting"
+            @click="domainWizardModal.show = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="
+              domainWizardModal.isTesting ||
+              !domainWizardModal.inputText.trim() ||
+              domainWizardModal.errorMsg ||
+              !domainWizardModal.selectedOutbound
+            "
+            @click="confirmApplyDomainWizard"
+          >
+            确认并写入配置
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -6378,6 +6754,499 @@ const groupImportModal = reactive({
   searchQuery: "",
   selectedTags: [],
 });
+
+// ==========================================
+// 域名分流推荐 (最佳实践) Wizard Logic
+// ==========================================
+
+const getCommonSuffix = (domains) => {
+  if (!domains || domains.length <= 1) return "";
+  const domainParts = domains.map((d) => d.split(".").reverse());
+  const minLength = Math.min(...domainParts.map((parts) => parts.length));
+
+  const commonParts = [];
+  for (let i = 0; i < minLength; i++) {
+    const part = domainParts[0][i];
+    const allMatch = domainParts.every((parts) => parts[i] === part);
+    if (allMatch) {
+      commonParts.push(part);
+    } else {
+      break;
+    }
+  }
+  if (commonParts.length === 0) return "";
+  return commonParts.reverse().join(".");
+};
+
+const domainWizardModal = reactive({
+  show: false,
+  inputText: "",
+  errorMsg: "",
+  detectedType: "",
+  extractedSuffix: "",
+  testUrl: "",
+  isTesting: false,
+  testProgress: 0,
+  testTotal: 0,
+  testLogs: [],
+  testResults: {},
+  recommendedOutbound: "",
+  selectedOutbound: "",
+  targetRuleAction: "create",
+});
+
+watch(
+  () => domainWizardModal.inputText,
+  (newVal) => {
+    if (!newVal) {
+      domainWizardModal.errorMsg = "";
+      domainWizardModal.detectedType = "";
+      domainWizardModal.extractedSuffix = "";
+      domainWizardModal.testUrl = "";
+      return;
+    }
+    const lines = newVal
+      .split(/[\n,\s]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      domainWizardModal.errorMsg = "";
+      domainWizardModal.detectedType = "";
+      domainWizardModal.extractedSuffix = "";
+      domainWizardModal.testUrl = "";
+      return;
+    }
+
+    // Basic validation to prevent arbitrary inputs
+    const domainRegex =
+      /^[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+$/;
+    const invalidDomains = lines.filter((d) => !domainRegex.test(d));
+    if (invalidDomains.length > 0) {
+      domainWizardModal.errorMsg = `存在非法的域名格式: ${invalidDomains.join(", ")}`;
+      domainWizardModal.detectedType = "";
+      domainWizardModal.extractedSuffix = "";
+      domainWizardModal.testUrl = "";
+      return;
+    }
+
+    domainWizardModal.errorMsg = "";
+    if (lines.length === 1) {
+      domainWizardModal.detectedType = "precise";
+      domainWizardModal.extractedSuffix = "";
+      domainWizardModal.testUrl = lines[0];
+    } else {
+      domainWizardModal.detectedType = "wildcard";
+      const suffix = getCommonSuffix(lines);
+      if (!suffix) {
+        domainWizardModal.errorMsg =
+          "这些域名没有共同的后缀（如都以 .com 或 google.com 结尾），无法作为范域名。请确保至少有 2 个且具有共同后缀的域名。";
+        domainWizardModal.extractedSuffix = "";
+        domainWizardModal.testUrl = "";
+      } else {
+        domainWizardModal.extractedSuffix = suffix;
+        domainWizardModal.testUrl = lines[0];
+      }
+    }
+  },
+);
+
+const startLatencyTest = async () => {
+  if (domainWizardModal.errorMsg) {
+    showToast(domainWizardModal.errorMsg, "warning");
+    return;
+  }
+  if (!domainWizardModal.testUrl) {
+    showToast("请输入待测试域名", "warning");
+    return;
+  }
+
+  if (nodePoolCache.value.length === 0) {
+    domainWizardModal.testLogs.push("正在从后端加载节点池缓存...");
+    await loadNodePoolCache();
+  }
+
+  const targetNodeIds = [];
+  const dbIdToNodeTag = {};
+  const proxyTags = new Set();
+
+  (configData.outbounds || []).forEach((o) => {
+    if (!["direct", "block", "dns", "selector", "urltest"].includes(o.type)) {
+      proxyTags.add(o.tag);
+    } else if (
+      ["selector", "urltest"].includes(o.type) &&
+      Array.isArray(o.outbounds)
+    ) {
+      o.outbounds.forEach((memberTag) => {
+        const memberOutbound = (configData.outbounds || []).find(
+          (x) => x.tag === memberTag,
+        );
+        if (
+          memberOutbound &&
+          !["direct", "block", "dns", "selector", "urltest"].includes(
+            memberOutbound.type,
+          )
+        ) {
+          proxyTags.add(memberTag);
+        }
+      });
+    }
+  });
+
+  proxyTags.forEach((tag) => {
+    const dbNode = nodePoolCache.value.find((n) => n.tag === tag);
+    if (dbNode && dbNode.id) {
+      targetNodeIds.push(dbNode.id);
+      dbIdToNodeTag[dbNode.id] = tag;
+    }
+  });
+
+  if (targetNodeIds.length === 0) {
+    domainWizardModal.testLogs = [
+      "配置的出站或策略组中没有包含有效的代理节点。",
+    ];
+    showToast("未找到可测试的代理节点", "warning");
+    return;
+  }
+
+  domainWizardModal.isTesting = true;
+  domainWizardModal.testProgress = 0;
+  domainWizardModal.testTotal = targetNodeIds.length;
+  domainWizardModal.testLogs = [
+    `开始测试域名: ${domainWizardModal.testUrl}`,
+    `共找到 ${targetNodeIds.length} 个相关代理节点待测速...`,
+  ];
+  domainWizardModal.testResults = {};
+
+  const testUrlClean =
+    domainWizardModal.testUrl.startsWith("http://") ||
+    domainWizardModal.testUrl.startsWith("https://")
+      ? domainWizardModal.testUrl
+      : `https://${domainWizardModal.testUrl}`;
+
+  const batchSize = 3;
+  const idsToProcess = [...targetNodeIds];
+
+  const processBatch = async () => {
+    if (idsToProcess.length === 0 || !domainWizardModal.isTesting) {
+      domainWizardModal.isTesting = false;
+      calculateRecommendations();
+      return;
+    }
+
+    const batch = idsToProcess.splice(0, batchSize);
+    const promises = batch.map(async (id) => {
+      const tag = dbIdToNodeTag[id];
+      try {
+        const res = await fetch(`${API_BASE}/api/nodes/ping`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token.value}`,
+          },
+          body: JSON.stringify({
+            ids: [id],
+            test_type: "both",
+            target_url: testUrlClean,
+          }),
+        });
+
+        if (!domainWizardModal.isTesting) return;
+
+        if (res.ok) {
+          const results = await res.json();
+          const item = results[0];
+          if (item) {
+            const tcp = item.tcp_latency;
+            const web = item.web_latency;
+            const latency = web !== null && web !== undefined ? web : tcp;
+
+            domainWizardModal.testResults[tag] = { tcp, web, latency };
+            if (latency !== null && latency !== undefined) {
+              domainWizardModal.testLogs.push(
+                `[${tag}] 网页延迟: ${web || "N/A"}ms, TCP 延迟: ${tcp || "N/A"}ms`,
+              );
+            } else {
+              domainWizardModal.testLogs.push(`[${tag}] 连接失败`);
+            }
+          } else {
+            domainWizardModal.testResults[tag] = {
+              tcp: null,
+              web: null,
+              latency: null,
+            };
+            domainWizardModal.testLogs.push(`[${tag}] 接口未返回数据`);
+          }
+        } else {
+          domainWizardModal.testResults[tag] = {
+            tcp: null,
+            web: null,
+            latency: null,
+          };
+          domainWizardModal.testLogs.push(
+            `[${tag}] 接口错误 (状态码: ${res.status})`,
+          );
+        }
+      } catch (err) {
+        if (!domainWizardModal.isTesting) return;
+        domainWizardModal.testResults[tag] = {
+          tcp: null,
+          web: null,
+          latency: null,
+        };
+        domainWizardModal.testLogs.push(
+          `[${tag}] 测试异常: ${err.message || err}`,
+        );
+      } finally {
+        domainWizardModal.testProgress++;
+      }
+    });
+
+    await Promise.all(promises);
+    setTimeout(processBatch, 50);
+  };
+
+  await processBatch();
+};
+
+const calculateRecommendations = () => {
+  const proxyRankings = [];
+  const groupRankings = [];
+
+  (configData.outbounds || []).forEach((o) => {
+    if (!["direct", "block", "dns", "selector", "urltest"].includes(o.type)) {
+      const result = domainWizardModal.testResults[o.tag];
+      const latency = result?.latency;
+      proxyRankings.push({
+        tag: o.tag,
+        type: o.type,
+        latency: latency !== undefined && latency !== null ? latency : 99999,
+      });
+    } else if (["selector", "urltest"].includes(o.type)) {
+      let totalLatency = 0;
+      let count = 0;
+      if (Array.isArray(o.outbounds)) {
+        o.outbounds.forEach((memberTag) => {
+          const result = domainWizardModal.testResults[memberTag];
+          if (
+            result &&
+            result.latency !== null &&
+            result.latency !== undefined
+          ) {
+            totalLatency += result.latency;
+            count++;
+          }
+        });
+      }
+      const avgLatency = count > 0 ? Math.round(totalLatency / count) : 99999;
+      groupRankings.push({
+        tag: o.tag,
+        type: o.type,
+        latency: avgLatency,
+      });
+    }
+  });
+
+  proxyRankings.sort((a, b) => a.latency - b.latency);
+  groupRankings.sort((a, b) => a.latency - b.latency);
+
+  const recommendedGroup = groupRankings.find(
+    (g) => g.type === "urltest" && g.latency < 99999,
+  );
+  const recommendedNode = proxyRankings.find((p) => p.latency < 99999);
+
+  let bestTag = "";
+  if (recommendedGroup) {
+    bestTag = recommendedGroup.tag;
+    domainWizardModal.testLogs.push(
+      `[系统推荐] 最佳自动测速策略组: ${bestTag} (平均延迟: ${recommendedGroup.latency}ms)`,
+    );
+  } else if (recommendedNode) {
+    bestTag = recommendedNode.tag;
+    domainWizardModal.testLogs.push(
+      `[系统推荐] 最佳代理节点: ${bestTag} (延迟: ${recommendedNode.latency}ms)`,
+    );
+  } else {
+    const urltestGroup = (configData.outbounds || []).find(
+      (o) => o.type === "urltest",
+    );
+    bestTag = urltestGroup ? urltestGroup.tag : "direct";
+    domainWizardModal.testLogs.push(
+      `[系统提示] 所有代理节点测速失败，已默认推荐: ${bestTag}`,
+    );
+  }
+
+  domainWizardModal.recommendedOutbound = bestTag;
+  domainWizardModal.selectedOutbound = bestTag;
+};
+
+const sortedOutboundsForSelect = computed(() => {
+  const list = [];
+  (configData.outbounds || []).forEach((o) => {
+    let latencyText = "";
+    let sortKey = 999999;
+    let isRecommended = o.tag === domainWizardModal.recommendedOutbound;
+
+    if (["selector", "urltest"].includes(o.type)) {
+      let totalLatency = 0;
+      let count = 0;
+      if (Array.isArray(o.outbounds)) {
+        o.outbounds.forEach((memberTag) => {
+          const result = domainWizardModal.testResults[memberTag];
+          if (
+            result &&
+            result.latency !== null &&
+            result.latency !== undefined
+          ) {
+            totalLatency += result.latency;
+            count++;
+          }
+        });
+      }
+      if (count > 0) {
+        const avg = Math.round(totalLatency / count);
+        latencyText = `平均延迟: ${avg}ms`;
+        sortKey = avg;
+      } else {
+        latencyText = "策略组 (未测速/全部失败)";
+        sortKey = 888888;
+      }
+    } else if (!["direct", "block", "dns"].includes(o.type)) {
+      const result = domainWizardModal.testResults[o.tag];
+      if (result && result.latency !== null && result.latency !== undefined) {
+        latencyText = `延迟: ${result.latency}ms`;
+        sortKey = result.latency;
+      } else {
+        latencyText = "代理节点 (测速失败/未测速)";
+        sortKey = 888888;
+      }
+    } else {
+      latencyText =
+        o.type === "direct" ? "直连" : o.type === "block" ? "阻断" : "DNS";
+      sortKey = 900000;
+    }
+
+    list.push({
+      tag: o.tag,
+      type: o.type,
+      latencyText,
+      sortKey,
+      isRecommended,
+    });
+  });
+
+  list.sort((a, b) => {
+    if (a.isRecommended) return -1;
+    if (b.isRecommended) return 1;
+    return a.sortKey - b.sortKey;
+  });
+
+  return list;
+});
+
+const matchingExistingRule = computed(() => {
+  if (!domainWizardModal.selectedOutbound) return null;
+  return (configData.route.rules || []).find(
+    (r) =>
+      r.outbound === domainWizardModal.selectedOutbound &&
+      !r.ip_cidr &&
+      !r.geoip &&
+      !r.geosite &&
+      !r.port &&
+      !r.protocol &&
+      !r.ip_is_private &&
+      r.type !== "logical",
+  );
+});
+
+const confirmApplyDomainWizard = () => {
+  if (domainWizardModal.errorMsg) {
+    showToast(domainWizardModal.errorMsg, "warning");
+    return;
+  }
+  if (!domainWizardModal.selectedOutbound) {
+    showToast("请选择目标出站", "warning");
+    return;
+  }
+
+  const domains = domainWizardModal.inputText
+    .split(/[\n,\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (domains.length === 0) {
+    showToast("请输入待配置的域名", "warning");
+    return;
+  }
+
+  let targetValue = "";
+  let fieldName = "";
+
+  if (domainWizardModal.detectedType === "precise") {
+    targetValue = domains[0];
+    fieldName = "domain";
+  } else {
+    targetValue = domainWizardModal.extractedSuffix;
+    fieldName = "domain_suffix";
+    if (!targetValue) {
+      showToast("范域名公共后缀为空，请重新输入", "warning");
+      return;
+    }
+  }
+
+  const ruleToMerge =
+    domainWizardModal.targetRuleAction === "append"
+      ? matchingExistingRule.value
+      : null;
+
+  if (ruleToMerge) {
+    if (!Array.isArray(ruleToMerge[fieldName])) {
+      ruleToMerge[fieldName] = [];
+    }
+    if (!ruleToMerge[fieldName].includes(targetValue)) {
+      ruleToMerge[fieldName].push(targetValue);
+      showToast(
+        `已成功将域名/后缀 [${targetValue}] 合并到已有出站 [${domainWizardModal.selectedOutbound}] 的路由规则中！`,
+      );
+    } else {
+      showToast(
+        `域名/后缀 [${targetValue}] 已存在于该出站规则中，无需重复添加。`,
+        "warning",
+      );
+    }
+  } else {
+    const newRule = {
+      outbound: domainWizardModal.selectedOutbound,
+      [fieldName]: [targetValue],
+    };
+    if (!Array.isArray(configData.route.rules)) {
+      configData.route.rules = [];
+    }
+    configData.route.rules.unshift(newRule);
+    showToast(
+      `已成功创建新的分流路由规则，指向出站 [${domainWizardModal.selectedOutbound}]，匹配: ${targetValue}`,
+    );
+  }
+
+  domainWizardModal.show = false;
+};
+
+const openDomainWizard = () => {
+  domainWizardModal.inputText = "";
+  domainWizardModal.errorMsg = "";
+  domainWizardModal.detectedType = "";
+  domainWizardModal.extractedSuffix = "";
+  domainWizardModal.testUrl = "";
+
+  domainWizardModal.isTesting = false;
+  domainWizardModal.testProgress = 0;
+  domainWizardModal.testTotal = 0;
+  domainWizardModal.testLogs = [];
+  domainWizardModal.testResults = {};
+  domainWizardModal.recommendedOutbound = "";
+  domainWizardModal.selectedOutbound = "";
+  domainWizardModal.targetRuleAction = "create";
+
+  domainWizardModal.show = true;
+};
 
 const isGroupImported = (tag) => {
   return (configData.outbounds || []).some(
