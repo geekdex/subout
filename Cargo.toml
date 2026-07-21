@@ -1,0 +1,22 @@
+[package]
+name = "subout"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["macros"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+anyhow = "1.0"
+sha2 = "0.10"
+base64 = "0.22"
+percent-encoding = "2.3"
+url = "2.5"
+chrono = "0.4"
+dirs = "5.0"
