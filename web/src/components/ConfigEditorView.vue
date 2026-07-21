@@ -1280,6 +1280,28 @@
                                       }}
                                     </div>
                                     <div
+                                      v-if="sub.domain_keyword"
+                                      class="criteria-tag"
+                                    >
+                                      Keyword:
+                                      {{
+                                        Array.isArray(sub.domain_keyword)
+                                          ? sub.domain_keyword.join(", ")
+                                          : sub.domain_keyword
+                                      }}
+                                    </div>
+                                    <div
+                                      v-if="sub.domain_regex"
+                                      class="criteria-tag"
+                                    >
+                                      Regex:
+                                      {{
+                                        Array.isArray(sub.domain_regex)
+                                          ? sub.domain_regex.join(", ")
+                                          : sub.domain_regex
+                                      }}
+                                    </div>
+                                    <div
                                       v-if="sub.geoip"
                                       class="criteria-tag"
                                       :class="{
@@ -3578,16 +3600,18 @@
             <div v-if="itemModal.itemType === 'dns_rule'">
               <div class="grid-2" style="margin-bottom: 1rem">
                 <div class="input-group">
-                  <label>规则类型 (Rule Type)</label>
-                  <select v-model="itemModal.dnsRuleType" class="input-control">
-                    <option value="domain_suffix">
-                      域名后缀 (domain_suffix)
+                  <label>规则匹配逻辑 (Rule Logic)</label>
+                  <select
+                    v-model="itemModal.routeRuleLogic"
+                    class="input-control"
+                  >
+                    <option value="or">
+                      逻辑或 OR (满足下方任意非空条件即可 - 建议默认)
                     </option>
-                    <option value="rule_set">
-                      规则集 (rule_set / geosite)
+                    <option value="standard">
+                      默认 AND 逻辑 (需同时满足下方所有非空条件)
                     </option>
-                    <option value="logical">逻辑规则 (logical)</option>
-                    <option value="advanced">高级/其它 (advanced)</option>
+                    <option value="and">逻辑与 AND (仅用于特殊嵌套逻辑)</option>
                   </select>
                 </div>
                 <div class="input-group">
@@ -3651,71 +3675,17 @@
                 </div>
               </div>
 
-              <!-- Logical logic selector -->
-              <div
-                v-if="itemModal.dnsRuleType === 'logical'"
-                class="grid-2"
-                style="margin-bottom: 1rem"
-              >
-                <div class="input-group">
-                  <label>逻辑运算符 (Logic Mode)</label>
-                  <select
-                    v-model="itemModal.routeRuleLogic"
-                    class="input-control"
-                  >
-                    <option value="or">逻辑或 OR (满足任一子规则)</option>
-                    <option value="and">逻辑与 AND (需满足所有子规则)</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Condition Fields depending on dnsRuleType -->
-              <!-- 1. Domain Suffix -->
-              <div
-                v-if="itemModal.dnsRuleType === 'domain_suffix'"
-                class="input-group"
-              >
-                <label>域名后缀 (domain_suffix, 每行一例)</label>
-                <textarea
-                  v-model="itemModal.tempFields.domain_suffix"
-                  class="input-control"
-                  style="height: 120px"
-                  placeholder="google.com&#10;youtube.com"
-                ></textarea>
-              </div>
-
-              <!-- 2. Rule Set -->
-              <div
-                v-if="itemModal.dnsRuleType === 'rule_set'"
-                style="display: flex; flex-direction: column; gap: 1rem"
-              >
+              <!-- Coexisting condition fields -->
+              <div style="display: flex; flex-direction: column; gap: 1rem">
                 <div class="input-group">
                   <label>规则集列表 (rule_set, 每行一例)</label>
                   <textarea
                     v-model="itemModal.tempFields.rule_set"
                     class="input-control"
-                    style="height: 100px"
+                    style="height: 80px"
                     placeholder="geosite-google&#10;geosite-cn"
                   ></textarea>
                 </div>
-                <div class="input-group">
-                  <label
-                    >Geosite 规则集名称 (geosite, 每行一例 - 兼容旧版)</label
-                  >
-                  <textarea
-                    v-model="itemModal.tempFields.geosite"
-                    class="input-control"
-                    style="height: 100px"
-                    placeholder="cn&#10;geolocation-!cn"
-                  ></textarea>
-                </div>
-              </div>
-
-              <!-- 3. Logical or Advanced -->
-              <div
-                v-if="['logical', 'advanced'].includes(itemModal.dnsRuleType)"
-                style="display: flex; flex-direction: column; gap: 1rem"
-              >
                 <div class="input-group">
                   <label>域名后缀 (domain_suffix, 每行一例)</label>
                   <textarea
@@ -3723,15 +3693,6 @@
                     class="input-control"
                     style="height: 80px"
                     placeholder="google.com&#10;youtube.com"
-                  ></textarea>
-                </div>
-                <div class="input-group">
-                  <label>规则集列表 (rule_set, 每行一例)</label>
-                  <textarea
-                    v-model="itemModal.tempFields.rule_set"
-                    class="input-control"
-                    style="height: 80px"
-                    placeholder="geosite-google&#10;geosite-cn"
                   ></textarea>
                 </div>
                 <div class="input-group">
@@ -3752,6 +3713,7 @@
                     placeholder="www.google.com&#10;api.github.com"
                   ></textarea>
                 </div>
+
                 <div style="margin-top: 0.5rem; text-align: center">
                   <button
                     type="button"
@@ -3762,10 +3724,11 @@
                     {{
                       showAdvancedDnsFields
                         ? "收起高级匹配条件 ▴"
-                        : "展开高级匹配条件 (域名关键字/正则/IP等) ▾"
+                        : "展开高级匹配条件 (域名关键字/正则/GeoIP/IP网段/端口等) ▾"
                     }}
                   </button>
                 </div>
+
                 <div
                   v-show="showAdvancedDnsFields"
                   style="
@@ -8665,7 +8628,9 @@ const addDnsRule = () => {
       : "local-dns";
   const newItem = {
     server: defaultServer,
-    domain_suffix: [],
+    type: "logical",
+    mode: "or",
+    rules: [],
   };
   editItem(newItem, "dns_rule", (parsed) => {
     configData.dns.rules.push(parsed);
@@ -8898,102 +8863,10 @@ const syncVisualToItemData = () => {
         delete itemModal.itemData.client_subnet;
       }
     }
+  }
 
-    delete itemModal.itemData.type;
-    delete itemModal.itemData.mode;
-    delete itemModal.itemData.rules;
-
-    let allowedFields = [];
-    if (itemModal.dnsRuleType === "domain_suffix") {
-      allowedFields = ["domain_suffix"];
-    } else if (itemModal.dnsRuleType === "rule_set") {
-      allowedFields = ["rule_set", "geosite"];
-    } else if (itemModal.dnsRuleType === "logical") {
-      itemModal.itemData.type = "logical";
-      itemModal.itemData.mode =
-        itemModal.routeRuleLogic && itemModal.routeRuleLogic !== "standard"
-          ? itemModal.routeRuleLogic
-          : "or";
-
-      const rules = [];
-      arrayFields.forEach((f) => {
-        if (
-          itemModal.tempFields[f] !== undefined &&
-          itemModal.tempFields[f] !== null
-        ) {
-          const val = itemModal.tempFields[f].trim();
-          if (val) {
-            const list = val
-              .split(/[\n,]+/)
-              .map((s) => s.trim())
-              .filter((s) => s.length > 0);
-            if (list.length > 0) {
-              rules.push({ [f]: list });
-            }
-          }
-        }
-      });
-
-      if (itemModal.tempFields.port) {
-        const val = itemModal.tempFields.port.trim();
-        if (val) {
-          const list = val
-            .split(/[\n,]+/)
-            .map((s) => parseInt(s.trim()))
-            .filter((n) => !isNaN(n));
-          if (list.length > 0) {
-            rules.push({ port: list });
-          }
-        }
-      }
-
-      itemModal.itemData.rules = rules;
-      arrayFields.forEach((f) => {
-        delete itemModal.itemData[f];
-      });
-      delete itemModal.itemData.port;
-    } else {
-      allowedFields = arrayFields;
-    }
-
-    if (itemModal.dnsRuleType !== "logical") {
-      arrayFields.forEach((f) => {
-        if (allowedFields.includes(f)) {
-          if (
-            itemModal.tempFields[f] !== undefined &&
-            itemModal.tempFields[f] !== null
-          ) {
-            const val = itemModal.tempFields[f].trim();
-            if (val) {
-              itemModal.itemData[f] = val
-                .split(/[\n,]+/)
-                .map((s) => s.trim())
-                .filter((s) => s.length > 0);
-            } else {
-              delete itemModal.itemData[f];
-            }
-          }
-        } else {
-          delete itemModal.itemData[f];
-        }
-      });
-
-      if (allowedFields.includes("port") && itemModal.tempFields.port) {
-        const val = itemModal.tempFields.port.trim();
-        if (val) {
-          itemModal.itemData.port = val
-            .split(/[\n,]+/)
-            .map((s) => parseInt(s.trim()))
-            .filter((n) => !isNaN(n));
-        } else {
-          delete itemModal.itemData.port;
-        }
-      } else {
-        delete itemModal.itemData.port;
-      }
-    }
-  } else if (
-    ["route_rule"].includes(itemModal.itemType) &&
+  if (
+    ["route_rule", "dns_rule"].includes(itemModal.itemType) &&
     itemModal.routeRuleLogic &&
     itemModal.routeRuleLogic !== "standard"
   ) {
@@ -9036,7 +8909,7 @@ const syncVisualToItemData = () => {
 
     itemModal.itemData.rules = rules;
   } else {
-    if (["route_rule"].includes(itemModal.itemType)) {
+    if (["route_rule", "dns_rule"].includes(itemModal.itemType)) {
       delete itemModal.itemData.type;
       delete itemModal.itemData.mode;
       delete itemModal.itemData.rules;
@@ -9223,27 +9096,9 @@ const setItemModalMode = (mode) => {
       }
       if (itemModal.itemType === "dns_rule") {
         if (parsed.type === "logical") {
-          itemModal.dnsRuleType = "logical";
           itemModal.routeRuleLogic = parsed.mode || "or";
-        } else if (parsed.rule_set || parsed.geosite) {
-          itemModal.dnsRuleType = "rule_set";
-        } else if (parsed.domain_suffix) {
-          itemModal.dnsRuleType = "domain_suffix";
         } else {
-          const hasOtherFields = [
-            "domain",
-            "domain_keyword",
-            "domain_regex",
-            "geoip",
-            "ip_cidr",
-            "port",
-            "inbound",
-          ].some((f) => parsed[f] !== undefined && parsed[f] !== null);
-          if (hasOtherFields) {
-            itemModal.dnsRuleType = "advanced";
-          } else {
-            itemModal.dnsRuleType = "domain_suffix";
-          }
+          itemModal.routeRuleLogic = "standard";
         }
       }
       itemModal.itemData = parsed;
@@ -9608,7 +9463,7 @@ watch(
     itemModal.tempFields,
     itemModal.jsonText,
     itemModal.mode,
-    itemModal.dnsRuleType,
+    itemModal.routeRuleLogic,
   ],
   () => {
     if (itemModal.show) {
@@ -9616,21 +9471,6 @@ watch(
     }
   },
   { deep: true },
-);
-
-watch(
-  () => itemModal.dnsRuleType,
-  (newType) => {
-    if (itemModal.itemType === "dns_rule") {
-      if (newType === "logical") {
-        if (itemModal.routeRuleLogic === "standard") {
-          itemModal.routeRuleLogic = "or";
-        }
-      } else {
-        itemModal.routeRuleLogic = "standard";
-      }
-    }
-  },
 );
 
 const validateItemModal = () => {
@@ -9679,6 +9519,26 @@ const validateItemModal = () => {
     if (itemModal.itemType === "outbound" && tempObj.port !== undefined) {
       tempObj.server_port = parseInt(tempObj.port);
       delete tempObj.port;
+    }
+    if (
+      ["route_rule", "dns_rule"].includes(itemModal.itemType) &&
+      itemModal.routeRuleLogic &&
+      itemModal.routeRuleLogic !== "standard"
+    ) {
+      tempObj.type = "logical";
+      tempObj.mode = itemModal.routeRuleLogic;
+      const rules = [];
+      arrayFields.forEach((f) => {
+        if (tempObj[f]) {
+          rules.push({ [f]: tempObj[f] });
+          delete tempObj[f];
+        }
+      });
+      if (tempObj.port) {
+        rules.push({ port: tempObj.port });
+        delete tempObj.port;
+      }
+      tempObj.rules = rules;
     }
     data = tempObj;
   } else {

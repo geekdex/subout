@@ -164,6 +164,8 @@ function createMockFetch() {
       body = { items: mockConfigList, active_id: null };
     } else if (path.match(/^\/api\/config\/history\/\d+$/)) {
       body = mockConfigDetail;
+    } else if (path === "/api/config/validate") {
+      body = { valid: true };
     } else {
       // 默认返回空对象，避免未 mock 的请求报错
       body = {};
@@ -758,8 +760,9 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
 
     it("配置详情页：若当前编辑条目为运行设置配置，展示'运行设置中'徽章与'更新'按钮", async () => {
       window.location.hash = "#config/edit/1/log";
-      global.fetch = vi.fn().mockImplementation((url, options = {}) => {
-        if (url.includes("/api/config/running")) {
+      const baseMockFetch = createMockFetch();
+      global.fetch = vi.fn().mockImplementation((url) => {
+        if (String(url).includes("/api/config/running")) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -770,7 +773,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
             }),
           });
         }
-        return baseMockFetch(url, options);
+        return baseMockFetch(url);
       });
 
       const wrapper = mount(ConfigEditorView, {
@@ -785,6 +788,115 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
         .find((b) => b.text().includes("更新"));
       expect(updateBtn).toBeDefined();
       expect(updateBtn.exists()).toBe(true);
+    });
+  });
+
+  describe("DNS 规则的多字段共存与匹配逻辑 (sing-box 最佳实践)", () => {
+    it("新建 DNS 规则时默认采用 OR 逻辑，并支持多字段 (domain_suffix + rule_set + geosite) 同时存在", async () => {
+      window.location.hash = "#config/edit/1/dns";
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      // 点击 "+ 添加规则" 按钮
+      const addRuleBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("+ 添加规则"));
+      expect(addRuleBtn).toBeDefined();
+      await addRuleBtn.trigger("click");
+      await flushPromises();
+
+      // Modal 标题应为 "编辑 DNS 分流规则"
+      expect(wrapper.text()).toContain("编辑 DNS 分流规则");
+
+      // 规则匹配逻辑下拉框应默认为 or
+      const logicSelect = wrapper
+        .findAll(".modal-body select")
+        .find((s) => s.element.value === "or");
+      expect(logicSelect).toBeDefined();
+
+      // 填写 domain_suffix
+      const domainSuffixInput = wrapper
+        .findAll(".modal-body textarea")
+        .find((t) => t.element.placeholder.includes("google.com"));
+      await domainSuffixInput.setValue("google.com\nyoutube.com");
+
+      // 填写 rule_set
+      const ruleSetInput = wrapper
+        .findAll(".modal-body textarea")
+        .find((t) => t.element.placeholder.includes("geosite-google"));
+      await ruleSetInput.setValue("geosite-google");
+
+      // 点击 保存/确定 按钮
+      const saveBtn = wrapper
+        .findAll(".modal-footer button")
+        .find((b) => b.text().includes("保存") || b.text().includes("确定"));
+      await saveBtn.trigger("click");
+      await flushPromises();
+
+      // 检查渲染出来的 DNS 规则列表中是否同时存在 逻辑模式: OR、RuleSet 与 Suffix
+      const boxes = wrapper.findAll(".visual-section-box");
+      const rulesBox = boxes.find((b) => b.text().includes("DNS 分流规则列表"));
+      expect(rulesBox).toBeDefined();
+      expect(rulesBox.text()).toContain("逻辑模式: OR");
+      expect(rulesBox.text()).toContain("google.com, youtube.com");
+      expect(rulesBox.text()).toContain("geosite-google");
+    });
+
+    it("选择默认 AND 逻辑时生成标准规则，所有条件共存于根对象中", async () => {
+      window.location.hash = "#config/edit/1/dns";
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      const addRuleBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("+ 添加规则"));
+      await addRuleBtn.trigger("click");
+      await flushPromises();
+
+      // 切换为默认 AND 逻辑
+      const logicSelect = wrapper.find(".modal-body select");
+      await logicSelect.setValue("standard");
+
+      // 填写 domain_suffix
+      const domainSuffixInput = wrapper
+        .findAll(".modal-body textarea")
+        .find((t) => t.element.placeholder.includes("google.com"));
+      await domainSuffixInput.setValue("github.com");
+
+      // 填写 ip_cidr
+      const showAdvancedBtn = wrapper
+        .findAll(".modal-body button")
+        .find((b) => b.text().includes("展开高级匹配条件"));
+      if (showAdvancedBtn) {
+        await showAdvancedBtn.trigger("click");
+        await flushPromises();
+      }
+
+      const ipCidrInput = wrapper
+        .findAll(".modal-body textarea")
+        .find((t) => t.element.placeholder.includes("192.168.1.0/24"));
+      if (ipCidrInput) {
+        await ipCidrInput.setValue("10.0.0.0/8");
+      }
+
+      // 保存
+      const saveBtn = wrapper
+        .findAll(".modal-footer button")
+        .find((b) => b.text().includes("保存") || b.text().includes("确定"));
+      await saveBtn.trigger("click");
+      await flushPromises();
+
+      const boxes = wrapper.findAll(".visual-section-box");
+      const rulesBox = boxes.find((b) => b.text().includes("DNS 分流规则列表"));
+      expect(rulesBox.text()).not.toContain("逻辑模式: OR");
+      expect(rulesBox.text()).toContain("github.com");
+      expect(rulesBox.text()).toContain("10.0.0.0/8");
     });
   });
 });
