@@ -1395,6 +1395,14 @@
                                 </button>
                                 <button
                                   class="btn btn-secondary table-btn"
+                                  title="同步此规则至路由规则"
+                                  style="color: var(--primary); border-color: rgba(99, 102, 241, 0.3)"
+                                  @click="openSyncModal(rule, 'dns', idx)"
+                                >
+                                  ⇄ 同步
+                                </button>
+                                <button
+                                  class="btn btn-secondary table-btn"
                                   @click="
                                     editItem(
                                       rule,
@@ -2926,6 +2934,14 @@
                                   "
                                 >
                                   ▼
+                                </button>
+                                <button
+                                  class="btn btn-secondary table-btn"
+                                  title="同步此规则至 DNS 分流规则"
+                                  style="color: var(--primary); border-color: rgba(99, 102, 241, 0.3)"
+                                  @click="openSyncModal(rule, 'route', idx)"
+                                >
+                                  ⇄ 同步
                                 </button>
                                 <button
                                   class="btn btn-secondary table-btn"
@@ -5894,6 +5910,250 @@
             @click="confirmBatchGroupImport"
           >
             批量引入所选 ({{ (groupImportModal.selectedTags || []).length }})
+          </button>
+        </div>
+      </div>
+    </div>
+
+        <!-- 规则快速同步 Modal -->
+    <div
+      class="modal"
+      :class="{ active: ruleSyncModal.show }"
+      @click.self="ruleSyncModal.show = false"
+    >
+      <div class="modal-card" style="max-width: 600px">
+        <div class="modal-header">
+          <span>
+            ⇄ 同步规则
+            <span
+              style="
+                font-size: 0.85rem;
+                font-weight: normal;
+                color: var(--text-muted);
+                margin-left: 0.5rem;
+              "
+            >
+              ({{
+                ruleSyncModal.direction === 'route_to_dns'
+                  ? '路由规则 ➔ DNS 规则'
+                  : 'DNS 规则 ➔ 路由规则'
+              }})
+            </span>
+          </span>
+          <svg
+            style="cursor: pointer"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            @click="ruleSyncModal.show = false"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </div>
+        <div class="modal-body">
+          <div
+            v-if="ruleSyncModal.error"
+            class="alert alert-danger mb-3"
+            style="padding: 0.5rem 0.75rem; font-size: 0.85rem"
+          >
+            {{ ruleSyncModal.error }}
+          </div>
+
+          <!-- 源规则预览信息 -->
+          <div
+            class="panel"
+            style="
+              padding: 0.75rem 1rem;
+              margin-bottom: 1rem;
+              background: rgba(255, 255, 255, 0.03);
+              border: 1px dashed var(--border-color);
+            "
+          >
+            <div
+              style="
+                font-size: 0.82rem;
+                color: var(--text-muted);
+                margin-bottom: 0.35rem;
+              "
+            >
+              源规则描述特征 (同步时自动保留域名/规则集/端口等共用条件,
+              {{
+                ruleSyncModal.direction === 'route_to_dns'
+                  ? '过滤掉仅路由生效的 IP/CIDR'
+                  : '同步至目标路由'
+              }})：
+            </div>
+            <div style="font-size: 0.88rem; font-weight: 500">
+              {{
+                ruleSyncModal.sourceRule
+                  ? getRuleSummaryText(
+                      ruleSyncModal.sourceRule,
+                      ruleSyncModal.sourceIndex,
+                      ruleSyncModal.direction === 'route_to_dns'
+                        ? 'route'
+                        : 'dns',
+                    )
+                  : ''
+              }}
+            </div>
+          </div>
+
+          <!-- 同步模式选择：新建 vs 覆盖 -->
+          <div class="input-group" style="margin-bottom: 1rem">
+            <label>同步目标方式 (Target Action)</label>
+            <div style="display: flex; gap: 1rem; margin-top: 0.35rem">
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 0.35rem;
+                  cursor: pointer;
+                "
+              >
+                <input
+                  v-model="ruleSyncModal.mode"
+                  type="radio"
+                  value="new"
+                />
+                <span>➕ 新建全新的规则配置</span>
+              </label>
+              <label
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 0.35rem;
+                  cursor: pointer;
+                "
+              >
+                <input
+                  v-model="ruleSyncModal.mode"
+                  type="radio"
+                  value="overwrite"
+                />
+                <span>✏️ 覆盖现有某条规则配置</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 覆盖目标选择 -->
+          <div
+            v-if="ruleSyncModal.mode === 'overwrite'"
+            class="input-group"
+            style="margin-bottom: 1rem"
+          >
+            <label>请选择需要覆盖的目标规则</label>
+            <select
+              v-model="ruleSyncModal.targetIndex"
+              class="input-control"
+              required
+            >
+              <option :value="-1" disabled>-- 请选择目标规则 --</option>
+              <template v-if="ruleSyncModal.direction === 'route_to_dns'">
+                <option
+                  v-for="(r, i) in configData.dns.rules"
+                  :key="i"
+                  :value="i"
+                >
+                  {{ getRuleSummaryText(r, i, 'dns') }}
+                </option>
+              </template>
+              <template v-else>
+                <option
+                  v-for="(r, i) in configData.route.rules"
+                  :key="i"
+                  :value="i"
+                >
+                  {{ getRuleSummaryText(r, i, 'route') }}
+                </option>
+              </template>
+            </select>
+          </div>
+
+          <!-- 目标 DNS 配置 (方向为 route_to_dns) -->
+          <div
+            v-if="ruleSyncModal.direction === 'route_to_dns'"
+            class="grid-2"
+            style="margin-bottom: 1rem"
+          >
+            <div class="input-group">
+              <label>目标 DNS 服务器 Tag (server)</label>
+              <select
+                v-model="ruleSyncModal.targetDnsServer"
+                class="input-control"
+                required
+              >
+                <option
+                  v-for="srv in configData.dns.servers"
+                  :key="srv.tag"
+                  :value="srv.tag"
+                >
+                  {{ srv.tag }}
+                </option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>ECS 客户端子网 (client_subnet, 可选)</label>
+              <input
+                v-model="ruleSyncModal.targetClientSubnet"
+                type="text"
+                class="input-control"
+                placeholder="例如: 223.5.5.0/24"
+              />
+            </div>
+          </div>
+
+          <!-- 目标 Route 配置 (方向为 dns_to_route) -->
+          <div
+            v-if="ruleSyncModal.direction === 'dns_to_route'"
+            class="grid-2"
+            style="margin-bottom: 1rem"
+          >
+            <div class="input-group">
+              <label>动作 (Action)</label>
+              <select
+                v-model="ruleSyncModal.targetRouteAction"
+                class="input-control"
+              >
+                <option value="route">route (路由选择)</option>
+                <option value="reject">reject (拦截阻断)</option>
+                <option value="hijack-dns">hijack-dns (劫持 DNS)</option>
+                <option value="sniff">sniff (流量嗅探)</option>
+              </select>
+            </div>
+            <div
+              v-if="ruleSyncModal.targetRouteAction === 'route'"
+              class="input-group"
+            >
+              <label>目标出站 Tag (outbound)</label>
+              <select
+                v-model="ruleSyncModal.targetRouteOutbound"
+                class="input-control"
+                required
+              >
+                <option
+                  v-for="tag in allOutboundTags"
+                  :key="tag"
+                  :value="tag"
+                >
+                  {{ tag }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            class="btn btn-secondary"
+            @click="ruleSyncModal.show = false"
+          >
+            取消
+          </button>
+          <button class="btn btn-primary" @click="confirmSyncRule">
+            确认同步
           </button>
         </div>
       </div>
@@ -9905,6 +10165,225 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("hashchange", handleHashChange);
 });
+
+const ruleSyncModal = reactive({
+  show: false,
+  direction: "route_to_dns",
+  sourceIndex: -1,
+  sourceRule: null,
+  mode: "new",
+  targetIndex: -1,
+  targetDnsServer: "",
+  targetClientSubnet: "",
+  targetRouteAction: "route",
+  targetRouteOutbound: "",
+  error: "",
+});
+
+const openSyncModal = (rule, sourceSection, index) => {
+  ruleSyncModal.direction =
+    sourceSection === "route" ? "route_to_dns" : "dns_to_route";
+  ruleSyncModal.sourceIndex = index;
+  ruleSyncModal.sourceRule = JSON.parse(JSON.stringify(rule));
+  ruleSyncModal.mode = "new";
+  ruleSyncModal.targetIndex = -1;
+  ruleSyncModal.error = "";
+
+  const defaultDnsServer =
+    configData.dns.servers && configData.dns.servers.length > 0
+      ? configData.dns.servers[0].tag
+      : "local-dns";
+
+  ruleSyncModal.targetDnsServer = defaultDnsServer;
+  ruleSyncModal.targetClientSubnet = rule.client_subnet || "";
+
+  ruleSyncModal.targetRouteAction = rule.action || "route";
+  ruleSyncModal.targetRouteOutbound =
+    rule.outbound ||
+    (allOutboundTags.value.includes("proxy")
+      ? "proxy"
+      : allOutboundTags.value[0] || "");
+
+  ruleSyncModal.show = true;
+};
+
+const getRuleSummaryText = (rule, index, type) => {
+  if (!rule) return "";
+  const parts = [];
+  if (type === "dns") {
+    parts.push(`DNS: ${rule.server || "默认"}`);
+  } else {
+    parts.push(`Outbound: ${rule.outbound || rule.action || "未指定"}`);
+  }
+
+  if (rule.type === "logical") {
+    parts.push(`[逻辑 ${rule.mode ? rule.mode.toUpperCase() : "OR"}]`);
+  }
+
+  const criteria = [];
+  const fields = [
+    "rule_set",
+    "domain_suffix",
+    "geosite",
+    "domain",
+    "domain_keyword",
+    "domain_regex",
+    "ip_cidr",
+    "geoip",
+  ];
+  fields.forEach((f) => {
+    let val = rule[f];
+    if (!val && rule.type === "logical" && Array.isArray(rule.rules)) {
+      const subVals = rule.rules
+        .map((sub) => sub[f])
+        .filter(Boolean)
+        .flat();
+      if (subVals.length > 0) val = subVals;
+    }
+    if (val) {
+      const arr = Array.isArray(val) ? val : [val];
+      criteria.push(
+        `${f}: ${arr.slice(0, 2).join(",")}${arr.length > 2 ? "..." : ""}`,
+      );
+    }
+  });
+
+  const desc = criteria.length > 0 ? criteria.join(" | ") : "全匹配规则";
+  return `#${index + 1} (${parts.join(" - ")}) - ${desc}`;
+};
+
+const buildSyncedRule = () => {
+  const src = JSON.parse(JSON.stringify(ruleSyncModal.sourceRule || {}));
+  const isToDns = ruleSyncModal.direction === "route_to_dns";
+
+  const syncFields = [
+    "rule_set",
+    "domain_suffix",
+    "geosite",
+    "domain",
+    "domain_keyword",
+    "domain_regex",
+    "port",
+    "inbound",
+    "protocol",
+  ];
+
+  let syncedRule = {};
+
+  if (src.type === "logical" && Array.isArray(src.rules)) {
+    syncedRule.type = "logical";
+    syncedRule.mode = src.mode || "or";
+
+    syncedRule.rules = src.rules
+      .map((sub) => {
+        const cleanSub = {};
+        syncFields.forEach((f) => {
+          if (sub[f] !== undefined && sub[f] !== null) {
+            cleanSub[f] = JSON.parse(JSON.stringify(sub[f]));
+          }
+        });
+        if (!isToDns) {
+          ["ip_cidr", "geoip"].forEach((f) => {
+            if (sub[f] !== undefined && sub[f] !== null) {
+              cleanSub[f] = JSON.parse(JSON.stringify(sub[f]));
+            }
+          });
+        }
+        return cleanSub;
+      })
+      .filter((sub) => Object.keys(sub).length > 0);
+  } else {
+    syncFields.forEach((f) => {
+      if (src[f] !== undefined && src[f] !== null) {
+        syncedRule[f] = JSON.parse(JSON.stringify(src[f]));
+      }
+    });
+    if (!isToDns) {
+      ["ip_cidr", "geoip", "ip_is_private"].forEach((f) => {
+        if (src[f] !== undefined && src[f] !== null) {
+          syncedRule[f] = JSON.parse(JSON.stringify(src[f]));
+        }
+      });
+    }
+  }
+
+  if (src.invert !== undefined) {
+    syncedRule.invert = src.invert;
+  }
+
+  if (isToDns) {
+    syncedRule.server = ruleSyncModal.targetDnsServer || "local-dns";
+    if (ruleSyncModal.targetClientSubnet && ruleSyncModal.targetClientSubnet.trim()) {
+      syncedRule.client_subnet = ruleSyncModal.targetClientSubnet.trim();
+    }
+  } else {
+    if (ruleSyncModal.targetRouteAction) {
+      syncedRule.action = ruleSyncModal.targetRouteAction;
+    }
+    if (
+      (!syncedRule.action || syncedRule.action === "route") &&
+      ruleSyncModal.targetRouteOutbound
+    ) {
+      syncedRule.action = "route";
+      syncedRule.outbound = ruleSyncModal.targetRouteOutbound;
+    }
+  }
+
+  return syncedRule;
+};
+
+const confirmSyncRule = () => {
+  ruleSyncModal.error = "";
+  const isToDns = ruleSyncModal.direction === "route_to_dns";
+
+  if (
+    !isToDns &&
+    ruleSyncModal.targetRouteAction === "route" &&
+    !ruleSyncModal.targetRouteOutbound
+  ) {
+    ruleSyncModal.error = "请选择目标出站 Tag (outbound)";
+    return;
+  }
+
+  if (isToDns && !ruleSyncModal.targetDnsServer) {
+    ruleSyncModal.error = "请选择目标 DNS 服务器 Tag (server)";
+    return;
+  }
+
+  const syncedRule = buildSyncedRule();
+
+  if (isToDns) {
+    if (!Array.isArray(configData.dns.rules)) configData.dns.rules = [];
+  } else {
+    if (!Array.isArray(configData.route.rules)) configData.route.rules = [];
+  }
+
+  const targetList = isToDns ? configData.dns.rules : configData.route.rules;
+
+  if (ruleSyncModal.mode === "overwrite") {
+    if (
+      ruleSyncModal.targetIndex < 0 ||
+      ruleSyncModal.targetIndex >= targetList.length
+    ) {
+      ruleSyncModal.error = "请选择需要覆盖的目标规则条目";
+      return;
+    }
+    targetList[ruleSyncModal.targetIndex] = syncedRule;
+    showToast(
+      `已成功覆盖 ${isToDns ? "DNS" : "路由"} 规则 #${ruleSyncModal.targetIndex + 1}`,
+      "success",
+    );
+  } else {
+    targetList.push(syncedRule);
+    showToast(
+      `已成功同步并新建至 ${isToDns ? "DNS" : "路由"} 规则列表 (共 ${targetList.length} 条)`,
+      "success",
+    );
+  }
+
+  ruleSyncModal.show = false;
+};
+
 </script>
 
 <style scoped>

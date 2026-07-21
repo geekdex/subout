@@ -899,4 +899,164 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(rulesBox.text()).toContain("10.0.0.0/8");
     });
   });
+
+  describe("Route 与 DNS 规则快速双向同步机制", () => {
+    it("从 Route 规则同步至 DNS 规则：自动过滤 IP/CIDR 并支持新建配置", async () => {
+      window.location.hash = "#config/edit/1/route";
+      const baseMockFetch = createMockFetch();
+      vi.spyOn(global, "fetch").mockImplementation((url) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/api/config/history/1")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 1,
+              detail: "测试配置",
+              content: JSON.stringify({
+                dns: {
+                  servers: [{ tag: "local-dns", type: "udp", server: "223.5.5.5" }],
+                  rules: [],
+                },
+                route: {
+                  rules: [
+                    {
+                      outbound: "proxy",
+                      domain_suffix: ["google.com"],
+                      rule_set: ["geosite-google"],
+                      ip_cidr: ["1.1.1.1/32"],
+                    },
+                  ],
+                },
+              }),
+            }),
+          });
+        }
+        return baseMockFetch(url);
+      });
+
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      // 点击路由规则表格第一行的 "⇄ 同步" 按钮
+      const syncBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().trim() === "⇄ 同步");
+      expect(syncBtn).toBeDefined();
+      await syncBtn.trigger("click");
+      await flushPromises();
+
+      // 弹窗出现
+      expect(wrapper.text()).toContain("路由规则 ➔ DNS 规则");
+
+      // 点击确认同步
+      const confirmBtn = wrapper
+        .findAll(".modal-footer button")
+        .find((b) => b.text().includes("确认同步"));
+      expect(confirmBtn).toBeDefined();
+      await confirmBtn.trigger("click");
+      await flushPromises();
+
+      // 切换到 DNS tab 验证
+      const dnsTab = wrapper
+        .findAll(".tab")
+        .find((t) => t.text().includes("DNS服务"));
+      expect(dnsTab).toBeDefined();
+      await dnsTab.trigger("click");
+      await flushPromises();
+
+      const boxes = wrapper.findAll(".visual-section-box");
+      const dnsRulesBox = boxes.find((b) =>
+        b.text().includes("DNS 分流规则列表"),
+      );
+      expect(dnsRulesBox).toBeDefined();
+      expect(dnsRulesBox.text()).toContain("google.com");
+      expect(dnsRulesBox.text()).toContain("geosite-google");
+      // 必须过滤掉 IP CIDR 1.1.1.1/32
+      expect(dnsRulesBox.text()).not.toContain("1.1.1.1/32");
+    });
+
+    it("从 DNS 规则同步至 Route 规则：支持覆盖既有路由规则", async () => {
+      window.location.hash = "#config/edit/1/dns";
+      const baseMockFetch = createMockFetch();
+      vi.spyOn(global, "fetch").mockImplementation((url) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/api/config/history/1")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: 1,
+              detail: "测试配置",
+              content: JSON.stringify({
+                dns: {
+                  servers: [{ tag: "remote-dns", type: "udp", server: "8.8.8.8" }],
+                  rules: [
+                    {
+                      server: "remote-dns",
+                      domain_suffix: ["openai.com"],
+                    },
+                  ],
+                },
+                route: {
+                  rules: [
+                    {
+                      outbound: "direct",
+                      domain_suffix: ["baidu.com"],
+                    },
+                  ],
+                },
+              }),
+            }),
+          });
+        }
+        return baseMockFetch(url);
+      });
+
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      // 点击 DNS 规则中的 "⇄ 同步"
+      const syncBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().trim() === "⇄ 同步");
+      expect(syncBtn).toBeDefined();
+      await syncBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("DNS 规则 ➔ 路由规则");
+
+      // 选择 "✏️ 覆盖现有某条规则配置"
+      const radios = wrapper.findAll(".modal-body input[type='radio']");
+      const overwriteRadio = radios.find((r) => r.element.value === "overwrite");
+      expect(overwriteRadio).toBeDefined();
+      await overwriteRadio.setValue(true);
+      await flushPromises();
+
+      // 选择目标覆盖的规则 (第 1 条，index 0)
+      const selectTarget = wrapper.find(".modal-body select");
+      await selectTarget.setValue(0);
+
+      // 点击确认同步
+      const confirmBtn = wrapper
+        .findAll(".modal-footer button")
+        .find((b) => b.text().includes("确认同步"));
+      await confirmBtn.trigger("click");
+      await flushPromises();
+
+      // 切换至 Route 验证
+      const routeTab = wrapper
+        .findAll(".tab")
+        .find((t) => t.text().includes("路由规则"));
+      expect(routeTab).toBeDefined();
+      await routeTab.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("openai.com");
+    });
+  });
 });
