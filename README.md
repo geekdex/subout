@@ -1,26 +1,22 @@
 # subout
 
-> 专为 **sing-box** 生态打造的高性能、轻量级代理订阅转换 CLI 工具与 Web 可视化管理面板。
+专为 **sing-box** 生态打造的轻量级代理订阅转换 CLI 工具与 Web 可视化管理面板。
 
 [![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust)](https://www.rust-lang.org/)
 [![sing-box](https://img.shields.io/badge/sing--box-Outbounds-blue)](https://sing-box.sagernet.org/)
 [![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-green)](LICENSE-MIT)
 
-`subout` 将繁琐的代理节点订阅转换与复杂的 `sing-box` 规则配置简化为极致简单的体验。无论是命令行脚本一键导出，还是通过优雅的 Web 面板进行多订阅聚合与分流策略组管理，`subout` 都能轻松胜任。
+`subout` 旨在解决 sing-box 配置过程中订阅转换繁琐、节点清洗困难以及多订阅管理复杂的问题。支持一键解析多种代理协议并导出为 sing-box 兼容的 `outbounds` 节点，同时提供可视化 Web 面板用于多订阅聚合、分流策略组配置与版本历史管理。
 
 ---
 
-## ⚡ 为什么选择 subout？
+## 🛠️ 核心功能与解决痛点
 
-- **📦 零依赖单二进制**：采用 Rust 极速构建，Web 前端打入二进制，开箱即用，无需复杂部署环境。
-- **🌐 广泛协议支持**：自适应解析 **VMess, VLESS, Shadowsocks, Trojan, Socks, HTTP, Anytls, Hysteria, Hysteria2** 等主流代理协议。
-- **🧹 智能节点净化**：自动识别并剔除流量/到期/公告等无效节点，Tag 自动冲突去重，保证 sing-box 配置规范。
-- **🛡️ 节点安全审计**：实时检测不安全 TLS（如 `allowInsecure`），防范潜在中间人风险。
-- **📊 强大可视化面板 (Subout Panel)**：
-  - **多订阅聚合与节点池**：多订阅同步、关键字过滤，支持手动追加自定义专属节点。
-  - **分流出站组设计**：可视化设计 Selector（策略组）、URLTest（自动延迟测速选择器）。
-  - **模板与 Schema 校验**：在线编辑全局 JSON 模板（DNS, Routing, Inbounds），实时语法校验。
-  - **版本控制与还原**：配置修改历史全程留痕，支持一键预览、差异对比与回滚还原。
+- **全协议解析**：自适应解析 VMess/VLESS/SS/Trojan/Socks/HTTP/Anytls/Hysteria(2) 等订阅链接、本地文件或 Base64。
+- **节点净化与 Tag 去重**：自动剔除流量公告等无效节点，动态重命名冲突 Tag，避免 sing-box 启动失败。
+- **安全审计**：检测并警告 `allowInsecure` 等存在中间人风险的不安全 TLS 设置。
+- **可视化面板 (Subout Panel)**：提供多订阅聚合、节点池、分流组设计（Selector/URLTest）、JSON 模板校验及版本对比回滚。
+- **单文件部署**：Rust + 嵌入前端 UI，零外部依赖，即装即用。
 
 ---
 
