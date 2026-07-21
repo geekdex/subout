@@ -402,7 +402,7 @@
                     "
                     :title="'网页测试目标: ' + getNodeTargetUrl(node)"
                   >
-                    🎯 {{ getNodeTargetUrl(node) }}
+                    🎯 {{ getNodeTargetUrlDisplay(node) }}
                   </div>
                   <span v-else style="color: var(--text-muted)">-</span>
                 </td>
@@ -1207,13 +1207,36 @@
               "
               >测试目标网址</label
             >
-            <input
-              v-model="pingModal.targetUrl"
-              type="text"
+            <select
+              v-model="pingModal.targetUrlSelect"
               class="form-control"
-              placeholder="默认: https://www.google.com"
               style="
                 width: 100%;
+                padding: 0.5rem;
+                border-radius: 6px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                color: var(--text-color);
+              "
+            >
+              <option
+                v-for="opt in TARGET_URL_OPTIONS"
+                :key="opt.url"
+                :value="opt.url"
+              >
+                {{ opt.label }} ({{ opt.url }})
+              </option>
+              <option value="custom">自定义网址...</option>
+            </select>
+            <input
+              v-if="pingModal.targetUrlSelect === 'custom'"
+              v-model="pingModal.customTargetUrl"
+              type="text"
+              class="form-control"
+              placeholder="请输入自定义 HTTP(S) 测试目标网址"
+              style="
+                width: 100%;
+                margin-top: 0.5rem;
                 padding: 0.5rem;
                 border-radius: 6px;
                 background: var(--bg-card);
@@ -1370,12 +1393,48 @@ const getNodeTestedAt = (node) => {
   return node.last_tested_at || "";
 };
 
+const TARGET_URL_OPTIONS = [
+  { label: "Google（通用）", url: "http://www.gstatic.com/generate_204" },
+  {
+    label: "Google（Android系统级）",
+    url: "http://connectivitycheck.gstatic.com/generate_204",
+  },
+  {
+    label: "Google（另一变体）",
+    url: "http://connectivitycheck.android.com/generate_204",
+  },
+  { label: "Cloudflare", url: "http://cp.cloudflare.com/generate_204" },
+  {
+    label: "Microsoft（Windows NCSI）",
+    url: "http://www.msftconnecttest.com/connecttest.txt",
+  },
+  {
+    label: "Apple（iOS/macOS）",
+    url: "http://captive.apple.com/hotspot-detect.html",
+  },
+  {
+    label: "Firefox",
+    url: "http://detectportal.firefox.com/success.txt",
+  },
+  {
+    label: "Ubuntu/Canonical",
+    url: "http://connectivity-check.ubuntu.com",
+  },
+];
+
 const getNodeTargetUrl = (node) => {
   const mapItem = latencyMap.value[node.id];
   if (mapItem && typeof mapItem === "object" && mapItem.target_url) {
     return mapItem.target_url;
   }
   return node.last_target_url || "";
+};
+
+const getNodeTargetUrlDisplay = (node) => {
+  const url = getNodeTargetUrl(node);
+  if (!url) return "";
+  const found = TARGET_URL_OPTIONS.find((opt) => opt.url === url);
+  return found ? found.label : url;
 };
 
 const isAllSelected = computed(() => {
@@ -2060,13 +2119,23 @@ const pingModal = reactive({
   testRange: "all",
   singleNodeId: "",
   testType: "both",
-  targetUrl: "https://www.google.com",
+  targetUrlSelect: "http://www.gstatic.com/generate_204",
+  customTargetUrl: "",
   isTesting: false,
   progress: 0,
   total: 0,
   logs: [],
   statusMap: {},
 });
+
+const getEffectiveTargetUrl = () => {
+  if (pingModal.targetUrlSelect === "custom") {
+    return (
+      pingModal.customTargetUrl.trim() || "http://www.gstatic.com/generate_204"
+    );
+  }
+  return pingModal.targetUrlSelect || "http://www.gstatic.com/generate_204";
+};
 
 const logsConsole = ref(null);
 const allNodesListForSelect = ref([]);
@@ -2098,7 +2167,8 @@ const openPingModal = () => {
   pingModal.testRange = selectedNodeIds.value.length > 0 ? "selected" : "all";
   pingModal.singleNodeId = "";
   pingModal.testType = "both";
-  pingModal.targetUrl = "https://www.google.com";
+  pingModal.targetUrlSelect = "http://www.gstatic.com/generate_204";
+  pingModal.customTargetUrl = "";
   pingModal.isTesting = false;
   pingModal.progress = 0;
   pingModal.total = 0;
@@ -2159,6 +2229,7 @@ const pingSingleNode = async (id) => {
       tag: `节点 #${id}`,
     };
 
+  const targetUrl = getEffectiveTargetUrl();
   showToast(`开始测试节点 [${node.tag}] ...`);
 
   latencyMap.value[id] = {
@@ -2176,7 +2247,7 @@ const pingSingleNode = async (id) => {
       body: JSON.stringify({
         ids: [id],
         test_type: "both",
-        target_url: "https://www.google.com",
+        target_url: targetUrl,
       }),
     });
 
@@ -2189,7 +2260,7 @@ const pingSingleNode = async (id) => {
         latencyMap.value[id] = {
           tcp: tcp !== undefined && tcp !== null ? tcp : null,
           web: web !== undefined && web !== null ? web : null,
-          target_url: "https://www.google.com",
+          target_url: targetUrl,
         };
         if (tcp !== undefined && tcp !== null) {
           if (web !== undefined && web !== null) {
@@ -2243,6 +2314,8 @@ const startPingTests = async () => {
     showToast("没有可测试的节点", "warning");
     return;
   }
+
+  const targetUrl = getEffectiveTargetUrl();
 
   pingModal.isTesting = true;
   pingModal.progress = 0;
@@ -2299,7 +2372,7 @@ const startPingTests = async () => {
           ids: [id],
           test_type: pingModal.testType,
           target_url: ["web", "both"].includes(pingModal.testType)
-            ? pingModal.targetUrl
+            ? targetUrl
             : undefined,
         }),
       });
@@ -2319,7 +2392,7 @@ const startPingTests = async () => {
             latencyMap.value[id] = {
               tcp: tcp !== undefined && tcp !== null ? tcp : null,
               web: web !== undefined && web !== null ? web : null,
-              target_url: pingModal.targetUrl,
+              target_url: targetUrl,
             };
             if (tcp !== undefined && tcp !== null) {
               if (web !== undefined && web !== null) {
@@ -2353,7 +2426,7 @@ const startPingTests = async () => {
             latencyMap.value[id] = {
               ...latObj,
               web: latency !== undefined && latency !== null ? latency : null,
-              target_url: pingModal.targetUrl,
+              target_url: targetUrl,
             };
             if (latency !== undefined && latency !== null) {
               pingModal.statusMap[id] = latency;

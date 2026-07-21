@@ -432,4 +432,124 @@ describe("NodesView - 节点池管理", () => {
       expect(wrapper.vm.selectedNodeIds).toEqual([]);
     });
   });
+
+  describe("节点测速功能与测试目标网址下拉选择", () => {
+    it("打开节点测速 Modal，显示 8 个预设目标网址和自定义选项，默认选中 Google（通用）", async () => {
+      const wrapper = await mountNodesView();
+      const pingBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("节点测速"));
+      expect(pingBtn).toBeDefined();
+
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.vm.pingModal.show).toBe(true);
+
+      // 下拉选框
+      const targetSelect = wrapper
+        .findAll("select")
+        .find((s) => s.html().includes("http://www.gstatic.com/generate_204"));
+      expect(targetSelect).toBeDefined();
+
+      // 验证包含预设的目标网址选项
+      const options = targetSelect.findAll("option");
+      const optionValues = options.map((o) => o.element.value);
+      expect(optionValues).toContain("http://www.gstatic.com/generate_204");
+      expect(optionValues).toContain(
+        "http://connectivitycheck.gstatic.com/generate_204",
+      );
+      expect(optionValues).toContain(
+        "http://connectivitycheck.android.com/generate_204",
+      );
+      expect(optionValues).toContain("http://cp.cloudflare.com/generate_204");
+      expect(optionValues).toContain(
+        "http://www.msftconnecttest.com/connecttest.txt",
+      );
+      expect(optionValues).toContain(
+        "http://captive.apple.com/hotspot-detect.html",
+      );
+      expect(optionValues).toContain(
+        "http://detectportal.firefox.com/success.txt",
+      );
+      expect(optionValues).toContain("http://connectivity-check.ubuntu.com");
+      expect(optionValues).toContain("custom");
+
+      // 默认选中为 http://www.gstatic.com/generate_204
+      expect(wrapper.vm.pingModal.targetUrlSelect).toBe(
+        "http://www.gstatic.com/generate_204",
+      );
+    });
+
+    it("切换选择预设或自定义网址，开始测速时发送正确的 target_url", async () => {
+      const wrapper = await mountNodesView();
+      const pingBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("节点测速"));
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      // 切换选择 Cloudflare 预设
+      const targetSelect = wrapper
+        .findAll("select")
+        .find((s) => s.html().includes("http://www.gstatic.com/generate_204"));
+      await targetSelect.setValue("http://cp.cloudflare.com/generate_204");
+      await flushPromises();
+
+      // 点击开始测试
+      const startBtn = wrapper
+        .findAll(".modal button")
+        .find((b) => b.text().includes("开始测试"));
+      await startBtn.trigger("click");
+      await flushPromises();
+
+      // 检查 /api/nodes/ping 请求体
+      const pingCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/nodes/ping" && o?.method === "POST",
+      );
+      expect(pingCall).toBeDefined();
+      const body = JSON.parse(pingCall[1].body);
+      expect(body.target_url).toBe("http://cp.cloudflare.com/generate_204");
+    });
+
+    it("选择自定义网址模式，能输入自定义 URL 并发送", async () => {
+      const wrapper = await mountNodesView();
+      const pingBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("节点测速"));
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      // 切换到 custom
+      const targetSelect = wrapper
+        .findAll("select")
+        .find((s) => s.html().includes("http://www.gstatic.com/generate_204"));
+      await targetSelect.setValue("custom");
+      await flushPromises();
+
+      // 输入框出现
+      const customInput = wrapper.find(
+        'input[placeholder="请输入自定义 HTTP(S) 测试目标网址"]',
+      );
+      expect(customInput.exists()).toBe(true);
+
+      await customInput.setValue("http://my-custom-server.org/ping");
+      await flushPromises();
+
+      // 点击开始测试
+      global.fetch.mockClear();
+      const startBtn = wrapper
+        .findAll(".modal button")
+        .find((b) => b.text().includes("开始测试"));
+      await startBtn.trigger("click");
+      await flushPromises();
+
+      const pingCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/nodes/ping" && o?.method === "POST",
+      );
+      expect(pingCall).toBeDefined();
+      const body = JSON.parse(pingCall[1].body);
+      expect(body.target_url).toBe("http://my-custom-server.org/ping");
+    });
+  });
 });

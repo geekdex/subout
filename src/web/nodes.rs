@@ -570,7 +570,7 @@ pub async fn ping_nodes(
     let test_type = payload.test_type.as_deref().unwrap_or("tcp");
     let target_url = payload
         .target_url
-        .unwrap_or_else(|| "https://www.google.com".to_string());
+        .unwrap_or_else(|| "http://www.gstatic.com/generate_204".to_string());
 
     let mut tasks = Vec::new();
     if test_type == "web" {
