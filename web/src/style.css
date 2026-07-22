@@ -1808,3 +1808,577 @@ select.table-input {
     min-width: unset;
   }
 }
+
+/* ==================== DNS & Route 卡片化布局样式 ==================== */
+
+/* 卡片网格布局 */
+.dns-cards-grid,
+.route-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 0.85rem;
+}
+
+@media (max-width: 768px) {
+  .dns-cards-grid,
+  .route-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 规则卡片基类 */
+.rule-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.rule-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.rule-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.3);
+}
+
+.rule-card:hover::before {
+  opacity: 1;
+}
+
+/* 规则卡片头部 */
+.rule-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.rule-card-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
+}
+
+.rule-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+/* 规则卡本体内容 */
+.rule-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.rule-card-detail {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.rule-card-detail .detail-label {
+  min-width: auto;
+  flex-shrink: 0;
+}
+
+.rule-card-detail .detail-value {
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+/* 规则卡片操作区 */
+.rule-card-actions {
+  display: flex;
+  gap: 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.rule-card-actions .btn {
+  flex: 0 1 auto;
+}
+
+/* 规则条件标签容器 */
+.rule-criteria-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+/* 条件标签（保留原样式增强） */
+.criteria-tag {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.criteria-tag:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.criteria-tag.rule-set-tag {
+  background: rgba(6, 182, 212, 0.15);
+  color: #22d3ee;
+  border-color: rgba(6, 182, 212, 0.25);
+}
+
+.criteria-tag.rule-set-tag:hover {
+  background: rgba(6, 182, 212, 0.25);
+}
+
+.criteria-tag.action-tag {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.25);
+}
+
+.criteria-tag.duplicate-tag {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* TransitionGroup 动画 */
+.card-list-enter-active {
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.card-list-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-list-enter-from {
+  opacity: 0;
+  transform: scale(0.85) translateY(15px);
+}
+.card-list-leave-to {
+  opacity: 0;
+  transform: scale(0.9) translateX(30px);
+}
+.card-list-move {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 卡片空状态 */
+.rule-empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border-color);
+  border-radius: 12px;
+}
+
+.rule-empty-state .empty-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 0.5rem;
+}
+
+.rule-empty-state .empty-description {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+/* 搜索过滤栏 */
+.search-filter-bar {
+  margin-bottom: 1rem;
+}
+
+/* Element Plus 主题覆盖 — 适配项目暗色主题 */
+.el-card {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 10px !important;
+  color: var(--text-main) !important;
+}
+
+.el-card__body {
+  padding: 1rem !important;
+}
+
+.el-select,
+.el-input,
+.el-switch {
+  --el-border-color: var(--border-color);
+  --el-border-color-hover: var(--primary);
+  --el-color-primary: var(--primary);
+}
+
+.el-select-dropdown,
+.el-popper {
+  --el-bg-color: var(--bg-card) !important;
+  --el-border-color-light: var(--border-color) !important;
+  --el-text-color-primary: var(--text-main) !important;
+  --el-text-color-regular: var(--text-muted) !important;
+}
+
+.el-alert {
+  border-radius: 8px;
+}
+
+.el-empty__description {
+  color: var(--text-muted);
+}
+
+.el-collapse-item__header {
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.el-collapse-item__wrap {
+  background: transparent;
+}
+
+.el-tag {
+  --el-tag-bg-color: rgba(99, 102, 241, 0.15);
+  --el-tag-text-color: #818cf8;
+  --el-tag-border-color: rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+}
+
+.el-button {
+  --el-button-bg-color: var(--primary);
+  --el-button-hover-bg-color: var(--primary-hover);
+  --el-button-text-color: #fff;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.el-button--default {
+  --el-button-bg-color: rgba(255, 255, 255, 0.05);
+  --el-button-border-color: var(--border-color);
+  --el-button-text-color: var(--text-main);
+  --el-button-hover-bg-color: rgba(255, 255, 255, 0.1);
+  --el-button-hover-border-color: var(--border-color);
+  --el-button-hover-text-color: var(--text-main);
+}
+
+.el-button--danger {
+  --el-button-bg-color: var(--danger);
+  --el-button-border-color: var(--danger);
+  --el-button-hover-bg-color: #dc2626;
+  --el-button-hover-border-color: #dc2626;
+}
+
+/* 紧凑型按钮 */
+.btn-compact {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* Switch 适配 */
+.el-switch {
+  --el-switch-on-color: var(--primary);
+  --el-switch-off-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Select 样式适配 */
+.el-select .el-input__wrapper {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: none !important;
+}
+
+.el-select .el-input__wrapper:hover {
+  border-color: var(--primary) !important;
+}
+
+.el-select .el-input__wrapper.is-focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px var(--primary-glow) !important;
+}
+
+.el-select-dropdown__item.selected {
+  color: var(--primary) !important;
+  font-weight: 600;
+}
+
+/* Popconfirm 适配 */
+.el-popconfirm {
+  --el-bg-color: var(--bg-card);
+  --el-border-color-light: var(--border-color);
+  --el-text-color-primary: var(--text-main);
+  --el-text-color-secondary: var(--text-muted);
+}
+
+/* DNS 开关组网格 */
+.dns-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toggle-label {
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-main);
+}
+
+/* Element Plus 紧凑型 select */
+.el-select.w-full {
+  width: 100%;
+}
+
+/* 规则卡片在小屏时的调整 */
+@media (max-width: 480px) {
+  .rule-card-actions {
+    flex-direction: column;
+  }
+  .rule-card-actions .el-button {
+    width: 100%;
+  }
+}
+
+/* ==================== 表单区块卡片分组 ==================== */
+
+.form-section-card {
+  margin-bottom: 1.25rem;
+  border-radius: 10px !important;
+  overflow: hidden;
+}
+
+.form-section-card .el-card__header {
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.form-section-card .el-card__header .header-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.15rem 0.45rem;
+  border-radius: 10px;
+  margin-left: auto;
+}
+
+.form-section-card .el-card__body {
+  padding: 1rem 1.25rem !important;
+}
+
+/* ==================== el-collapse 卡片化 ==================== */
+
+.section-collapse {
+  border: none !important;
+  border-top: none !important;
+}
+
+.section-collapse .el-collapse-item__header {
+  padding: 0.6rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--secondary);
+  height: auto;
+  line-height: 1.5;
+  transition: all 0.2s ease;
+}
+
+.section-collapse .el-collapse-item__header:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.section-collapse .el-collapse-item__header.is-active {
+  border-radius: 8px 8px 0 0;
+  border-bottom-color: transparent;
+}
+
+.section-collapse .el-collapse-item__wrap {
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.section-collapse .el-collapse-item__content {
+  padding: 0.75rem 1rem;
+}
+
+/* ==================== 统计概览条 ==================== */
+
+.stats-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.stats-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+
+.stats-bar-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.stats-bar-item .stat-num {
+  font-weight: 700;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+.stats-bar-item .stat-icon {
+  color: var(--primary);
+  font-size: 0.9rem;
+}
+
+/* ==================== 折叠区 header 内操作按钮 ==================== */
+
+.collapse-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 让 el-collapse-item header 的 flex 布局容纳右侧按钮 */
+.section-collapse .el-collapse-item__header {
+  display: flex;
+  align-items: center;
+}
+
+.section-collapse .el-collapse-item__arrow {
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* ==================== 拖拽排序 ==================== */
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-muted);
+  padding: 0 0.25rem;
+  font-size: 1rem;
+  line-height: 1;
+  user-select: none;
+  transition: color 0.2s;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.drag-handle:hover {
+  color: var(--primary);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 拖拽幽灵卡片样式 */
+.ghost-card {
+  opacity: 0.5;
+  background: var(--bg-card-hover) !important;
+  border: 2px dashed var(--primary) !important;
+  border-radius: 10px !important;
+  transform: scale(0.98);
+  transition: all 0.2s;
+}
+
+/* 拖拽中的原始位置占位 */
+.sortable-chosen {
+  opacity: 0.9;
+  border-color: var(--primary) !important;
+  box-shadow:
+    0 0 0 3px var(--primary-glow),
+    0 8px 24px rgba(0, 0, 0, 0.25) !important;
+  transform: scale(1.02) !important;
+}
+
+.sortable-ghost {
+  opacity: 0.4;
+  background: var(--bg-card-hover) !important;
+}
+
+/* 卡片 header 内拖拽手柄布局 */
+.rule-card .card-header-with-drag {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+}
+
+.rule-card .card-header-with-drag .drag-handle {
+  margin-top: 0.1rem;
+}
+
+.rule-card .card-header-with-drag .rule-card-header {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}

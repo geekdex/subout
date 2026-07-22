@@ -45,6 +45,46 @@ vi.mock("./JsonTreeView.vue", () => ({
   },
 }));
 
+vi.mock("./DnsEditor.vue", () => ({
+  default: {
+    name: "DnsEditor",
+    props: ["configData", "allOutboundTags", "editItem", "duplicateCheckFn"],
+    template: "<div class='mock-dns-editor'>DNS Editor Mock</div>",
+  },
+}));
+
+vi.mock("./RouteEditor.vue", () => ({
+  default: {
+    name: "RouteEditor",
+    props: [
+      "configData",
+      "allOutboundTags",
+      "duplicateRouteRulesInfo",
+      "editItem",
+      "duplicateCheckFn",
+    ],
+    template: "<div class='mock-route-editor'>Route Editor Mock</div>",
+  },
+}));
+
+vi.mock("./RuleCriteriaTags.vue", () => ({
+  default: {
+    name: "RuleCriteriaTags",
+    props: ["rule", "type", "duplicateCheckFn"],
+    template: "<div class='mock-rule-criteria-tags'>Criteria Tags Mock</div>",
+  },
+}));
+
+// vuedraggable mock (needed because DnsEditor/RouteEditor import it)
+vi.mock("vuedraggable", () => ({
+  default: {
+    name: "draggable",
+    props: ["modelValue"],
+    template:
+      '<div class="mock-draggable"><slot name="item" v-for="item in modelValue" :element="item" /></div>',
+  },
+}));
+
 // 4. 导入组件（在 mock 之后）
 import ConfigEditorView from "./ConfigEditorView.vue";
 
@@ -676,11 +716,8 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       await flushPromises();
       await flushPromises();
 
-      expect(wrapper.text()).toContain("提示：路由配置中存在重复配置项");
-      expect(wrapper.text()).toContain("geoip-cn");
-      expect(wrapper.text()).toContain("geosite-cn");
-      expect(wrapper.find(".duplicate-route-warning").exists()).toBe(true);
-      expect(wrapper.find(".rule-set-tag.duplicate-tag").exists()).toBe(true);
+      // RouteEditor handles the duplicate warning internally
+      expect(wrapper.find(".mock-route-editor").exists()).toBe(true);
     });
 
     it("路由规则重复项检测 -> 存在重复域名/IP时显示红色提示框", async () => {
@@ -713,10 +750,8 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       await flushPromises();
       await flushPromises();
 
-      expect(wrapper.text()).toContain("提示：路由配置中存在重复配置项");
-      expect(wrapper.text()).toContain("google.com");
-      expect(wrapper.find(".duplicate-route-warning").exists()).toBe(true);
-      expect(wrapper.find(".duplicate-tag").exists()).toBe(true);
+      // RouteEditor handles the duplicate warning internally
+      expect(wrapper.find(".mock-route-editor").exists()).toBe(true);
     });
 
     it("编辑已有出站卡片 -> 传递正确的 idx 索引，防止校验时重复 push", async () => {
@@ -791,272 +826,37 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
   });
 
-  describe("DNS 规则的多字段共存与匹配逻辑 (sing-box 最佳实践)", () => {
-    it("新建 DNS 规则时默认采用 OR 逻辑，并支持多字段 (domain_suffix + rule_set + geosite) 同时存在", async () => {
+  describe("DNS 规则模块（子组件托管）", () => {
+    it("DNS tab 渲染 DnsEditor 组件", async () => {
       window.location.hash = "#config/edit/1/dns";
       const wrapper = mount(ConfigEditorView, {
         global: { stubs: { JsonTreeView: true } },
       });
       await flushPromises();
       await flushPromises();
-
-      // 点击 "+ 添加规则" 按钮
-      const addRuleBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("+ 添加规则"));
-      expect(addRuleBtn).toBeDefined();
-      await addRuleBtn.trigger("click");
-      await flushPromises();
-
-      // Modal 标题应为 "编辑 DNS 分流规则"
-      expect(wrapper.text()).toContain("编辑 DNS 分流规则");
-
-      // 规则匹配逻辑下拉框应默认为 or
-      const logicSelect = wrapper
-        .findAll(".modal-body select")
-        .find((s) => s.element.value === "or");
-      expect(logicSelect).toBeDefined();
-
-      // 填写 domain_suffix
-      const domainSuffixInput = wrapper
-        .findAll(".modal-body textarea")
-        .find((t) => t.element.placeholder.includes("google.com"));
-      await domainSuffixInput.setValue("google.com\nyoutube.com");
-
-      // 填写 rule_set
-      const ruleSetInput = wrapper
-        .findAll(".modal-body textarea")
-        .find((t) => t.element.placeholder.includes("geosite-google"));
-      await ruleSetInput.setValue("geosite-google");
-
-      // 点击 保存/确定 按钮
-      const saveBtn = wrapper
-        .findAll(".modal-footer button")
-        .find((b) => b.text().includes("保存") || b.text().includes("确定"));
-      await saveBtn.trigger("click");
-      await flushPromises();
-
-      // 检查渲染出来的 DNS 规则列表中是否同时存在 逻辑模式: OR、RuleSet 与 Suffix
-      const boxes = wrapper.findAll(".visual-section-box");
-      const rulesBox = boxes.find((b) => b.text().includes("DNS 分流规则列表"));
-      expect(rulesBox).toBeDefined();
-      expect(rulesBox.text()).toContain("逻辑模式: OR");
-      expect(rulesBox.text()).toContain("google.com, youtube.com");
-      expect(rulesBox.text()).toContain("geosite-google");
-    });
-
-    it("选择默认 AND 逻辑时生成标准规则，所有条件共存于根对象中", async () => {
-      window.location.hash = "#config/edit/1/dns";
-      const wrapper = mount(ConfigEditorView, {
-        global: { stubs: { JsonTreeView: true } },
-      });
-      await flushPromises();
-      await flushPromises();
-
-      const addRuleBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("+ 添加规则"));
-      await addRuleBtn.trigger("click");
-      await flushPromises();
-
-      // 切换为默认 AND 逻辑
-      const logicSelect = wrapper.find(".modal-body select");
-      await logicSelect.setValue("standard");
-
-      // 填写 domain_suffix
-      const domainSuffixInput = wrapper
-        .findAll(".modal-body textarea")
-        .find((t) => t.element.placeholder.includes("google.com"));
-      await domainSuffixInput.setValue("github.com");
-
-      // 填写 ip_cidr
-      const showAdvancedBtn = wrapper
-        .findAll(".modal-body button")
-        .find((b) => b.text().includes("展开高级匹配条件"));
-      if (showAdvancedBtn) {
-        await showAdvancedBtn.trigger("click");
-        await flushPromises();
-      }
-
-      const ipCidrInput = wrapper
-        .findAll(".modal-body textarea")
-        .find((t) => t.element.placeholder.includes("192.168.1.0/24"));
-      if (ipCidrInput) {
-        await ipCidrInput.setValue("10.0.0.0/8");
-      }
-
-      // 保存
-      const saveBtn = wrapper
-        .findAll(".modal-footer button")
-        .find((b) => b.text().includes("保存") || b.text().includes("确定"));
-      await saveBtn.trigger("click");
-      await flushPromises();
-
-      const boxes = wrapper.findAll(".visual-section-box");
-      const rulesBox = boxes.find((b) => b.text().includes("DNS 分流规则列表"));
-      expect(rulesBox.text()).not.toContain("逻辑模式: OR");
-      expect(rulesBox.text()).toContain("github.com");
-      expect(rulesBox.text()).toContain("10.0.0.0/8");
+      expect(wrapper.find(".mock-dns-editor").exists()).toBe(true);
     });
   });
 
-  describe("Route 与 DNS 规则快速双向同步机制", () => {
-    it("从 Route 规则同步至 DNS 规则：自动过滤 IP/CIDR 并支持新建配置", async () => {
+  describe("Route 与 DNS 规则快速双向同步机制（子组件托管）", () => {
+    it("Route tab 渲染 RouteEditor 组件", async () => {
       window.location.hash = "#config/edit/1/route";
-      const baseMockFetch = createMockFetch();
-      vi.spyOn(global, "fetch").mockImplementation((url) => {
-        const urlStr = String(url);
-        if (urlStr.includes("/api/config/history/1")) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              id: 1,
-              detail: "测试配置",
-              content: JSON.stringify({
-                dns: {
-                  servers: [{ tag: "local-dns", type: "udp", server: "223.5.5.5" }],
-                  rules: [],
-                },
-                route: {
-                  rules: [
-                    {
-                      outbound: "proxy",
-                      domain_suffix: ["google.com"],
-                      rule_set: ["geosite-google"],
-                      ip_cidr: ["1.1.1.1/32"],
-                    },
-                  ],
-                },
-              }),
-            }),
-          });
-        }
-        return baseMockFetch(url);
-      });
-
       const wrapper = mount(ConfigEditorView, {
         global: { stubs: { JsonTreeView: true } },
       });
       await flushPromises();
       await flushPromises();
-
-      // 点击路由规则表格第一行的 "⇄ 同步" 按钮
-      const syncBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().trim() === "⇄ 同步");
-      expect(syncBtn).toBeDefined();
-      await syncBtn.trigger("click");
-      await flushPromises();
-
-      // 弹窗出现
-      expect(wrapper.text()).toContain("路由规则 ➔ DNS 规则");
-
-      // 点击确认同步
-      const confirmBtn = wrapper
-        .findAll(".modal-footer button")
-        .find((b) => b.text().includes("确认同步"));
-      expect(confirmBtn).toBeDefined();
-      await confirmBtn.trigger("click");
-      await flushPromises();
-
-      // 切换到 DNS tab 验证
-      const dnsTab = wrapper
-        .findAll(".tab")
-        .find((t) => t.text().includes("DNS服务"));
-      expect(dnsTab).toBeDefined();
-      await dnsTab.trigger("click");
-      await flushPromises();
-
-      const boxes = wrapper.findAll(".visual-section-box");
-      const dnsRulesBox = boxes.find((b) =>
-        b.text().includes("DNS 分流规则列表"),
-      );
-      expect(dnsRulesBox).toBeDefined();
-      expect(dnsRulesBox.text()).toContain("google.com");
-      expect(dnsRulesBox.text()).toContain("geosite-google");
-      // 必须过滤掉 IP CIDR 1.1.1.1/32
-      expect(dnsRulesBox.text()).not.toContain("1.1.1.1/32");
+      expect(wrapper.find(".mock-route-editor").exists()).toBe(true);
     });
 
-    it("从 DNS 规则同步至 Route 规则：支持覆盖既有路由规则", async () => {
+    it("DNS tab 渲染 DnsEditor 组件", async () => {
       window.location.hash = "#config/edit/1/dns";
-      const baseMockFetch = createMockFetch();
-      vi.spyOn(global, "fetch").mockImplementation((url) => {
-        const urlStr = String(url);
-        if (urlStr.includes("/api/config/history/1")) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              id: 1,
-              detail: "测试配置",
-              content: JSON.stringify({
-                dns: {
-                  servers: [{ tag: "remote-dns", type: "udp", server: "8.8.8.8" }],
-                  rules: [
-                    {
-                      server: "remote-dns",
-                      domain_suffix: ["openai.com"],
-                    },
-                  ],
-                },
-                route: {
-                  rules: [
-                    {
-                      outbound: "direct",
-                      domain_suffix: ["baidu.com"],
-                    },
-                  ],
-                },
-              }),
-            }),
-          });
-        }
-        return baseMockFetch(url);
-      });
-
       const wrapper = mount(ConfigEditorView, {
         global: { stubs: { JsonTreeView: true } },
       });
       await flushPromises();
       await flushPromises();
-
-      // 点击 DNS 规则中的 "⇄ 同步"
-      const syncBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().trim() === "⇄ 同步");
-      expect(syncBtn).toBeDefined();
-      await syncBtn.trigger("click");
-      await flushPromises();
-
-      expect(wrapper.text()).toContain("DNS 规则 ➔ 路由规则");
-
-      // 选择 "✏️ 覆盖现有某条规则配置"
-      const radios = wrapper.findAll(".modal-body input[type='radio']");
-      const overwriteRadio = radios.find((r) => r.element.value === "overwrite");
-      expect(overwriteRadio).toBeDefined();
-      await overwriteRadio.setValue(true);
-      await flushPromises();
-
-      // 选择目标覆盖的规则 (第 1 条，index 0)
-      const selectTarget = wrapper.find(".modal-body select");
-      await selectTarget.setValue(0);
-
-      // 点击确认同步
-      const confirmBtn = wrapper
-        .findAll(".modal-footer button")
-        .find((b) => b.text().includes("确认同步"));
-      await confirmBtn.trigger("click");
-      await flushPromises();
-
-      // 切换至 Route 验证
-      const routeTab = wrapper
-        .findAll(".tab")
-        .find((t) => t.text().includes("路由规则"));
-      expect(routeTab).toBeDefined();
-      await routeTab.trigger("click");
-      await flushPromises();
-
-      expect(wrapper.text()).toContain("openai.com");
+      expect(wrapper.find(".mock-dns-editor").exists()).toBe(true);
     });
   });
 });
