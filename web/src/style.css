@@ -16,6 +16,11 @@
   --warning: #f59e0b;
   --info: #3b82f6;
   --info-glow: rgba(59, 130, 246, 0.15);
+
+  --btn-secondary-bg: rgba(255, 255, 255, 0.06);
+  --btn-secondary-hover-bg: rgba(255, 255, 255, 0.12);
+  --btn-secondary-border: rgba(255, 255, 255, 0.12);
+  --btn-secondary-text: #f8fafc;
   --font-main:
     "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
@@ -51,6 +56,11 @@
     --info: #2563eb;
     --info-glow: rgba(37, 99, 235, 0.1);
 
+    --btn-secondary-bg: #f1f5f9;
+    --btn-secondary-hover-bg: #e2e8f0;
+    --btn-secondary-border: rgba(15, 23, 42, 0.15);
+    --btn-secondary-text: #0f172a;
+
     --bg-login-gradient: linear-gradient(
       to bottom,
       #7dd3fc 0%,
@@ -81,6 +91,11 @@ html[data-theme="dark"] {
   --danger: #ef4444;
   --warning: #f59e0b;
 
+  --btn-secondary-bg: rgba(255, 255, 255, 0.06);
+  --btn-secondary-hover-bg: rgba(255, 255, 255, 0.12);
+  --btn-secondary-border: rgba(255, 255, 255, 0.12);
+  --btn-secondary-text: #f8fafc;
+
   --bg-login-gradient: linear-gradient(
     to bottom,
     #090a16 0%,
@@ -108,6 +123,11 @@ html[data-theme="light"] {
   --success: #059669;
   --danger: #dc2626;
   --warning: #d97706;
+
+  --btn-secondary-bg: #f1f5f9;
+  --btn-secondary-hover-bg: #e2e8f0;
+  --btn-secondary-border: rgba(15, 23, 42, 0.15);
+  --btn-secondary-text: #0f172a;
 
   --bg-login-gradient: linear-gradient(
     to bottom,
@@ -432,13 +452,14 @@ input[type="checkbox"]:focus-visible {
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-main);
-  border: 1px solid var(--border-color);
+  background: var(--btn-secondary-bg, rgba(255, 255, 255, 0.06));
+  color: var(--btn-secondary-text, var(--text-main));
+  border: 1px solid var(--btn-secondary-border, var(--border-color));
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--btn-secondary-hover-bg, rgba(255, 255, 255, 0.12));
+  color: var(--btn-secondary-text, var(--text-main));
 }
 
 .btn-danger {
@@ -2084,25 +2105,76 @@ select.table-input {
 .el-button {
   --el-button-bg-color: var(--primary);
   --el-button-hover-bg-color: var(--primary-hover);
-  --el-button-text-color: #fff;
+  --el-button-border-color: transparent;
+  --el-button-hover-border-color: transparent;
   border-radius: 6px;
   font-weight: 500;
+  color: var(--text-main);
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--primary);
+  --el-button-hover-bg-color: var(--primary-hover);
+  --el-button-text-color: #ffffff;
+  --el-button-hover-text-color: #ffffff;
 }
 
 .el-button--default {
-  --el-button-bg-color: rgba(255, 255, 255, 0.05);
-  --el-button-border-color: var(--border-color);
-  --el-button-text-color: var(--text-main);
-  --el-button-hover-bg-color: rgba(255, 255, 255, 0.1);
-  --el-button-hover-border-color: var(--border-color);
-  --el-button-hover-text-color: var(--text-main);
+  --el-button-bg-color: var(--btn-secondary-bg, rgba(255, 255, 255, 0.06));
+  --el-button-border-color: var(--btn-secondary-border, var(--border-color));
+  --el-button-text-color: var(--btn-secondary-text, var(--text-main));
+  --el-button-hover-bg-color: var(--btn-secondary-hover-bg, rgba(255, 255, 255, 0.12));
+  --el-button-hover-border-color: var(--btn-secondary-border, var(--border-color));
+  --el-button-hover-text-color: var(--btn-secondary-text, var(--text-main));
 }
 
 .el-button--danger {
   --el-button-bg-color: var(--danger);
   --el-button-border-color: var(--danger);
+  --el-button-text-color: #ffffff;
   --el-button-hover-bg-color: #dc2626;
   --el-button-hover-border-color: #dc2626;
+  --el-button-hover-text-color: #ffffff;
+}
+
+/* 文本按钮 / 透明无背景按钮 (e.g. <el-button text>) */
+.el-button.is-text,
+.el-button--text {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-text-color: var(--text-main);
+  --el-button-hover-text-color: var(--primary);
+  --el-button-hover-bg-color: var(--primary-glow, rgba(99, 102, 241, 0.12));
+  color: var(--text-main);
+  background-color: transparent;
+}
+
+.el-button.is-text:hover,
+.el-button--text:hover {
+  color: var(--primary);
+  background-color: var(--primary-glow, rgba(99, 102, 241, 0.12));
+}
+
+.el-button.is-text.el-button--danger,
+.el-button--text.el-button--danger {
+  --el-button-text-color: var(--danger);
+  --el-button-hover-text-color: #dc2626;
+  --el-button-hover-bg-color: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+}
+
+.el-button.is-text.el-button--danger:hover,
+.el-button--text.el-button--danger:hover {
+  color: #dc2626;
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
+.el-button.is-text.el-button--primary,
+.el-button--text.el-button--primary {
+  --el-button-text-color: var(--primary);
+  --el-button-hover-text-color: var(--primary-hover);
+  --el-button-hover-bg-color: var(--primary-glow, rgba(99, 102, 241, 0.12));
+  color: var(--primary);
 }
 
 /* 紧凑型按钮 */
