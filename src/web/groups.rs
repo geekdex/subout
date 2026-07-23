@@ -6,7 +6,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::db;
-use crate::web::{AppState, check_auth, get_db_conn};
+use crate::web::{AppState, check_auth, get_db_conn, subscriptions::BatchDeleteRequest};
 
 #[derive(Deserialize)]
 pub struct OutboundGroupRequest {
@@ -109,6 +109,37 @@ pub async fn delete_group(
     db::delete_outbound_group(&conn, id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let _ = db::log_history(&conn, "出站组管理", "删除出站组", &detail, None);
+
+    Ok(StatusCode::OK)
+}
+
+pub async fn batch_delete_groups(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<BatchDeleteRequest>,
+) -> Result<StatusCode, StatusCode> {
+    check_auth(&state, &headers).await?;
+    let mut conn = get_db_conn(&state.db_path)?;
+
+    let tx = conn
+        .transaction()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tags: Vec<String> = Vec::new();
+    for id in &payload.ids {
+        if let Ok(t) = tx.query_row("SELECT tag FROM outbound_groups WHERE id = ?", [*id], |r| r.get(0)) {
+            tags.push(t);
+        }
+        let _ = tx.execute("DELETE FROM outbound_groups WHERE id = ?", [id]);
+    }
+    tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let _ = db::log_history(
+        &conn,
+        "出站组管理",
+        "批量删除出站组",
+        &format!("批量删除出站组: {}", tags.join(", ")),
+        None,
+    );
 
     Ok(StatusCode::OK)
 }

@@ -320,9 +320,39 @@ describe("GroupsView - 分流出站组管理", () => {
       );
       expect(deleteCalls.length).toBe(0);
     });
+
+    it("勾选多个分组后执行批量删除 → POST /api/groups/batch-delete", async () => {
+      const wrapper = await mountGroupsView();
+      global.fetch.mockClear();
+
+      // 勾选表格表头全选框
+      const headerCheckbox = wrapper.find("thead input[type='checkbox']");
+      await headerCheckbox.setValue(true);
+      await flushPromises();
+
+      // 应该出现批量删除按钮
+      const batchBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("批量删除"));
+      expect(batchBtn).toBeDefined();
+      expect(batchBtn.text()).toContain("已选 2 项");
+
+      // 点击批量删除
+      await batchBtn.trigger("click");
+      await flushPromises();
+
+      expect(mockConfirmDialog).toHaveBeenCalled();
+      const batchCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/groups/batch-delete" && o?.method === "POST"
+      );
+      expect(batchCall).toBeDefined();
+      const [, opts] = batchCall;
+      expect(JSON.parse(opts.body)).toEqual({ ids: [1, 2] });
+      expect(mockShowToast).toHaveBeenCalledWith("已批量删除选中的 2 个出站组");
+    });
   });
 
-  describe("节点穿梭框交互", () => {
+  describe("节点/出站组选择框增强筛选功能", () => {
     it("打开 modal 后加载全部节点供选择", async () => {
       const wrapper = await mountGroupsView();
       global.fetch.mockClear();
@@ -342,6 +372,59 @@ describe("GroupsView - 分流出站组管理", () => {
       expect(nodesCall).toBeDefined();
     });
 
+    it("只筛选节点 vs 只筛选出站组", async () => {
+      const wrapper = await mountGroupsView();
+      const addBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("添加出站组"));
+      await addBtn.trigger("click");
+      await flushPromises();
+
+      // 找到类型筛选下拉框
+      const typeSelects = wrapper.findAll(".pane-header select");
+      const typeFilterSelect = typeSelects[0];
+
+      // 筛选"仅节点"
+      await typeFilterSelect.setValue("node");
+      await flushPromises();
+      const itemsOnlyNodes = wrapper.findAll(".transfer-available-item");
+      expect(itemsOnlyNodes.length).toBe(2); // node1, node2
+      expect(wrapper.find(".pane-body").text()).not.toContain("[出站组]");
+
+      // 筛选"仅出站组"
+      await typeFilterSelect.setValue("group");
+      await flushPromises();
+      const itemsOnlyGroups = wrapper.findAll(".transfer-available-item");
+      expect(itemsOnlyGroups.length).toBe(2); // proxy, auto-test (except self if editing)
+      expect(wrapper.find(".pane-body").text()).toContain("[出站组]");
+    });
+
+    it("支持关键词包含和排除多个关键词查询", async () => {
+      const wrapper = await mountGroupsView();
+      const addBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("添加出站组"));
+      await addBtn.trigger("click");
+      await flushPromises();
+
+      const searchInputs = wrapper.findAll('.pane-header input[type="text"]');
+      const includeInput = searchInputs[0];
+      const excludeInput = searchInputs[1];
+
+      // 包含搜索 "node"
+      await includeInput.setValue("node");
+      await flushPromises();
+      expect(wrapper.find(".pane-body").text()).toContain("node1");
+      expect(wrapper.find(".pane-body").text()).toContain("node2");
+      expect(wrapper.find(".pane-body").text()).not.toContain("proxy");
+
+      // 排除搜索 "node2, direct"
+      await excludeInput.setValue("node2, direct");
+      await flushPromises();
+      expect(wrapper.find(".pane-body").text()).toContain("node1");
+      expect(wrapper.find(".pane-body").text()).not.toContain("node2");
+    });
+
     it("全选按钮把过滤后的所有 tag 加入已选列表", async () => {
       const wrapper = await mountGroupsView();
       const addBtn = wrapper
@@ -351,12 +434,12 @@ describe("GroupsView - 分流出站组管理", () => {
       await flushPromises();
       await flushPromises();
 
-      // 找到全选按钮（含"全选"文本）
-      const selectAllBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("全选"));
-      if (selectAllBtn) {
-        await selectAllBtn.trigger("click");
+      // 找到全选链接
+      const selectAllLink = wrapper
+        .findAll(".pane-header a")
+        .find((a) => a.text().includes("全选当前"));
+      if (selectAllLink) {
+        await selectAllLink.trigger("click");
         await flushPromises();
         // 已选 tag 会显示在右侧
         expect(wrapper.text()).toContain("node1");
@@ -374,25 +457,22 @@ describe("GroupsView - 分流出站组管理", () => {
       await flushPromises();
 
       // 先全选
-      const selectAllBtn = wrapper
-        .findAll("button")
-        .find((b) => b.text().includes("全选"));
-      if (selectAllBtn) {
-        await selectAllBtn.trigger("click");
+      const selectAllLink = wrapper
+        .findAll(".pane-header a")
+        .find((a) => a.text().includes("全选当前"));
+      if (selectAllLink) {
+        await selectAllLink.trigger("click");
         await flushPromises();
       }
 
       // 点击清空
       const clearBtn = wrapper
-        .findAll("button")
-        .find(
-          (b) => b.text().includes("清空") || b.text().includes("移除全部"),
-        );
+        .findAll(".pane-header a")
+        .find((a) => a.text().includes("清空"));
       if (clearBtn) {
         await clearBtn.trigger("click");
         await flushPromises();
-        // 验证不抛错即可
-        expect(true).toBe(true);
+        expect(wrapper.find(".pane-column:nth-child(2)").text()).toContain("请从左侧选择节点");
       }
     });
   });

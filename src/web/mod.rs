@@ -142,6 +142,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             get(groups::get_groups).post(groups::add_group),
         )
         .route(
+            "/api/groups/batch-delete",
+            post(groups::batch_delete_groups),
+        )
+        .route(
             "/api/groups/:id",
             put(groups::update_group).delete(groups::delete_group),
         )

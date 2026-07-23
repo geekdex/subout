@@ -17,31 +17,64 @@
           出站分组。
         </p>
       </div>
-      <button class="btn" @click="openAddModal">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
+      <div class="flex gap-2" style="align-items: center">
+        <button
+          v-if="selectedGroupIds.length > 0"
+          class="btn btn-danger"
+          @click="batchDeleteGroups"
         >
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-        添加出站组
-      </button>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <polyline points="3 6 5 6 21 6" />
+            <path
+              d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+            />
+          </svg>
+          批量删除 (已选 {{ selectedGroupIds.length }} 项)
+        </button>
+        <button class="btn" @click="openAddModal">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          添加出站组
+        </button>
+      </div>
     </div>
 
     <div class="view-body">
       <div class="panel fill-height">
-        <div class="panel-title">
+        <div class="panel-title" style="display: flex; justify-content: space-between; align-items: center">
           <span>已配置的出站组</span>
+          <span v-if="selectedGroupIds.length > 0" style="font-size: 0.85rem; color: var(--text-muted); font-weight: normal">
+            已选择 {{ selectedGroupIds.length }} / {{ groups.length }} 项
+          </span>
         </div>
         <div class="panel-table-wrapper">
           <table>
             <thead>
               <tr>
+                <th style="width: 40px; text-align: center">
+                  <input
+                    type="checkbox"
+                    :checked="isAllSelected"
+                    :indeterminate.prop="isIndeterminate"
+                    @change="toggleSelectAll"
+                  />
+                </th>
                 <th>出站 Tag</th>
                 <th>分组类型</th>
                 <th>配置详情</th>
@@ -50,6 +83,13 @@
             </thead>
             <tbody>
               <tr v-for="g in paginatedGroups" :key="g.id">
+                <td style="text-align: center">
+                  <input
+                    type="checkbox"
+                    :value="g.id"
+                    v-model="selectedGroupIds"
+                  />
+                </td>
                 <td>
                   <strong>{{ g.tag }}</strong>
                 </td>
@@ -123,7 +163,7 @@
               </tr>
               <tr v-if="groups.length === 0">
                 <td
-                  colspan="4"
+                  colspan="5"
                   style="text-align: center; color: var(--text-muted)"
                 >
                   暂无配置的分流出站组。
@@ -211,7 +251,7 @@
 
     <!-- Group Add/Edit Modal -->
     <div class="modal" :class="{ active: modal.show }">
-      <div class="modal-card" style="max-width: 850px; width: 90%">
+      <div class="modal-card" style="max-width: 950px; width: 92%">
         <div class="modal-header">
           <span>{{ modal.isEdit ? "编辑分流出站组" : "添加分流出站组" }}</span>
           <svg
@@ -305,13 +345,29 @@
                       <div class="pane-header">
                         <div
                           class="flex gap-2"
-                          style="width: 100%; margin-bottom: 0.2rem"
+                          style="width: 100%; margin-bottom: 0.25rem; flex-wrap: wrap"
                         >
+                          <select
+                            v-model="groupNodeTypeFilter"
+                            class="input-control"
+                            style="
+                              flex: 1;
+                              min-width: 85px;
+                              font-size: 0.8rem;
+                              padding: 0.25rem 0.5rem;
+                              height: 32px;
+                            "
+                          >
+                            <option value="all">全部类型</option>
+                            <option value="node">仅节点</option>
+                            <option value="group">仅出站组</option>
+                          </select>
                           <select
                             v-model="groupNodeSubFilter"
                             class="input-control"
                             style="
-                              max-width: 90px;
+                              flex: 1;
+                              min-width: 85px;
                               font-size: 0.8rem;
                               padding: 0.25rem 0.5rem;
                               height: 32px;
@@ -327,17 +383,35 @@
                               {{ sub.label }}
                             </option>
                           </select>
+                        </div>
+                        <div style="width: 100%; margin-bottom: 0.25rem">
                           <input
                             v-model="groupNodeSearch"
                             type="text"
                             class="input-control"
                             style="
-                              flex-grow: 1;
+                              width: 100%;
+                              box-sizing: border-box;
                               font-size: 0.8rem;
                               padding: 0.25rem 0.5rem;
                               height: 32px;
                             "
-                            placeholder="搜索节点/出站组..."
+                            placeholder="包含关键词 (例如: HK, 0.5x)..."
+                          />
+                        </div>
+                        <div style="width: 100%; margin-bottom: 0.2rem">
+                          <input
+                            v-model="groupNodeExcludeSearch"
+                            type="text"
+                            class="input-control"
+                            style="
+                              width: 100%;
+                              box-sizing: border-box;
+                              font-size: 0.8rem;
+                              padding: 0.25rem 0.5rem;
+                              height: 32px;
+                            "
+                            placeholder="排除关键词 (多个用逗号/空格分隔)..."
                           />
                         </div>
                         <div
@@ -456,7 +530,6 @@
                           justify-content: space-between;
                           align-items: center;
                           flex-direction: row;
-                          height: 53px;
                           box-sizing: border-box;
                         "
                       >
@@ -571,8 +644,12 @@ import { token, API_BASE, groups, showToast, confirmDialog } from "../store.js";
 
 const allNodes = ref([]);
 const subList = ref([]);
+const groupNodeTypeFilter = ref("all");
 const groupNodeSubFilter = ref("all");
 const groupNodeSearch = ref("");
+const groupNodeExcludeSearch = ref("");
+
+const selectedGroupIds = ref([]);
 
 const currentPage = ref(1);
 const pageSize = ref(10);
@@ -582,7 +659,34 @@ const paginatedGroups = computed(() => {
   return groups.value.slice(start, end);
 });
 
+const isAllSelected = computed(() => {
+  if (paginatedGroups.value.length === 0) return false;
+  return paginatedGroups.value.every((g) => selectedGroupIds.value.includes(g.id));
+});
+
+const isIndeterminate = computed(() => {
+  if (paginatedGroups.value.length === 0) return false;
+  const pageSelectedCount = paginatedGroups.value.filter((g) =>
+    selectedGroupIds.value.includes(g.id)
+  ).length;
+  return pageSelectedCount > 0 && pageSelectedCount < paginatedGroups.value.length;
+});
+
+const toggleSelectAll = (e) => {
+  const currentPageIds = paginatedGroups.value.map((g) => g.id);
+  if (e.target.checked) {
+    const combined = new Set([...selectedGroupIds.value, ...currentPageIds]);
+    selectedGroupIds.value = Array.from(combined);
+  } else {
+    selectedGroupIds.value = selectedGroupIds.value.filter(
+      (id) => !currentPageIds.includes(id)
+    );
+  }
+};
+
 watch(groups, (newVal) => {
+  const validIds = new Set(newVal.map((g) => g.id));
+  selectedGroupIds.value = selectedGroupIds.value.filter((id) => validIds.has(id));
   const maxPage = Math.max(1, Math.ceil(newVal.length / pageSize.value));
   if (currentPage.value > maxPage) {
     currentPage.value = maxPage;
@@ -711,11 +815,25 @@ const checkableOptions = computed(() => {
 });
 
 const filteredOutbounds = computed(() => {
+  const includeKeywords = groupNodeSearch.value
+    .split(/[,，\s]+/)
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean);
+
+  const excludeKeywords = groupNodeExcludeSearch.value
+    .split(/[,，\s]+/)
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean);
+
   return checkableOptions.value.filter((item) => {
     // 1. Exclude if already selected
     if (modal.selectedNodeTags.includes(item.tag)) return false;
 
-    // 2. Filter sub ID
+    // 2. Filter type (all / node / group)
+    if (groupNodeTypeFilter.value === "node" && !item.isNode) return false;
+    if (groupNodeTypeFilter.value === "group" && !item.isGroup) return false;
+
+    // 3. Filter sub ID
     if (groupNodeSubFilter.value !== "all") {
       if (groupNodeSubFilter.value === "custom") {
         if (item.subId !== "custom") return false;
@@ -723,20 +841,37 @@ const filteredOutbounds = computed(() => {
         if (item.subId !== groupNodeSubFilter.value) return false;
       }
     }
-    // 3. Filter search query
-    if (groupNodeSearch.value) {
-      const query = groupNodeSearch.value.toLowerCase();
-      const tagMatch = item.tag && item.tag.toLowerCase().includes(query);
-      const serverMatch =
-        item.server && item.server.toLowerCase().includes(query);
-      return tagMatch || serverMatch;
+
+    // 4. Filter positive keywords
+    if (includeKeywords.length > 0) {
+      const tagLower = (item.tag || "").toLowerCase();
+      const serverLower = (item.server || "").toLowerCase();
+      const matchesAllInclude = includeKeywords.every(
+        (kw) => tagLower.includes(kw) || serverLower.includes(kw)
+      );
+      if (!matchesAllInclude) return false;
     }
+
+    // 5. Filter exclude keywords
+    if (excludeKeywords.length > 0) {
+      const tagLower = (item.tag || "").toLowerCase();
+      const serverLower = (item.server || "").toLowerCase();
+      const matchesAnyExclude = excludeKeywords.some(
+        (kw) => tagLower.includes(kw) || serverLower.includes(kw)
+      );
+      if (matchesAnyExclude) return false;
+    }
+
     return true;
   });
 });
 
 const openAddModal = () => {
   loadAllNodesForSelector();
+  groupNodeTypeFilter.value = "all";
+  groupNodeSubFilter.value = "all";
+  groupNodeSearch.value = "";
+  groupNodeExcludeSearch.value = "";
   modal.isEdit = false;
   modal.editId = null;
   modal.tag = "";
@@ -750,6 +885,10 @@ const openAddModal = () => {
 
 const openEditModal = (g) => {
   loadAllNodesForSelector();
+  groupNodeTypeFilter.value = "all";
+  groupNodeSubFilter.value = "all";
+  groupNodeSearch.value = "";
+  groupNodeExcludeSearch.value = "";
   modal.isEdit = true;
   modal.editId = g.id;
   modal.tag = g.tag;
@@ -854,12 +993,45 @@ const deleteGroup = async (id) => {
 
     if (res.ok) {
       showToast("分流出站组已删除");
+      selectedGroupIds.value = selectedGroupIds.value.filter((itemId) => itemId !== id);
       loadGroups();
     } else {
       showToast("删除出站组失败", "danger");
     }
   } catch {
     showToast("删除出站组出错", "danger");
+  }
+};
+
+const batchDeleteGroups = async () => {
+  if (selectedGroupIds.value.length === 0) return;
+  const count = selectedGroupIds.value.length;
+  if (
+    !(await confirmDialog(`确定要删除选中的 ${count} 个出站分组吗？`, {
+      isDanger: true,
+    }))
+  )
+    return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/groups/batch-delete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({ ids: selectedGroupIds.value }),
+    });
+
+    if (res.ok) {
+      showToast(`已批量删除选中的 ${count} 个出站组`);
+      selectedGroupIds.value = [];
+      loadGroups();
+    } else {
+      showToast("批量删除出站组失败", "danger");
+    }
+  } catch {
+    showToast("批量删除出站组出错", "danger");
   }
 };
 
@@ -870,11 +1042,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.group-editor-container {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .group-editor-container {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
 .node-selection-workspace {
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
+  grid-template-columns: 1.25fr 1fr;
   gap: 1rem;
-  height: 320px;
+  height: 420px;
   margin-top: 0.5rem;
 }
 
