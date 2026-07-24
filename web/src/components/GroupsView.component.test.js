@@ -343,7 +343,7 @@ describe("GroupsView - 分流出站组管理", () => {
 
       expect(mockConfirmDialog).toHaveBeenCalled();
       const batchCall = global.fetch.mock.calls.find(
-        ([u, o]) => u === "/api/groups/batch-delete" && o?.method === "POST"
+        ([u, o]) => u === "/api/groups/batch-delete" && o?.method === "POST",
       );
       expect(batchCall).toBeDefined();
       const [, opts] = batchCall;
@@ -472,7 +472,9 @@ describe("GroupsView - 分流出站组管理", () => {
       if (clearBtn) {
         await clearBtn.trigger("click");
         await flushPromises();
-        expect(wrapper.find(".pane-column:nth-child(2)").text()).toContain("请从左侧选择节点");
+        expect(wrapper.find(".pane-column:nth-child(2)").text()).toContain(
+          "请从左侧选择节点",
+        );
       }
     });
   });

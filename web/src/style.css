@@ -2123,8 +2123,14 @@ select.table-input {
   --el-button-bg-color: var(--btn-secondary-bg, rgba(255, 255, 255, 0.06));
   --el-button-border-color: var(--btn-secondary-border, var(--border-color));
   --el-button-text-color: var(--btn-secondary-text, var(--text-main));
-  --el-button-hover-bg-color: var(--btn-secondary-hover-bg, rgba(255, 255, 255, 0.12));
-  --el-button-hover-border-color: var(--btn-secondary-border, var(--border-color));
+  --el-button-hover-bg-color: var(
+    --btn-secondary-hover-bg,
+    rgba(255, 255, 255, 0.12)
+  );
+  --el-button-hover-border-color: var(
+    --btn-secondary-border,
+    var(--border-color)
+  );
   --el-button-hover-text-color: var(--btn-secondary-text, var(--text-main));
 }
 

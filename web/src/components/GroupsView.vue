@@ -57,9 +57,23 @@
 
     <div class="view-body">
       <div class="panel fill-height">
-        <div class="panel-title" style="display: flex; justify-content: space-between; align-items: center">
+        <div
+          class="panel-title"
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          "
+        >
           <span>已配置的出站组</span>
-          <span v-if="selectedGroupIds.length > 0" style="font-size: 0.85rem; color: var(--text-muted); font-weight: normal">
+          <span
+            v-if="selectedGroupIds.length > 0"
+            style="
+              font-size: 0.85rem;
+              color: var(--text-muted);
+              font-weight: normal;
+            "
+          >
             已选择 {{ selectedGroupIds.length }} / {{ groups.length }} 项
           </span>
         </div>
@@ -85,9 +99,9 @@
               <tr v-for="g in paginatedGroups" :key="g.id">
                 <td style="text-align: center">
                   <input
+                    v-model="selectedGroupIds"
                     type="checkbox"
                     :value="g.id"
-                    v-model="selectedGroupIds"
                   />
                 </td>
                 <td>
@@ -345,7 +359,11 @@
                       <div class="pane-header">
                         <div
                           class="flex gap-2"
-                          style="width: 100%; margin-bottom: 0.25rem; flex-wrap: wrap"
+                          style="
+                            width: 100%;
+                            margin-bottom: 0.25rem;
+                            flex-wrap: wrap;
+                          "
                         >
                           <select
                             v-model="groupNodeTypeFilter"
@@ -661,15 +679,19 @@ const paginatedGroups = computed(() => {
 
 const isAllSelected = computed(() => {
   if (paginatedGroups.value.length === 0) return false;
-  return paginatedGroups.value.every((g) => selectedGroupIds.value.includes(g.id));
+  return paginatedGroups.value.every((g) =>
+    selectedGroupIds.value.includes(g.id),
+  );
 });
 
 const isIndeterminate = computed(() => {
   if (paginatedGroups.value.length === 0) return false;
   const pageSelectedCount = paginatedGroups.value.filter((g) =>
-    selectedGroupIds.value.includes(g.id)
+    selectedGroupIds.value.includes(g.id),
   ).length;
-  return pageSelectedCount > 0 && pageSelectedCount < paginatedGroups.value.length;
+  return (
+    pageSelectedCount > 0 && pageSelectedCount < paginatedGroups.value.length
+  );
 });
 
 const toggleSelectAll = (e) => {
@@ -679,14 +701,16 @@ const toggleSelectAll = (e) => {
     selectedGroupIds.value = Array.from(combined);
   } else {
     selectedGroupIds.value = selectedGroupIds.value.filter(
-      (id) => !currentPageIds.includes(id)
+      (id) => !currentPageIds.includes(id),
     );
   }
 };
 
 watch(groups, (newVal) => {
   const validIds = new Set(newVal.map((g) => g.id));
-  selectedGroupIds.value = selectedGroupIds.value.filter((id) => validIds.has(id));
+  selectedGroupIds.value = selectedGroupIds.value.filter((id) =>
+    validIds.has(id),
+  );
   const maxPage = Math.max(1, Math.ceil(newVal.length / pageSize.value));
   if (currentPage.value > maxPage) {
     currentPage.value = maxPage;
@@ -847,7 +871,7 @@ const filteredOutbounds = computed(() => {
       const tagLower = (item.tag || "").toLowerCase();
       const serverLower = (item.server || "").toLowerCase();
       const matchesAllInclude = includeKeywords.every(
-        (kw) => tagLower.includes(kw) || serverLower.includes(kw)
+        (kw) => tagLower.includes(kw) || serverLower.includes(kw),
       );
       if (!matchesAllInclude) return false;
     }
@@ -857,7 +881,7 @@ const filteredOutbounds = computed(() => {
       const tagLower = (item.tag || "").toLowerCase();
       const serverLower = (item.server || "").toLowerCase();
       const matchesAnyExclude = excludeKeywords.some(
-        (kw) => tagLower.includes(kw) || serverLower.includes(kw)
+        (kw) => tagLower.includes(kw) || serverLower.includes(kw),
       );
       if (matchesAnyExclude) return false;
     }
@@ -993,7 +1017,9 @@ const deleteGroup = async (id) => {
 
     if (res.ok) {
       showToast("分流出站组已删除");
-      selectedGroupIds.value = selectedGroupIds.value.filter((itemId) => itemId !== id);
+      selectedGroupIds.value = selectedGroupIds.value.filter(
+        (itemId) => itemId !== id,
+      );
       loadGroups();
     } else {
       showToast("删除出站组失败", "danger");

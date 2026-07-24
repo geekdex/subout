@@ -859,4 +859,121 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(wrapper.find(".mock-dns-editor").exists()).toBe(true);
     });
   });
+
+  describe("配置复制与 Outbounds 批量删除", () => {
+    it("配置列表：点击'复制'按钮可以复制指定配置", async () => {
+      window.location.hash = "#config";
+      let postPayload = null;
+      const baseFetch = createMockFetch();
+      vi.spyOn(global, "fetch").mockImplementation((url, options) => {
+        const urlStr = String(url);
+        if (
+          urlStr.includes("/api/config/history/1") &&
+          (!options || options.method === "GET" || !options.method)
+        ) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: 1,
+              detail: "测试配置1",
+              content: JSON.stringify({ outbounds: [] }),
+            }),
+            text: async () =>
+              JSON.stringify({ id: 1, detail: "测试配置1", content: "{}" }),
+          });
+        }
+        if (
+          urlStr.includes("/api/config/history") &&
+          options &&
+          options.method === "POST"
+        ) {
+          postPayload = JSON.parse(options.body);
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 2, detail: postPayload.detail }),
+            text: async () =>
+              JSON.stringify({ id: 2, detail: postPayload.detail }),
+          });
+        }
+        return baseFetch(url, options);
+      });
+
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      const copyBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text() === "复制");
+      expect(copyBtn).toBeDefined();
+      await copyBtn.trigger("click");
+      await flushPromises();
+
+      expect(mockPromptDialog).toHaveBeenCalled();
+      expect(postPayload).not.toBeNull();
+      expect(postPayload.detail).toBe("test");
+    });
+
+    it("Outbounds tab: 勾选策略组并触发批量删除", async () => {
+      window.location.hash = "#config/edit/1/outbounds";
+      const baseFetch = createMockFetch();
+      vi.spyOn(global, "fetch").mockImplementation((url, options) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/api/config/history/1")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: 1,
+              detail: "测试配置1",
+              content: JSON.stringify({
+                outbounds: [
+                  { tag: "group1", type: "selector", outbounds: ["proxy1"] },
+                  {
+                    tag: "proxy1",
+                    type: "vmess",
+                    server: "1.1.1.1",
+                    port: 443,
+                  },
+                ],
+              }),
+            }),
+            text: async () => "{}",
+          });
+        }
+        return baseFetch(url, options);
+      });
+
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      const groupCards = wrapper.findAll(".outbound-card.is-group");
+      expect(groupCards.length).toBe(1);
+
+      // 勾选第一个策略组
+      const checkbox = groupCards[0].find("input[type='checkbox']");
+      await checkbox.setValue(true);
+      await flushPromises();
+
+      // 寻找批量删除按钮
+      const batchBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("批量删除"));
+      expect(batchBtn).toBeDefined();
+      await batchBtn.trigger("click");
+      await flushPromises();
+
+      expect(mockConfirmDialog).toHaveBeenCalled();
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining("已批量删除选中的"),
+      );
+    });
+  });
 });

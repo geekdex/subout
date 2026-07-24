@@ -118,7 +118,7 @@
                 <th style="width: 80px">ID</th>
                 <th>配置备注 / 名称</th>
                 <th>创建时间</th>
-                <th style="text-align: right; width: 240px">操作</th>
+                <th style="text-align: right; width: 280px">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -138,6 +138,14 @@
                       @click="startEditConfig(item.id)"
                     >
                       编辑配置
+                    </button>
+                    <button
+                      class="btn btn-secondary"
+                      style="padding: 0.4rem 0.8rem; font-size: 0.85rem"
+                      title="复制此配置为新记录"
+                      @click="duplicateConfigItem(item.id)"
+                    >
+                      复制
                     </button>
                     <button
                       class="btn btn-secondary"
@@ -1102,7 +1110,25 @@
                           手动选择或自动测速的策略组，配置中已自包含
                         </p>
                       </div>
-                      <div class="flex gap-2">
+                      <div class="flex gap-2 items-center">
+                        <button
+                          v-if="groupOutbounds.length > 0"
+                          class="btn btn-secondary"
+                          style="padding: 0.35rem 0.75rem; font-size: 0.85rem"
+                          @click="toggleSelectAllOutboundGroups"
+                        >
+                          {{
+                            isAllOutboundGroupsSelected ? "取消全选" : "全选"
+                          }}
+                        </button>
+                        <button
+                          v-if="selectedGroupTags.length > 0"
+                          class="btn btn-danger"
+                          style="padding: 0.35rem 0.75rem; font-size: 0.85rem"
+                          @click="batchRemoveGroups"
+                        >
+                          🗑️ 批量删除 ({{ selectedGroupTags.length }})
+                        </button>
                         <a
                           href="#groups"
                           class="btn btn-secondary"
@@ -1139,14 +1165,38 @@
                         v-for="outb in groupOutbounds"
                         :key="outb.tag"
                         class="outbound-card"
-                        :class="{ 'is-group': true }"
+                        :class="{
+                          'is-group': true,
+                          selected: selectedGroupTags.includes(outb.tag),
+                        }"
                       >
                         <div class="card-header">
                           <div class="flex justify-between items-start">
-                            <div>
-                              <h4 class="card-title">{{ outb.tag }}</h4>
-                              <div class="card-subtitle">
-                                {{ getOutboundTypeDisplay(outb.type) }}
+                            <div
+                              style="
+                                display: flex;
+                                align-items: center;
+                                gap: 0.6rem;
+                              "
+                            >
+                              <input
+                                v-model="selectedGroupTags"
+                                type="checkbox"
+                                :value="outb.tag"
+                                style="
+                                  width: 16px;
+                                  height: 16px;
+                                  cursor: pointer;
+                                  accent-color: var(--primary);
+                                  flex-shrink: 0;
+                                "
+                                @click.stop
+                              />
+                              <div>
+                                <h4 class="card-title">{{ outb.tag }}</h4>
+                                <div class="card-subtitle">
+                                  {{ getOutboundTypeDisplay(outb.type) }}
+                                </div>
                               </div>
                             </div>
                             <div class="card-badges">
@@ -1285,7 +1335,23 @@
                           VMess、VLESS、Trojan、Shadowsocks等代理协议节点
                         </p>
                       </div>
-                      <div class="flex gap-2">
+                      <div class="flex gap-2 items-center">
+                        <button
+                          v-if="proxyOutbounds.length > 0"
+                          class="btn btn-secondary"
+                          style="padding: 0.35rem 0.75rem; font-size: 0.85rem"
+                          @click="toggleSelectAllProxies"
+                        >
+                          {{ isAllProxiesSelected ? "取消全选" : "全选" }}
+                        </button>
+                        <button
+                          v-if="selectedProxyTags.length > 0"
+                          class="btn btn-danger"
+                          style="padding: 0.35rem 0.75rem; font-size: 0.85rem"
+                          @click="batchRemoveProxies"
+                        >
+                          🗑️ 批量删除 ({{ selectedProxyTags.length }})
+                        </button>
                         <button
                           class="btn btn-secondary"
                           style="
@@ -1320,13 +1386,37 @@
                         v-for="outb in proxyOutbounds"
                         :key="outb.tag"
                         class="outbound-card proxy-card"
+                        :class="{
+                          selected: selectedProxyTags.includes(outb.tag),
+                        }"
                       >
                         <div class="card-header">
                           <div class="flex justify-between items-start">
-                            <div>
-                              <h4 class="card-title">{{ outb.tag }}</h4>
-                              <div class="card-subtitle">
-                                {{ getProxyTypeDisplay(outb.type) }}
+                            <div
+                              style="
+                                display: flex;
+                                align-items: center;
+                                gap: 0.6rem;
+                              "
+                            >
+                              <input
+                                v-model="selectedProxyTags"
+                                type="checkbox"
+                                :value="outb.tag"
+                                style="
+                                  width: 16px;
+                                  height: 16px;
+                                  cursor: pointer;
+                                  accent-color: var(--primary);
+                                  flex-shrink: 0;
+                                "
+                                @click.stop
+                              />
+                              <div>
+                                <h4 class="card-title">{{ outb.tag }}</h4>
+                                <div class="card-subtitle">
+                                  {{ getProxyTypeDisplay(outb.type) }}
+                                </div>
                               </div>
                             </div>
                             <div class="card-badges">
@@ -5176,6 +5266,70 @@ const groupOutbounds = computed(() => {
   );
 });
 
+// 策略组批量删除
+const selectedGroupTags = ref([]);
+const isAllOutboundGroupsSelected = computed(() => {
+  if (groupOutbounds.value.length === 0) return false;
+  return groupOutbounds.value.every((outb) =>
+    selectedGroupTags.value.includes(outb.tag),
+  );
+});
+const toggleSelectAllOutboundGroups = () => {
+  if (isAllOutboundGroupsSelected.value) {
+    selectedGroupTags.value = [];
+  } else {
+    selectedGroupTags.value = groupOutbounds.value.map((outb) => outb.tag);
+  }
+};
+const batchRemoveGroups = async () => {
+  const count = selectedGroupTags.value.length;
+  if (count === 0) return;
+  const confirmed = await confirmDialog(
+    `确定要批量删除选中的 ${count} 个策略组吗？`,
+    { isDanger: true },
+  );
+  if (!confirmed) return;
+
+  const removeTagsSet = new Set(selectedGroupTags.value);
+  configData.outbounds = (configData.outbounds || []).filter(
+    (o) => !removeTagsSet.has(o.tag),
+  );
+  selectedGroupTags.value = [];
+  showToast(`已批量删除选中的 ${count} 个策略组`);
+};
+
+// 代理节点批量删除
+const selectedProxyTags = ref([]);
+const isAllProxiesSelected = computed(() => {
+  if (proxyOutbounds.value.length === 0) return false;
+  return proxyOutbounds.value.every((outb) =>
+    selectedProxyTags.value.includes(outb.tag),
+  );
+});
+const toggleSelectAllProxies = () => {
+  if (isAllProxiesSelected.value) {
+    selectedProxyTags.value = [];
+  } else {
+    selectedProxyTags.value = proxyOutbounds.value.map((outb) => outb.tag);
+  }
+};
+const batchRemoveProxies = async () => {
+  const count = selectedProxyTags.value.length;
+  if (count === 0) return;
+  const confirmed = await confirmDialog(
+    `确定要批量删除选中的 ${count} 个代理节点吗？`,
+    { isDanger: true },
+  );
+  if (!confirmed) return;
+
+  const removeTagsSet = new Set(selectedProxyTags.value);
+  configData.outbounds = (configData.outbounds || []).filter(
+    (o) => !removeTagsSet.has(o.tag),
+  );
+  selectedProxyTags.value = [];
+  showToast(`已批量删除选中的 ${count} 个代理节点`);
+};
+
 // 辅助方法
 const getOutboundTypeDisplay = (type) => {
   const typeMap = {
@@ -6707,6 +6861,8 @@ const loadHistoryConfig = async (id) => {
 
       // 旧配置迁移：把 selector/urltest 的引用展开为自包含快照
       migrateLegacyGroupOutbounds();
+      selectedGroupTags.value = [];
+      selectedProxyTags.value = [];
     }
   } catch {
     showToast("加载配置详情失败", "danger");
@@ -6844,6 +7000,58 @@ const deleteConfigItem = async (id) => {
       await loadAllSections();
     } else {
       showToast("删除失败", "danger");
+    }
+  } catch {
+    showToast("网络请求失败", "danger");
+  }
+};
+
+const duplicateConfigItem = async (id) => {
+  try {
+    const res = await fetch(`${API_BASE}/api/config/history/${id}`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    });
+    if (!res.ok) {
+      showToast("获取原配置内容失败", "danger");
+      return;
+    }
+    const detailItem = await res.json();
+    const defaultName = (detailItem.detail || "配置") + " - 副本";
+    const desc = await promptDialog("请输入新配置的名称/备注:", defaultName, {
+      title: "复制配置",
+    });
+    if (desc === null) return;
+
+    let contentObj = null;
+    if (detailItem.content) {
+      try {
+        contentObj =
+          typeof detailItem.content === "string"
+            ? JSON.parse(detailItem.content)
+            : detailItem.content;
+      } catch {
+        contentObj = {};
+      }
+    }
+
+    const createRes = await fetch(`${API_BASE}/api/config/history`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({
+        detail: desc.trim() || defaultName,
+        content: contentObj,
+      }),
+    });
+
+    if (createRes.ok) {
+      showToast("已成功复制配置！");
+      await loadAllSections();
+    } else {
+      const errText = await createRes.text();
+      showToast(`复制失败: ${errText || "接口错误"}`, "danger");
     }
   } catch {
     showToast("网络请求失败", "danger");
@@ -8655,6 +8863,11 @@ const confirmSyncRule = () => {
 .outbound-card:hover {
   border-color: var(--primary);
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
+}
+
+.outbound-card.selected {
+  border-color: var(--primary);
+  background-color: rgba(99, 102, 241, 0.05);
 }
 
 .outbound-card .card-header {
