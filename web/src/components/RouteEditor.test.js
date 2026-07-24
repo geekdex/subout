@@ -35,7 +35,7 @@ const globalStubs = {
   "el-input": {
     template:
       "<input class='el-input' :value='modelValue' @input='$emit(\"update:modelValue\", $event.target.value)' />",
-    props: ["modelValue"],
+    props: ["modelValue", "size", "clearable", "prefixIcon", "placeholder"],
   },
   "el-switch": {
     template:
@@ -247,7 +247,7 @@ describe("RouteEditor", () => {
     it("calls editItem when add rule button is clicked", async () => {
       const wrapper = mountRouteEditor(mockConfigData);
       const addBtn = wrapper
-        .findAll(".el-button")
+        .findAll("button")
         .find((b) => b.text().includes("添加"));
       expect(addBtn).toBeTruthy();
       await addBtn.trigger("click");

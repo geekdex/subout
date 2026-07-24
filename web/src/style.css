@@ -2109,7 +2109,17 @@ select.table-input {
   --el-button-hover-border-color: transparent;
   border-radius: 6px;
   font-weight: 500;
-  color: var(--text-main);
+  color: #ffffff !important;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #ffffff !important;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+  color: #ffffff !important;
 }
 
 .el-button--primary {
