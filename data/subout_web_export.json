@@ -1,0 +1,320 @@
+[
+  {
+    "type": "http",
+    "tag": "🇸🇬 新加坡3",
+    "server": "71bcc608-tjm4g0-txdndl-1tvk5.sg3.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇸🇬 新加坡",
+    "server": "54720783-tjm4g0-txdndl-1tvk5.sg.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇸🇬 新加坡[CM]",
+    "server": "91b78b39-tjm4g0-txdndl-1tvk5.sg2.oshuawei.com",
+    "server_port": 5228,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇯🇵 日本4",
+    "server": "2d3a7366-tjm4g0-txdndl-1tvk5.jp4.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇮🇩 印尼",
+    "server": "eb740c51-tjm4g0-txdndl-1tvk5.id.oshuawei.com",
+    "server_port": 5228,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇯🇵 日本",
+    "server": "ddbe081a-tjm4g0-txdndl-1tvk5.jp.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇨🇳 台湾",
+    "server": "2778c797-tjm4g0-txdndl-1tvk5.tw3.p5pv.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇰🇷韩國",
+    "server": "240174d3-tjm4g0-txdndl-1tvk5.kr.oshuawei.com",
+    "server_port": 31433,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇹🇭 泰国[CM]",
+    "server": "eb740c51-tjm4g0-txdndl-1tvk5.id.oshuawei.com",
+    "server_port": 32232,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇲🇾 马来西亚",
+    "server": "1232e10b-tjm4g0-txdndl-1tvk5.my.oshuawei.com",
+    "server_port": 5228,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇩🇪 德国",
+    "server": "b47c5e0c-tjm4g0-txdndl-1tvk5.de3.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇫🇷 法国",
+    "server": "1e8f2d33-tjm4g0-txdndl-1tvk5.fr.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇬🇧 英国",
+    "server": "dfac85d7-tjm4g0-txdndl-1tvk5.uk.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "anytls",
+    "tag": "🇭🇰 香港03",
+    "server": "d661cbda-tjm4g0-txdndl-1tvk5.hk3.hyhuawei.com",
+    "server_port": 443,
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true,
+      "insecure": true
+    }
+  },
+  {
+    "type": "anytls",
+    "tag": "🇭🇰 香港02",
+    "server": "9d2fcd4d-tjm4g0-txdndl-1tvk5.hk2.hyhuawei.com",
+    "server_port": 443,
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true,
+      "insecure": true
+    }
+  },
+  {
+    "type": "socks",
+    "tag": "🇭🇰香港精品2",
+    "server": "d496bfb2-tjm4g0-txdndl-1tvk5.hkt2.cdnhuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d"
+  },
+  {
+    "type": "http",
+    "tag": "🇭🇰香港精品3",
+    "server": "2996cddc-tjm4g0-txdndl-1tvk5.hkt.cdnhuawei.com",
+    "server_port": 8443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇭🇰香港精品4",
+    "server": "d496bfb2-tjm4g0-txdndl-1tvk5.hkt2.cdnhuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "🇭🇰香港中转[CM]",
+    "server": "2491f7c8-tjm4g0-txdndl-1tvk5.cm4.oshuawei.com",
+    "server_port": 5228,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "美国ISP",
+    "server": "8b955aac-tjm4g0-txdndl-1tvk5.isp.cdnkuaishou.com",
+    "server_port": 8443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "anytls",
+    "tag": "美国洛杉矶3",
+    "server": "f2f110c4-tjm4g0-txdndl-1tvk5.los.hyhuawei.com",
+    "server_port": 443,
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true,
+      "insecure": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "美国洛杉矶2",
+    "server": "2b22422d-tjm4g0-txdndl-1tvk5.los.gotochinatown.net",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "socks",
+    "tag": "美国洛杉矶",
+    "server": "2b22422d-tjm4g0-txdndl-1tvk5.los.gotochinatown.net",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d"
+  },
+  {
+    "type": "http",
+    "tag": "美国圣何塞",
+    "server": "c252540d-tjm4g0-txdndl-1tvk5.sjc.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "美国硅谷3",
+    "server": "d976f21e-tjm4g0-txdndl-1tvk5.u12.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "http",
+    "tag": "美国硅谷2",
+    "server": "741fc158-tjm4g0-txdndl-1tvk5.sj.hyhuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "socks",
+    "tag": "美国硅谷",
+    "server": "ebe74834-tjm4g0-txdndl-1tvk5.sj.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d"
+  },
+  {
+    "type": "http",
+    "tag": "美国洛杉矶[CM]",
+    "server": "7cf2c042-tjm4g0-txdndl-1tvk5.us.oshuawei.com",
+    "server_port": 5228,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "type": "socks",
+    "tag": "美国西雅图2",
+    "server": "f2e367b8-tjm4g0-txdndl-1tvk5.sv.plebai.net",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d"
+  },
+  {
+    "type": "http",
+    "tag": "美国西雅图",
+    "server": "747b1300-tjm4g0-txdndl-1tvk5.se.oshuawei.com",
+    "server_port": 443,
+    "username": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "password": "23c8063e-2f0d-11f1-a667-f23c9164ca5d",
+    "tls": {
+      "enabled": true
+    }
+  }
+]

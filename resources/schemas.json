@@ -1,0 +1,32 @@
+{
+  "log": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "dns": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "inbounds": {
+    "type": "array"
+  },
+  "route": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "experimental": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "node": {
+    "type": "object",
+    "required": ["tag", "type", "server", "server_port"],
+    "properties": {
+      "tag": { "type": "string", "minLength": 1 },
+      "type": { "type": "string" },
+      "server": { "type": "string", "minLength": 1 },
+      "server_port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+    },
+    "additionalProperties": true
+  }
+}

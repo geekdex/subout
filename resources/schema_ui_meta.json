@@ -1,0 +1,75 @@
+{
+  "log": {
+    "title": "日志配置",
+    "icon": "📝",
+    "fields": {
+      "disabled": { "label": "禁用日志", "widget": "switch", "default": false },
+      "level": { "label": "日志级别", "widget": "select", "default": "warn" },
+      "timestamp": { "label": "显示时间戳", "widget": "switch", "default": true },
+      "output": { "label": "输出文件路径", "widget": "text", "placeholder": "/var/log/sing-box.log", "optional": true }
+    }
+  },
+  "dns": {
+    "title": "DNS 配置",
+    "icon": "🌐",
+    "fields": {
+      "strategy": { "label": "查询策略", "widget": "select", "default": "ipv4_only" },
+      "final": { "label": "默认 DNS 服务器", "widget": "text", "placeholder": "local-dns" },
+      "independent_cache": { "label": "独立缓存", "widget": "switch", "default": true },
+      "disable_cache": { "label": "禁用缓存", "widget": "switch", "default": false },
+      "reverse_mapping": { "label": "反向映射", "widget": "switch", "default": false }
+    },
+    "complexFields": {
+      "fakeip": { "type": "object", "label": "FakeIP 配置" },
+      "servers": { "type": "array", "label": "DNS 服务器列表" },
+      "rules": { "type": "array", "label": "DNS 规则" }
+    }
+  },
+  "inbounds": {
+    "title": "入站配置",
+    "icon": "📥",
+    "type": "array",
+    "itemFields": {
+      "tag": { "label": "入站标签", "widget": "text", "required": true },
+      "type": { "label": "入站类型", "widget": "select", "required": true },
+      "listen": { "label": "监听地址", "widget": "text", "default": "::" },
+      "listen_port": { "label": "监听端口", "widget": "number", "min": 1, "max": 65535 }
+    }
+  },
+  "route": {
+    "title": "路由配置",
+    "icon": "🛣️",
+    "fields": {
+      "final": { "label": "默认出站", "widget": "text", "placeholder": "direct", "required": true },
+      "auto_detect_interface": { "label": "自动检测接口", "widget": "switch", "default": true },
+      "default_domain_resolver": { "label": "默认域名解析器", "widget": "text", "optional": true }
+    },
+    "complexFields": {
+      "rule_set": { "type": "array", "label": "规则集" },
+      "rules": { "type": "array", "label": "路由规则" }
+    }
+  },
+  "experimental": {
+    "title": "实验性功能",
+    "icon": "🧪",
+    "fields": {
+      "cache_file.enabled": { "label": "启用缓存文件", "widget": "switch", "default": true },
+      "cache_file.store_fakeip": { "label": "存储 FakeIP", "widget": "switch", "default": true },
+      "cache_file.store_rdrc": { "label": "存储 RDRC", "widget": "switch", "default": true },
+      "clash_api.enabled": { "label": "启用 Clash API", "widget": "switch", "default": false },
+      "clash_api.external_controller": { "label": "API 监听地址", "widget": "text", "placeholder": "127.0.0.1:9090" }
+    }
+  },
+  "node": {
+    "title": "节点配置",
+    "icon": "🔗",
+    "fields": {
+      "tag": { "label": "节点名称", "widget": "text", "required": true },
+      "type": { "label": "协议类型", "widget": "select", "required": true },
+      "server": { "label": "服务器地址", "widget": "text", "required": true },
+      "server_port": { "label": "服务器端口", "widget": "number", "min": 1, "max": 65535, "required": true },
+      "uuid": { "label": "UUID", "widget": "text", "pattern": "uuid", "required_if": "type in ['vless', 'vmess', 'tuic']" },
+      "password": { "label": "密码", "widget": "password", "required_if": "type in ['trojan', 'shadowsocks']" }
+    }
+  }
+}
