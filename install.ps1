@@ -1,4 +1,3 @@
-```powershell
 # ==============================================================================
 # subout - Proxy Subscription Converter & Sing-box Web Panel
 # One-Click Install & Uninstall PowerShell Script for Windows
@@ -714,4 +713,3 @@ Write-Host "一键卸载命令 (PowerShell):" -ForegroundColor White
 Write-Host "  .\install.ps1 uninstall" -ForegroundColor Gray
 Write-Host "  .\install.ps1 uninstall -Purge" -ForegroundColor Gray
 Write-Host ""
-```

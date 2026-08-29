@@ -94,90 +94,58 @@ impl PlatformStrategy for WindowsPlatform {
         running_config_path: &Path,
     ) -> Vec<ConflictingProcessInfo> {
         let current_pid = std::process::id();
-        let config_path_str = running_config_path.to_string_lossy().to_string();
         let mut results: Vec<ConflictingProcessInfo> = Vec::new();
         let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
 
-        // 1. Primary: Use PowerShell to get full ProcessId, Name, CommandLine, and ExecutablePath
+        // 1. Primary: Use PowerShell + CIM with JSON serialization to safely inspect sing-box processes
         if let Ok(output) = std::process::Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or CommandLine like '%sing-box%'\" | ForEach-Object { \"$($_.ProcessId)|||$($_.Name)|||$($_.CommandLine)|||$($_.ExecutablePath)\" }",
+                "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or Name = 'singbox.exe' or Name = 'sing-box'\" | Select-Object ProcessId, ParentProcessId, Name, CommandLine, ExecutablePath | ConvertTo-Json -Compress",
             ])
             .output()
         {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let parts: Vec<&str> = trimmed.split("|||").collect();
-                    if parts.len() >= 2 {
-                        if let Ok(pid) = parts[0].trim().parse::<u32>() {
-                            if pid == current_pid || Some(pid) == managed_pid {
-                                continue;
-                            }
-                            let name = parts[1].trim().to_string();
-                            let cmdline = if parts.len() >= 3 && !parts[2].trim().is_empty() {
-                                Some(parts[2].trim().to_string())
-                            } else {
-                                None
-                            };
-                            let exe_path = if parts.len() >= 4 && !parts[3].trim().is_empty() {
-                                Some(parts[3].trim().to_string())
-                            } else {
-                                None
-                            };
-
-                            let is_subout = name.to_lowercase().contains("subout")
-                                || cmdline.as_deref().map(|c| {
-                                    let c_lower = c.to_lowercase();
-                                    c_lower.contains("subout") || c.contains(&config_path_str) || c.contains("sing-box-running.json")
-                                }).unwrap_or(false);
-
-                            if !is_subout && seen_pids.insert(pid) {
-                                results.push(ConflictingProcessInfo {
-                                    pid,
-                                    name,
-                                    cmdline,
-                                    exe_path,
-                                });
-                            }
-                        }
+                let items = parse_cim_process_json(&stdout);
+                let filtered = filter_conflicting_processes(items, current_pid, managed_pid, running_config_path);
+                for proc in filtered {
+                    if seen_pids.insert(proc.pid) {
+                        results.push(proc);
                     }
                 }
             }
         }
 
-        // 2. Secondary fallback: tasklist
+        // 2. Secondary fallback: tasklist if PowerShell returned nothing or failed
         if results.is_empty() {
-            if let Ok(output) = std::process::Command::new("tasklist")
-                .args(["/FI", "IMAGENAME eq sing-box.exe", "/FO", "CSV", "/NH"])
-                .output()
-            {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines() {
-                        let fields: Vec<String> = line
-                            .split(',')
-                            .map(|s| s.trim_matches('"').trim().to_string())
-                            .collect();
-                        if fields.len() >= 2 {
-                            if let Ok(pid) = fields[1].parse::<u32>() {
-                                if pid == current_pid || Some(pid) == managed_pid {
-                                    continue;
-                                }
-                                if seen_pids.insert(pid) {
-                                    results.push(ConflictingProcessInfo {
-                                        pid,
-                                        name: fields[0].clone(),
-                                        cmdline: None,
-                                        exe_path: None,
-                                    });
+            for img_name in &["sing-box.exe", "singbox.exe"] {
+                if let Ok(output) = std::process::Command::new("tasklist")
+                    .args(["/FI", &format!("IMAGENAME eq {}", img_name), "/FO", "CSV", "/NH"])
+                    .output()
+                {
+                    if output.status.success() {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        for line in stdout.lines() {
+                            let fields: Vec<String> = line
+                                .split(',')
+                                .map(|s| s.trim_matches('"').trim().to_string())
+                                .collect();
+                            if fields.len() >= 2 {
+                                if let Ok(pid) = fields[1].parse::<u32>() {
+                                    if pid == current_pid || Some(pid) == managed_pid || pid <= 4 {
+                                        continue;
+                                    }
+                                    if seen_pids.insert(pid) {
+                                        results.push(ConflictingProcessInfo {
+                                            pid,
+                                            name: fields[0].clone(),
+                                            cmdline: None,
+                                            exe_path: None,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -211,6 +179,7 @@ impl PlatformStrategy for WindowsPlatform {
         Box::pin(async move {
             let current_pid = std::process::id();
             let config_path_str = running_config_path.to_string_lossy().to_string();
+            let config_path_norm = config_path_str.replace('/', "\\");
             let mut pids_to_kill: Vec<u32> = Vec::new();
 
             if let Ok(output) = std::process::Command::new("powershell")
@@ -218,32 +187,36 @@ impl PlatformStrategy for WindowsPlatform {
                     "-NoProfile",
                     "-NonInteractive",
                     "-Command",
-                    "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or CommandLine like '%sing-box%'\" | ForEach-Object { \"$($_.ProcessId)|||$($_.ParentProcessId)|||$($_.CommandLine)\" }",
+                    "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or Name = 'singbox.exe' or Name = 'sing-box'\" | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json -Compress",
                 ])
                 .output()
             {
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines() {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() {
+                    let items = parse_cim_process_json(&stdout);
+
+                    for item in items {
+                        let pid = item.process_id.unwrap_or(0);
+                        let ppid = item.parent_process_id.unwrap_or(0);
+                        if pid == 0 || pid <= 4 || pid == current_pid || Some(pid) == exclude_pid {
                             continue;
                         }
-                        let parts: Vec<&str> = trimmed.split("|||").collect();
-                        if parts.len() >= 2 {
-                            if let (Ok(pid), Ok(ppid)) = (parts[0].trim().parse::<u32>(), parts[1].trim().parse::<u32>()) {
-                                if pid == current_pid || pid <= 4 || Some(pid) == exclude_pid {
-                                    continue;
-                                }
-                                let cmdline = if parts.len() >= 3 { parts[2].trim() } else { "" };
-                                let is_subout_instance = cmdline.contains(&config_path_str)
-                                    || cmdline.contains("sing-box-running.json")
-                                    || ppid == current_pid
-                                    || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
-                                if is_subout_instance {
-                                    pids_to_kill.push(pid);
-                                }
-                            }
+                        let name = item.name.unwrap_or_default().to_lowercase();
+                        if name.contains("powershell") || name.contains("pwsh") || name.contains("cmd") || name.contains("cargo") {
+                            continue;
+                        }
+                        let cmdline = item.command_line.unwrap_or_default();
+                        let cmdline_lower = cmdline.to_lowercase();
+                        let is_subout_instance = cmdline.contains(&config_path_str)
+                            || cmdline.contains(&config_path_norm)
+                            || cmdline_lower.contains("sing-box.json")
+                            || cmdline_lower.contains("sing-box-running.json")
+                            || cmdline_lower.contains("subout")
+                            || ppid == current_pid
+                            || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
+
+                        if is_subout_instance {
+                            pids_to_kill.push(pid);
                         }
                     }
                 }
@@ -265,7 +238,7 @@ impl PlatformStrategy for WindowsPlatform {
         Box::pin(async move {
             let pid_str = pid.to_string();
             let _ = tokio::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", "Stop-Service sing-box -ErrorAction SilentlyContinue; Stop-Service singbox -ErrorAction SilentlyContinue"])
+                .args(["-NoProfile", "-NonInteractive", "-Command", "Stop-Service sing-box -ErrorAction SilentlyContinue; Stop-Service singbox -ErrorAction SilentlyContinue"])
                 .output()
                 .await;
             let _ = tokio::process::Command::new("taskkill")
@@ -377,12 +350,24 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn standard_singbox_candidates(&self, binary_name: &str) -> Vec<PathBuf> {
-        vec![
+        let mut candidates = vec![
             PathBuf::from(format!(r"C:\Program Files\Subout\{}", binary_name)),
             PathBuf::from(format!(r"C:\Program Files\sing-box\{}", binary_name)),
             PathBuf::from(format!(r"C:\ProgramData\Subout\bin\{}", binary_name)),
             PathBuf::from(format!(r"C:\ProgramData\subout\bin\{}", binary_name)),
-        ]
+        ];
+
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local_app_data).join("Programs").join("sing-box").join(binary_name));
+        }
+        if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            candidates.push(PathBuf::from(user_profile).join("scoop").join("apps").join("sing-box").join("current").join(binary_name));
+        }
+        if let Ok(program_data) = std::env::var("ProgramData") {
+            candidates.push(PathBuf::from(program_data).join("chocolatey").join("bin").join(binary_name));
+        }
+
+        candidates
     }
 
     fn legacy_db_candidates(&self, _config_dir: &Path) -> Vec<PathBuf> {
@@ -411,6 +396,100 @@ impl PlatformStrategy for WindowsPlatform {
     }
 }
 
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct CimProcessItem {
+    #[serde(rename = "ProcessId")]
+    pub process_id: Option<u32>,
+    #[serde(rename = "ParentProcessId")]
+    pub parent_process_id: Option<u32>,
+    #[serde(rename = "Name")]
+    pub name: Option<String>,
+    #[serde(rename = "CommandLine")]
+    pub command_line: Option<String>,
+    #[serde(rename = "ExecutablePath")]
+    pub executable_path: Option<String>,
+}
+
+pub fn parse_cim_process_json(stdout: &str) -> Vec<CimProcessItem> {
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(list) = serde_json::from_str::<Vec<CimProcessItem>>(trimmed) {
+        list
+    } else if let Ok(single) = serde_json::from_str::<CimProcessItem>(trimmed) {
+        vec![single]
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn filter_conflicting_processes(
+    items: Vec<CimProcessItem>,
+    current_pid: u32,
+    managed_pid: Option<u32>,
+    running_config_path: &Path,
+) -> Vec<ConflictingProcessInfo> {
+    let config_path_str = running_config_path.to_string_lossy().to_string();
+    let config_path_norm = config_path_str.replace('/', "\\");
+    let mut results = Vec::new();
+    let mut seen_pids = std::collections::HashSet::new();
+
+    for item in items {
+        let pid = item.process_id.unwrap_or(0);
+        if pid == 0 || pid <= 4 || pid == current_pid || Some(pid) == managed_pid {
+            continue;
+        }
+
+        if let Some(ppid) = item.parent_process_id {
+            if ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid) {
+                continue;
+            }
+        }
+
+        let name = item.name.unwrap_or_default();
+        let name_lower = name.to_lowercase();
+        // Exclude Subout itself, parent build runners (cargo/rustc), and shells/system wrappers
+        if name_lower.contains("subout")
+            || name_lower.contains("powershell")
+            || name_lower.contains("pwsh")
+            || name_lower.contains("cmd")
+            || name_lower.contains("cargo")
+            || name_lower.contains("rustc")
+            || name_lower.contains("conhost")
+        {
+            continue;
+        }
+
+        let cmdline = item.command_line.clone();
+        let exe_path = item.executable_path.clone();
+
+        let is_subout_instance = cmdline.as_deref().map(|c| {
+            let c_lower = c.to_lowercase();
+            c_lower.contains("subout")
+                || c.contains(&config_path_str)
+                || c.contains(&config_path_norm)
+                || c_lower.contains("sing-box.json")
+                || c_lower.contains("sing-box-running.json")
+        }).unwrap_or(false);
+
+        if is_subout_instance {
+            continue;
+        }
+
+        if seen_pids.insert(pid) {
+            results.push(ConflictingProcessInfo {
+                pid,
+                name,
+                cmdline,
+                exe_path,
+            });
+        }
+    }
+
+    results
+}
+
 pub fn refresh_wininet_proxy() {
     let script = r#"
         $sig = @'
@@ -425,4 +504,140 @@ pub fn refresh_wininet_proxy() {
     let _ = std::process::Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script])
         .output();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_cim_process_json_empty_and_invalid() {
+        assert!(parse_cim_process_json("").is_empty());
+        assert!(parse_cim_process_json("   \n\t  ").is_empty());
+        assert!(parse_cim_process_json("invalid json").is_empty());
+    }
+
+    #[test]
+    fn test_parse_cim_process_json_single_object() {
+        let single_json = r#"{
+            "ProcessId": 2096,
+            "ParentProcessId": 1000,
+            "Name": "sing-box.exe",
+            "CommandLine": "sing-box.exe run -c C:\\conf.json",
+            "ExecutablePath": "C:\\Program Files\\sing-box\\sing-box.exe"
+        }"#;
+
+        let parsed = parse_cim_process_json(single_json);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].process_id, Some(2096));
+        assert_eq!(parsed[0].parent_process_id, Some(1000));
+        assert_eq!(parsed[0].name.as_deref(), Some("sing-box.exe"));
+        assert_eq!(parsed[0].command_line.as_deref(), Some("sing-box.exe run -c C:\\conf.json"));
+        assert_eq!(parsed[0].executable_path.as_deref(), Some("C:\\Program Files\\sing-box\\sing-box.exe"));
+    }
+
+    #[test]
+    fn test_parse_cim_process_json_array() {
+        let array_json = r#"[
+            {
+                "ProcessId": 1234,
+                "ParentProcessId": 500,
+                "Name": "sing-box.exe",
+                "CommandLine": "sing-box.exe run",
+                "ExecutablePath": "C:\\bin\\sing-box.exe"
+            },
+            {
+                "ProcessId": 5678,
+                "ParentProcessId": 500,
+                "Name": "singbox.exe",
+                "CommandLine": null,
+                "ExecutablePath": null
+            }
+        ]"#;
+
+        let parsed = parse_cim_process_json(array_json);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].process_id, Some(1234));
+        assert_eq!(parsed[1].process_id, Some(5678));
+        assert_eq!(parsed[1].name.as_deref(), Some("singbox.exe"));
+    }
+
+    #[test]
+    fn test_filter_conflicting_processes_ignores_powershell_and_tools() {
+        let items = vec![
+            CimProcessItem {
+                process_id: Some(2096),
+                parent_process_id: Some(100),
+                name: Some("powershell.exe".to_string()),
+                command_line: Some(r#""powershell" -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe'\"""#.to_string()),
+                executable_path: Some(r#"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"#.to_string()),
+            },
+            CimProcessItem {
+                process_id: Some(3000),
+                parent_process_id: Some(100),
+                name: Some("cargo.exe".to_string()),
+                command_line: Some("cargo run".to_string()),
+                executable_path: Some(r#"C:\Users\pan\.cargo\bin\cargo.exe"#.to_string()),
+            },
+            CimProcessItem {
+                process_id: Some(4000),
+                parent_process_id: Some(100),
+                name: Some("subout.exe".to_string()),
+                command_line: Some("subout.exe web".to_string()),
+                executable_path: Some(r#"C:\Subout\subout.exe"#.to_string()),
+            },
+        ];
+
+        let filtered = filter_conflicting_processes(items, 100, None, Path::new(r"C:\ProgramData\Subout\generated\sing-box.json"));
+        assert!(filtered.is_empty(), "All wrappers, powershell, cargo and subout processes must be filtered out");
+    }
+
+    #[test]
+    fn test_filter_conflicting_processes_ignores_managed_and_child_processes() {
+        let current_pid = 5000;
+        let managed_pid = 6000;
+        let config_path = Path::new(r"C:\Subout\generated\sing-box.json");
+
+        let items = vec![
+            // Subout's current process
+            CimProcessItem {
+                process_id: Some(current_pid),
+                parent_process_id: Some(100),
+                name: Some("subout.exe".to_string()),
+                command_line: Some("subout.exe".to_string()),
+                executable_path: None,
+            },
+            // Subout's managed child sing-box instance
+            CimProcessItem {
+                process_id: Some(managed_pid),
+                parent_process_id: Some(current_pid),
+                name: Some("sing-box.exe".to_string()),
+                command_line: Some(r#"sing-box.exe -D C:\Subout run -c C:\Subout\generated\sing-box.json"#.to_string()),
+                executable_path: Some(r#"C:\Subout\bin\sing-box.exe"#.to_string()),
+            },
+            // Another child of current_pid
+            CimProcessItem {
+                process_id: Some(7000),
+                parent_process_id: Some(current_pid),
+                name: Some("sing-box.exe".to_string()),
+                command_line: Some("sing-box.exe run".to_string()),
+                executable_path: None,
+            },
+            // Real external conflict (e.g. system service or user manual terminal launch)
+            CimProcessItem {
+                process_id: Some(8888),
+                parent_process_id: Some(1),
+                name: Some("sing-box.exe".to_string()),
+                command_line: Some(r#"sing-box.exe run -c C:\etc\sing-box\config.json"#.to_string()),
+                executable_path: Some(r#"C:\Program Files\sing-box\sing-box.exe"#.to_string()),
+            },
+        ];
+
+        let filtered = filter_conflicting_processes(items, current_pid, Some(managed_pid), config_path);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].pid, 8888);
+        assert_eq!(filtered[0].name, "sing-box.exe");
+        assert_eq!(filtered[0].cmdline.as_deref(), Some(r#"sing-box.exe run -c C:\etc\sing-box\config.json"#));
+        assert_eq!(filtered[0].exe_path.as_deref(), Some(r#"C:\Program Files\sing-box\sing-box.exe"#));
+    }
 }
