@@ -10,9 +10,12 @@ use crate::web::{AppState, check_auth};
 #[derive(Serialize)]
 pub struct SettingsResponse {
     pub is_password_env_set: bool,
-    pub has_sudo_pass: bool,
+    pub is_root: bool,
     pub os: String,
     pub is_linux: bool,
+    pub is_macos: bool,
+    pub binary_path: Option<String>,
+    pub has_saved_sudo_pass: bool,
 }
 
 pub async fn get_settings(
@@ -21,18 +24,20 @@ pub async fn get_settings(
 ) -> Result<Json<SettingsResponse>, StatusCode> {
     check_auth(&state, &headers).await?;
     let is_password_env_set = std::env::var("ADMIN_PASSWORD").is_ok();
-    let conn = crate::web::get_db_conn(&state.db_path)?;
-    let sudo_pass = db::get_setting(&conn, "running_sudo_pass")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .unwrap_or_default();
-    let has_sudo_pass = !sudo_pass.is_empty();
+    let is_root = crate::service::is_running_as_root();
     let os = std::env::consts::OS.to_string();
     let is_linux = cfg!(target_os = "linux");
+    let is_macos = cfg!(target_os = "macos");
+    let binary_path = crate::kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
+    let has_saved_sudo_pass = state.service_manager.has_saved_sudo_pass().await;
     Ok(Json(SettingsResponse {
         is_password_env_set,
-        has_sudo_pass,
+        is_root,
         os,
         is_linux,
+        is_macos,
+        binary_path,
+        has_saved_sudo_pass,
     }))
 }
 
@@ -45,14 +50,30 @@ pub async fn save_sudo_password(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<SudoPasswordRequest>,
-) -> Result<StatusCode, StatusCode> {
-    check_auth(&state, &headers).await?;
-    let conn = crate::web::get_db_conn(&state.db_path)?;
-    if payload.sudo_pass != "******" {
-        db::update_setting(&conn, "running_sudo_pass", &payload.sudo_pass)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    let trimmed = payload.sudo_pass.trim();
+    if trimmed.is_empty() {
+        state.service_manager.clear_saved_sudo_pass().await;
+        return Ok(Json(serde_json::json!({
+            "status": "success",
+            "message": "已清除已保存的 Sudo 密码"
+        })));
     }
-    Ok(StatusCode::OK)
+
+    state
+        .service_manager
+        .validate_and_save_sudo_pass(trimmed)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Sudo 密码验证失败: {}", e)))?;
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "message": "Sudo 密码已验证并永久保存"
+    })))
 }
 
 use crate::auto_update;
@@ -65,7 +86,6 @@ pub struct AutoUpdateSettingsRequest {
     pub interval: String,
     pub test_url: String,
     pub daily_time: Option<String>,
-    pub pre_command: Option<String>,
 }
 
 pub async fn get_auto_update_settings(
@@ -100,9 +120,6 @@ pub async fn get_auto_update_settings(
     let daily_time = db::get_setting(&conn, "auto_update_daily_time")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .unwrap_or_else(|| "04:00".to_string());
-    let pre_command = db::get_setting(&conn, "auto_update_pre_command")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .unwrap_or_default();
 
     if last_status == "running" {
         let last_run_secs: u64 = last_run.parse().unwrap_or(0);
@@ -136,7 +153,6 @@ pub async fn get_auto_update_settings(
         "last_log": last_log,
         "running_config_id": running_config_id,
         "daily_time": daily_time,
-        "pre_command": pre_command,
     })))
 }
 
@@ -229,14 +245,7 @@ pub async fn save_auto_update_settings(
         )
     })?;
 
-    let pre_command_val = payload.pre_command.clone().unwrap_or_default();
     db::update_setting(&conn, "auto_update_daily_time", &daily_time_val).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "更新设置失败".to_string(),
-        )
-    })?;
-    db::update_setting(&conn, "auto_update_pre_command", &pre_command_val).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "更新设置失败".to_string(),
@@ -328,8 +337,9 @@ pub async fn trigger_auto_update(
     }
 
     let db_path_clone = state.db_path.clone();
+    let service_mgr = state.service_manager.clone();
     tokio::spawn(async move {
-        if let Err(e) = auto_update::run_auto_update_process(&db_path_clone).await {
+        if let Err(e) = auto_update::run_auto_update_process(&db_path_clone, Some(service_mgr)).await {
             eprintln!("[AutoUpdate] Manually triggered update failed: {}", e);
         }
     });

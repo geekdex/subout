@@ -55,10 +55,23 @@ fn resolve_static_nodes_if_dynamic(
 pub async fn get_groups(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<db::OutboundGroup>>, StatusCode> {
-    check_auth(&state, &headers).await?;
-    let conn = get_db_conn(&state.db_path)?;
-    let groups = db::get_outbound_groups(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<Vec<db::OutboundGroup>>, (StatusCode, Json<serde_json::Value>)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|status| (status, Json(serde_json::json!({ "error": "未授权" }))))?;
+    let conn = get_db_conn(&state.db_path).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "数据库连接失败" })),
+        )
+    })?;
+    let groups = db::get_outbound_groups(&conn).map_err(|e| {
+        eprintln!("[groups::get_groups] Failed to query outbound_groups: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("获取出站分组列表失败: {}", e) })),
+        )
+    })?;
 
     Ok(Json(groups))
 }
@@ -67,15 +80,70 @@ pub async fn add_group(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<OutboundGroupRequest>,
-) -> Result<StatusCode, StatusCode> {
-    check_auth(&state, &headers).await?;
-    let conn = get_db_conn(&state.db_path)?;
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|status| (status, Json(serde_json::json!({ "error": "未授权" }))))?;
+    let conn = get_db_conn(&state.db_path).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "数据库连接失败" })),
+        )
+    })?;
+
+    let tag = payload.tag.trim();
+    if tag.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "保存分组失败，出站 Tag 名字不能为空" })),
+        ));
+    }
+
+    if tag.eq_ignore_ascii_case("direct")
+        || tag.eq_ignore_ascii_case("block")
+        || tag.eq_ignore_ascii_case("dns-out")
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能使用系统保留名称 '{}'", tag) })),
+        ));
+    }
+
+    let exists_in_groups: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM outbound_groups WHERE LOWER(tag) = LOWER(?1))",
+            [tag],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    if exists_in_groups {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 名字必须唯一 ('{}' 已存在于分流出站组)", tag) })),
+        ));
+    }
+
+    let exists_in_nodes: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE LOWER(tag) = LOWER(?1))",
+            [tag],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    if exists_in_nodes {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能与节点重名 ('{}' 已存在于节点池中)", tag) })),
+        ));
+    }
 
     let final_static_nodes = resolve_static_nodes_if_dynamic(&conn, &payload);
 
     db::save_outbound_group(
         &conn,
-        &payload.tag,
+        tag,
         &payload.group_type,
         payload.url.as_deref(),
         payload.interval.as_deref(),
@@ -86,13 +154,18 @@ pub async fn add_group(
         payload.include_keywords.as_deref(),
         payload.exclude_keywords.as_deref(),
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "保存出站组失败" })),
+        )
+    })?;
 
     let _ = db::log_history(
         &conn,
         "出站组管理",
         "添加出站组",
-        &format!("添加出站组: {}", payload.tag),
+        &format!("添加出站组: {}", tag),
         final_static_nodes.as_deref(),
     );
 
@@ -104,16 +177,71 @@ pub async fn update_group(
     headers: HeaderMap,
     Path(id): Path<i64>,
     Json(payload): Json<OutboundGroupRequest>,
-) -> Result<StatusCode, StatusCode> {
-    check_auth(&state, &headers).await?;
-    let conn = get_db_conn(&state.db_path)?;
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|status| (status, Json(serde_json::json!({ "error": "未授权" }))))?;
+    let conn = get_db_conn(&state.db_path).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "数据库连接失败" })),
+        )
+    })?;
+
+    let tag = payload.tag.trim();
+    if tag.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "保存分组失败，出站 Tag 名字不能为空" })),
+        ));
+    }
+
+    if tag.eq_ignore_ascii_case("direct")
+        || tag.eq_ignore_ascii_case("block")
+        || tag.eq_ignore_ascii_case("dns-out")
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能使用系统保留名称 '{}'", tag) })),
+        ));
+    }
+
+    let exists_in_groups: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM outbound_groups WHERE LOWER(tag) = LOWER(?1) AND id != ?2)",
+            rusqlite::params![tag, id],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    if exists_in_groups {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 名字必须唯一 ('{}' 已存在于分流出站组)", tag) })),
+        ));
+    }
+
+    let exists_in_nodes: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE LOWER(tag) = LOWER(?1))",
+            [tag],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    if exists_in_nodes {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能与节点重名 ('{}' 已存在于节点池中)", tag) })),
+        ));
+    }
 
     let final_static_nodes = resolve_static_nodes_if_dynamic(&conn, &payload);
 
     conn.execute(
         "UPDATE outbound_groups SET tag = ?, group_type = ?, url = ?, interval = ?, tolerance = ?, static_nodes = ?, node_types = ?, subscriptions = ?, include_keywords = ?, exclude_keywords = ? WHERE id = ?",
         rusqlite::params![
-            payload.tag,
+            tag,
             payload.group_type,
             payload.url,
             payload.interval,
@@ -125,13 +253,13 @@ pub async fn update_group(
             payload.exclude_keywords,
             id
         ],
-    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "更新出站组失败" }))))?;
 
     let _ = db::log_history(
         &conn,
         "出站组管理",
         "修改出站组",
-        &format!("修改出站组: {}", payload.tag),
+        &format!("修改出站组: {}", tag),
         final_static_nodes.as_deref(),
     );
 

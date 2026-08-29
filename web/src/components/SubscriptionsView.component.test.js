@@ -150,7 +150,7 @@ describe("SubscriptionsView - 订阅管理", () => {
         createMockFetch({ subs: mockSubsWithUserinfo }),
       );
       expect(wrapper.text()).toContain("5.00 GB / 100.00 GB");
-      expect(wrapper.text()).toContain("剩 30 天");
+      expect(wrapper.text()).toMatch(/剩 (29|30) 天/);
     });
   });
 

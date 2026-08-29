@@ -8,6 +8,12 @@ struct CliArgs {
     help: bool,
     web: bool,
     port: Option<u16>,
+    config_dir: Option<String>,
+    data_dir: Option<String>,
+    log_dir: Option<String>,
+    runtime_dir: Option<String>,
+    kernel_path: Option<String>,
+    portable: bool,
 }
 
 fn parse_args() -> Result<CliArgs, String> {
@@ -18,6 +24,12 @@ fn parse_args() -> Result<CliArgs, String> {
     let mut help = false;
     let mut web = false;
     let mut port = None;
+    let mut config_dir = None;
+    let mut data_dir = None;
+    let mut log_dir = None;
+    let mut runtime_dir = None;
+    let mut kernel_path = None;
+    let mut portable = false;
 
     // Check if the first argument is a subcommand 'web' or 'server'
     if let Some(arg) = std::env::args().nth(1) {
@@ -32,7 +44,7 @@ fn parse_args() -> Result<CliArgs, String> {
             "-h" | "--help" => {
                 help = true;
             }
-            "-v" => {
+            "-v" | "--verbose" => {
                 verbose = true;
             }
             "-s" => {
@@ -60,14 +72,55 @@ fn parse_args() -> Result<CliArgs, String> {
                     return Err("Error: Parameter '-p' requires a value.".to_string());
                 }
             }
+            "--data-dir" => {
+                if let Some(d) = args_iter.next() {
+                    data_dir = Some(d);
+                } else {
+                    return Err("Error: Parameter '--data-dir' requires a directory path.".to_string());
+                }
+            }
+            "--config-dir" => {
+                if let Some(c) = args_iter.next() {
+                    config_dir = Some(c);
+                } else {
+                    return Err("Error: Parameter '--config-dir' requires a directory path.".to_string());
+                }
+            }
+            "--log-dir" => {
+                if let Some(l) = args_iter.next() {
+                    log_dir = Some(l);
+                } else {
+                    return Err("Error: Parameter '--log-dir' requires a directory path.".to_string());
+                }
+            }
+            "--runtime-dir" => {
+                if let Some(r) = args_iter.next() {
+                    runtime_dir = Some(r);
+                } else {
+                    return Err("Error: Parameter '--runtime-dir' requires a directory path.".to_string());
+                }
+            }
+            "--portable" => {
+                portable = true;
+            }
+            "web" | "server" => {
+                web = true;
+            }
+            "--kernel-path" | "--singbox-path" => {
+                if let Some(k) = args_iter.next() {
+                    kernel_path = Some(k);
+                } else {
+                    return Err("Error: Parameter '--kernel-path' requires a file path.".to_string());
+                }
+            }
             other => {
                 return Err(format!("Error: Unknown option '{}'.", other));
             }
         }
     }
 
-    // If no arguments at all were provided, default to starting the web server.
-    if std::env::args().len() == 1 {
+    // If neither source nor output is provided and help was not requested, default to web mode
+    if source.is_none() && output.is_none() {
         web = true;
     }
 
@@ -78,6 +131,12 @@ fn parse_args() -> Result<CliArgs, String> {
         help,
         web,
         port,
+        config_dir,
+        data_dir,
+        log_dir,
+        runtime_dir,
+        kernel_path,
+        portable,
     })
 }
 
@@ -91,13 +150,19 @@ Usage:
   subout -h | --help                         Show this help menu.
 
 Required Parameters (CLI mode):
-  -s <source>   Original subscription link (HTTP/HTTPS URL), file path, or raw base64/plaintext content.
-  -o <output>   Output file path where the generated sing-box configuration will be saved.
+  -s <source>           Original subscription link (HTTP/HTTPS URL), file path, or raw base64/plaintext content.
+  -o <output>           Output file path where the generated sing-box configuration will be saved.
 
 Options:
-  -v            Show verbose execution logs and optimization recommendations.
-  -p, --port    Set the listening port for the web server (defaults to 1234 or PORT env var).
-  -h, --help    Show this help menu."
+  -v, --verbose         Show verbose execution logs and optimization recommendations.
+  -p, --port <port>     Set the listening port for the web server (defaults to 1234 or PORT env var).
+  --data-dir <dir>      Set custom data directory (stores subout.db, generated config, etc.).
+  --config-dir <dir>    Set custom configuration directory.
+  --log-dir <dir>       Set custom log directory.
+  --runtime-dir <dir>   Set custom runtime temporary data directory.
+  --portable            Run in portable mode (uses ./data, ./config, ./logs, ./run).
+  --kernel-path <path>  Set custom sing-box binary path.
+  -h, --help            Show this help menu."
     );
 }
 
@@ -117,16 +182,28 @@ async fn main() {
         return;
     }
 
+    // Initialize global paths with CLI overrides
+    subout::paths::AppPaths::init(
+        args.config_dir.as_ref().map(std::path::PathBuf::from),
+        args.data_dir.as_ref().map(std::path::PathBuf::from),
+        args.log_dir.as_ref().map(std::path::PathBuf::from),
+        args.runtime_dir.as_ref().map(std::path::PathBuf::from),
+        args.kernel_path.as_ref().map(std::path::PathBuf::from),
+        args.portable,
+    );
+
     if args.web {
         if let Err(e) = subout::web::run_server(args.port).await {
             eprintln!("Web server error: {}", e);
             std::process::exit(1);
         }
+        std::process::exit(0);
     } else {
         if let Err(e) = run(args).await {
             eprintln!("{}", e);
             std::process::exit(1);
         }
+        std::process::exit(0);
     }
 }
 

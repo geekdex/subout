@@ -80,17 +80,23 @@
                     getRunningConfigName(runningConfig.config_id)
                   }})</span
                 ><span v-else style="color: var(--text-muted)">未设定</span> |
-                配置文件：<span
-                  v-if="runningConfig.config_path"
-                  style="
-                    font-family: var(--font-mono);
-                    font-size: 0.8rem;
-                    background: rgba(0, 0, 0, 0.15);
-                    padding: 1px 4px;
-                    border-radius: 3px;
-                  "
-                  >{{ runningConfig.config_path }}</span
-                ><span v-else style="color: var(--text-muted)">未设定</span>
+                sing-box 内核：<span
+                  v-if="runningConfig.kernel_installed"
+                  style="color: var(--success); font-weight: 500"
+                  >已就绪
+                  {{
+                    runningConfig.kernel_version
+                      ? `(${runningConfig.kernel_version})`
+                      : ""
+                  }}</span
+                ><span v-else style="color: var(--danger); font-weight: 500"
+                  >未安装</span
+                >
+                | 服务状态：<span
+                  v-if="runningConfig.is_service_running"
+                  style="color: var(--success); font-weight: 500"
+                  >运行中</span
+                ><span v-else style="color: var(--text-muted)">已停止</span>
               </p>
             </div>
           </div>
@@ -736,7 +742,8 @@
                                       min-width: 60px;
                                       padding: 0.15rem 0.3rem;
                                     "
-                                    placeholder="网卡名 (tun0)"
+                                    :disabled="isApplePlatform || isWindowsPlatform"
+                                    :placeholder="isApplePlatform ? '系统自动分配 (utun)' : (isWindowsPlatform ? '系统自动分配 (wintun)' : '网卡名 (tun0)')"
                                   />
                                   <select
                                     v-model="inb.stack"
@@ -2243,7 +2250,7 @@
                           >
                           <button
                             v-for="b in browserPresets"
-                            :key="b.name"
+                            :key="b.label"
                             type="button"
                             class="btn btn-xs btn-secondary"
                             style="padding: 0.15rem 0.4rem; font-size: 0.75rem"
@@ -2260,6 +2267,21 @@
                         style="height: 80px"
                         :placeholder="processNamePlaceholder"
                       ></textarea>
+                      <div
+                        style="
+                          font-size: 0.75rem;
+                          color: var(--text-muted);
+                          margin-top: 0.25rem;
+                        "
+                      >
+                        {{
+                          isApplePlatform
+                            ? "提示：填入 macOS 进程名称（例如 Google Chrome、Microsoft Edge、firefox、Safari 等，Chromium 系建议同时包含 Helper），支持多个程序按行分隔。"
+                            : isWindowsPlatform
+                              ? "提示：填入 Windows 进程可执行文件名（例如 chrome.exe、firefox.exe、msedge.exe 等），支持多个程序按行分隔。"
+                              : "提示：填入 Linux 进程可执行文件名（例如 chrome、firefox、msedge 等），支持多个程序按行分隔。"
+                        }}
+                      </div>
                     </div>
                     <div class="input-group">
                       <label>进程绝对路径 (process_path, 每行一例)</label>
@@ -2375,9 +2397,15 @@
                       v-model="itemModal.itemData.interface_name"
                       type="text"
                       class="input-control"
-                      placeholder="tun0"
-                      required
+                      :disabled="isApplePlatform || isWindowsPlatform"
+                      :placeholder="isApplePlatform ? '系统自动分配 (utun)' : (isWindowsPlatform ? '系统自动分配 (wintun)' : 'tun0')"
                     />
+                    <small v-if="isApplePlatform" style="color: var(--text-muted); margin-top: 4px; display: block;">
+                      📌 macOS 虚拟网卡由系统内核自动挂载命名为 utun，固定为系统自动分配。
+                    </small>
+                    <small v-else-if="isWindowsPlatform" style="color: var(--text-muted); margin-top: 4px; display: block;">
+                      📌 Windows Wintun 虚拟网卡由系统内核自动挂载命名，固定为系统自动分配。
+                    </small>
                   </div>
                   <div class="input-group">
                     <label>网络协议栈 (stack)</label>
@@ -2599,7 +2627,7 @@
                     >
                     <button
                       v-for="b in browserPresets"
-                      :key="b.name"
+                      :key="b.label"
                       type="button"
                       class="btn btn-xs btn-secondary"
                       style="padding: 0.15rem 0.4rem; font-size: 0.75rem"
@@ -2624,9 +2652,11 @@
                   "
                 >
                   {{
-                    isLinux
-                      ? "提示：填入 Linux 进程可执行文件名（例如 chrome、firefox、msedge 等），支持多个程序按行分隔。"
-                      : "提示：填入进程可执行文件名（例如 chrome、firefox 等），支持多个程序按行分隔。"
+                    isApplePlatform
+                      ? "提示：填入 macOS 进程名称（例如 Google Chrome、Microsoft Edge、firefox、Safari 等，Chromium 系建议同时包含 Helper），支持多个程序按行分隔。"
+                      : isWindowsPlatform
+                        ? "提示：填入 Windows 进程可执行文件名（例如 chrome.exe、firefox.exe、msedge.exe 等），支持多个程序按行分隔。"
+                        : "提示：填入 Linux 进程可执行文件名（例如 chrome、firefox、msedge 等），支持多个程序按行分隔。"
                   }}
                 </div>
               </div>
@@ -3448,10 +3478,45 @@
             v-if="runningConfigModal.viewMode === 'form'"
             style="display: flex; flex-direction: column; gap: 1rem"
           >
+            <!-- Kernel missing warning -->
+            <div
+              v-if="!runningConfig.kernel_installed"
+              style="
+                padding: 0.75rem 1rem;
+                border-radius: 8px;
+                background: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.25);
+                font-size: 0.85rem;
+                line-height: 1.5;
+                color: #ef4444;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+              "
+            >
+              <span>⚠️</span>
+              <div>
+                <strong>未检测到 sing-box 内核:</strong>
+                <span>
+                  系统必须安装 sing-box 内核才能启动服务。请前往
+                  <a
+                    href="#dashboard"
+                    style="
+                      color: inherit;
+                      text-decoration: underline;
+                      font-weight: 600;
+                    "
+                    >仪表盘</a
+                  >
+                  一键下载安装内核。</span
+                >
+              </div>
+            </div>
+
             <div class="input-group">
               <label
                 style="font-weight: 600; margin-bottom: 0.35rem; display: block"
-                >选择运行配置</label
+                >选择运行配置模板</label
               >
               <select
                 v-model="runningConfigForm.config_id"
@@ -3469,75 +3534,24 @@
               </select>
             </div>
 
-            <div class="input-group">
-              <label
-                style="font-weight: 600; margin-bottom: 0.35rem; display: block"
-                >配置文件覆盖位置</label
-              >
-              <input
-                v-model="runningConfigForm.config_path"
-                type="text"
-                class="input-control"
-                style="width: 100%"
-                placeholder="例如: /etc/sing-box/config.json"
-              />
-              <small
-                style="
-                  color: var(--text-muted);
-                  font-size: 0.8rem;
-                  margin-top: 0.25rem;
-                  display: block;
-                "
-              >
-                请填写绝对路径，目标位置若无写权限可配合下方 sudo 密码使用。
-              </small>
-            </div>
-
-            <div class="input-group">
-              <label
-                style="font-weight: 600; margin-bottom: 0.35rem; display: block"
-                >重启命令</label
-              >
-              <input
-                v-model="runningConfigForm.restart_cmd"
-                type="text"
-                class="input-control"
-                style="width: 100%"
-                placeholder="例如: sudo systemctl restart sing-box"
-              />
-              <small
-                style="
-                  color: var(--text-muted);
-                  font-size: 0.8rem;
-                  margin-top: 0.25rem;
-                  display: block;
-                "
-              >
-                系统执行重启的 Shell 命令，留空则不执行。
-              </small>
-            </div>
-
+            <!-- Sing-Box core service description -->
             <div
               style="
+                padding: 0.75rem;
+                border-radius: 8px;
+                background: rgba(99, 102, 241, 0.08);
+                border: 1px solid rgba(99, 102, 241, 0.2);
                 font-size: 0.85rem;
-                color: var(--text-muted);
-                margin-top: 0.5rem;
-                display: flex;
-                align-items: center;
-                gap: 0.25rem;
+                line-height: 1.5;
+                color: var(--text-main);
               "
             >
-              <span>💡 提示: Sudo 密码为全局设置，请前往</span>
-              <a
-                href="#settings"
-                style="
-                  color: var(--primary);
-                  text-decoration: underline;
-                  font-weight: 500;
-                "
-                >系统设置</a
-              >
-              <span>进行配置。</span>
+              <div>🚀 <strong>sing-box 核心服务模式说明:</strong></div>
+              <div style="color: var(--text-muted); margin-top: 0.25rem">
+                Subout 统一基于 sing-box
+                官方核心内核拉起、重载并维护本地服务进程。全平台（Linux /
+                Windows / macOS）操作体验一致，免去配置外部命令行与权限提升。
+              </div>
             </div>
           </div>
 
@@ -5281,6 +5295,9 @@ import {
   showToast,
   confirmDialog,
   promptDialog,
+  sessionSudoPassword,
+  setSessionSudoPassword,
+  systemModeInfo,
 } from "../store.js";
 import { validateData } from "../validator.js";
 import { filterGroupsByQuery, clearSearchQuery } from "../utils/groupImport.js";
@@ -5337,9 +5354,9 @@ const showAdvancedDnsFields = ref(false);
 
 const runningConfig = reactive({
   config_id: null,
-  config_path: "",
-  restart_cmd: "",
-  has_sudo_pass: false,
+  is_service_running: false,
+  kernel_installed: false,
+  kernel_version: null,
 });
 
 const runningConfigModal = reactive({
@@ -5355,66 +5372,135 @@ const logConsoleRef = ref(null);
 
 const runningConfigForm = reactive({
   config_id: null,
-  config_path: "",
-  restart_cmd: "",
 });
 
 // 当前运行 subout 服务的宿主机操作系统环境（由 /api/system/info 接口获取，默认预设为 'linux'）
 const systemOs = ref("linux");
 const isLinux = computed(() => systemOs.value === "linux");
+const isApplePlatform = computed(
+  () => systemOs.value === "macos" || systemOs.value === "darwin",
+);
+const isWindowsPlatform = computed(
+  () => systemOs.value === "windows",
+);
 
 const browserPresets = computed(() => {
-  const isWin = systemOs.value === "windows";
+  const isWin = isWindowsPlatform.value;
+  const isApple = isApplePlatform.value;
+
+  if (isApple) {
+    return [
+      {
+        label: "🌐 Chrome",
+        name: ["Google Chrome", "Google Chrome Helper"],
+        title: "添加 Chrome 浏览器进程 (Google Chrome / Helper)",
+      },
+      {
+        label: "🦊 Firefox",
+        name: "firefox",
+        title: "添加 Firefox 浏览器进程 (firefox)",
+      },
+      {
+        label: "🌐 Edge",
+        name: ["Microsoft Edge", "Microsoft Edge Helper"],
+        title: "添加 Edge 浏览器进程 (Microsoft Edge / Helper)",
+      },
+      {
+        label: "🧭 Safari",
+        name: ["Safari", "com.apple.WebKit.Networking"],
+        title: "添加 Safari 浏览器进程 (Safari / WebKit)",
+      },
+      {
+        label: "🦁 Brave",
+        name: ["Brave Browser", "Brave Browser Helper"],
+        title: "添加 Brave 浏览器进程 (Brave Browser / Helper)",
+      },
+      {
+        label: "🌐 Chromium",
+        name: ["Chromium", "Chromium Helper"],
+        title: "添加 Chromium 浏览器进程 (Chromium / Helper)",
+      },
+    ];
+  }
+
+  if (isWin) {
+    return [
+      {
+        label: "🌐 Chrome",
+        name: "chrome.exe",
+        title: "添加 Chrome 浏览器进程 (chrome.exe)",
+      },
+      {
+        label: "🦊 Firefox",
+        name: "firefox.exe",
+        title: "添加 Firefox 浏览器进程 (firefox.exe)",
+      },
+      {
+        label: "🌐 Edge",
+        name: "msedge.exe",
+        title: "添加 Edge 浏览器进程 (msedge.exe)",
+      },
+      {
+        label: "🦁 Brave",
+        name: "brave.exe",
+        title: "添加 Brave 浏览器进程 (brave.exe)",
+      },
+      {
+        label: "🌐 Chromium",
+        name: "chromium.exe",
+        title: "添加 Chromium 浏览器进程 (chromium.exe)",
+      },
+    ];
+  }
+
   return [
     {
       label: "🌐 Chrome",
-      name: isWin ? "chrome.exe" : "chrome",
-      title: isWin
-        ? "添加 Chrome 浏览器进程 (chrome.exe)"
-        : "添加 Chrome 浏览器进程 (chrome)",
+      name: "chrome",
+      title: "添加 Chrome 浏览器进程 (chrome)",
     },
     {
       label: "🦊 Firefox",
-      name: isWin ? "firefox.exe" : "firefox",
-      title: isWin
-        ? "添加 Firefox 浏览器进程 (firefox.exe)"
-        : "添加 Firefox 浏览器进程 (firefox)",
+      name: "firefox",
+      title: "添加 Firefox 浏览器进程 (firefox)",
     },
     {
       label: "🌐 Edge",
-      name: isWin ? "msedge.exe" : "msedge",
-      title: isWin
-        ? "添加 Edge 浏览器进程 (msedge.exe)"
-        : "添加 Edge 浏览器进程 (msedge)",
+      name: "msedge",
+      title: "添加 Edge 浏览器进程 (msedge)",
     },
     {
       label: "🦁 Brave",
-      name: isWin ? "brave.exe" : "brave",
-      title: isWin
-        ? "添加 Brave 浏览器进程 (brave.exe)"
-        : "添加 Brave 浏览器进程 (brave)",
+      name: "brave",
+      title: "添加 Brave 浏览器进程 (brave)",
     },
     {
       label: "🌐 Chromium",
-      name: isWin ? "chromium.exe" : "chromium",
-      title: isWin
-        ? "添加 Chromium 浏览器进程 (chromium.exe)"
-        : "添加 Chromium 浏览器进程 (chromium)",
+      name: "chromium",
+      title: "添加 Chromium 浏览器进程 (chromium)",
     },
   ];
 });
 
-const processNamePlaceholder = computed(() =>
-  systemOs.value === "windows"
-    ? "chrome.exe\nfirefox.exe\nmsedge.exe"
-    : "chrome\nfirefox\nmsedge",
-);
+const processNamePlaceholder = computed(() => {
+  if (isApplePlatform.value) {
+    return "Google Chrome\nMicrosoft Edge\nfirefox\nSafari";
+  }
+  if (isWindowsPlatform.value) {
+    return "chrome.exe\nfirefox.exe\nmsedge.exe";
+  }
+  return "chrome\nfirefox\nmsedge";
+});
 
-const processPathPlaceholder = computed(() =>
-  systemOs.value === "windows"
-    ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-    : "/opt/google/chrome/chrome\n/usr/lib/firefox/firefox",
-);
+const processPathPlaceholder = computed(() => {
+  if (isApplePlatform.value) {
+    return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+  }
+  if (isWindowsPlatform.value) {
+    return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\nC:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+  }
+  return "/opt/google/chrome/chrome\n/usr/lib/firefox/firefox";
+});
 
 const fetchSystemInfo = async () => {
   try {
@@ -6991,6 +7077,7 @@ const confirmImport = async () => {
 
     if (!isLinux.value && Array.isArray(inboundsSec)) {
       let hadAutoRedirect = false;
+      let hadInvalidInterfaceName = false;
       inboundsSec.forEach((inb) => {
         if (
           inb &&
@@ -7000,11 +7087,28 @@ const confirmImport = async () => {
           delete inb.auto_redirect;
           hadAutoRedirect = true;
         }
+        if (inb && typeof inb === "object" && inb.type === "tun") {
+          if (
+            inb.interface_name === "tun0" ||
+            (isApplePlatform.value &&
+              inb.interface_name &&
+              !inb.interface_name.startsWith("utun"))
+          ) {
+            inb.interface_name = "";
+            hadInvalidInterfaceName = true;
+          }
+        }
       });
       if (hadAutoRedirect) {
         showToast(
           "检测到导入配置中包含「自动重定向 (auto_redirect)」，当前系统非 Linux，该配置将被忽略并已自动删除。",
           "warning",
+        );
+      }
+      if (hadInvalidInterfaceName) {
+        showToast(
+          "检测到导入配置中 TUN 网卡名称在当前系统不兼容，已自动重置为系统自动分配。",
+          "info",
         );
       }
     }
@@ -7870,7 +7974,11 @@ const onModalDnsServerTypeChange = () => {
 
 const onInboundTypeChange = (inb) => {
   if (inb.type === "tun") {
-    inb.interface_name = inb.interface_name || "tun0";
+    if (isApplePlatform.value || isWindowsPlatform.value) {
+      inb.interface_name = "";
+    } else {
+      inb.interface_name = inb.interface_name || "tun0";
+    }
     inb.stack = inb.stack || "gvisor";
     inb.auto_route = inb.auto_route !== false;
     delete inb.listen;
@@ -9002,9 +9110,9 @@ const loadRunningConfigSettings = async () => {
     if (res.ok) {
       const data = await res.json();
       runningConfig.config_id = data.config_id;
-      runningConfig.config_path = data.config_path;
-      runningConfig.restart_cmd = data.restart_cmd;
-      runningConfig.has_sudo_pass = data.has_sudo_pass;
+      runningConfig.is_service_running = !!data.is_service_running;
+      runningConfig.kernel_installed = !!data.kernel_installed;
+      runningConfig.kernel_version = data.kernel_version;
     }
   } catch (e) {
     console.error("加载运行设置失败", e);
@@ -9025,8 +9133,6 @@ const copyLogConsole = () => {
 
 const openRunningConfigModal = () => {
   runningConfigForm.config_id = runningConfig.config_id;
-  runningConfigForm.config_path = runningConfig.config_path;
-  runningConfigForm.restart_cmd = runningConfig.restart_cmd;
   runningConfigModal.viewMode = "form";
   runningConfigModal.status = "idle";
   runningConfigModal.logs = [];
@@ -9102,14 +9208,18 @@ const scrollToLogBottom = () => {
   });
 };
 
-const saveRunningConfigSettings = async (executeUpdate) => {
+const saveRunningConfigSettings = async (
+  executeUpdate,
+  customSudoPass = null,
+) => {
+  let sudoPass =
+    typeof customSudoPass === "string"
+      ? customSudoPass.trim()
+      : sessionSudoPassword.value || null;
+
   if (executeUpdate) {
     if (!runningConfigForm.config_id) {
-      showToast("请先选择要运行的配置", "danger");
-      return;
-    }
-    if (!runningConfigForm.config_path.trim()) {
-      showToast("配置文件覆盖位置不能为空", "danger");
+      showToast("请先选择要运行的配置模板", "danger");
       return;
     }
 
@@ -9120,7 +9230,7 @@ const saveRunningConfigSettings = async (executeUpdate) => {
       {
         step: "初始化",
         status: "info",
-        message: "正在初始化运行配置更新流程...",
+        message: "正在初始化 sing-box 运行配置更新流程...",
         timestamp: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
       },
     ];
@@ -9140,10 +9250,8 @@ const saveRunningConfigSettings = async (executeUpdate) => {
       },
       body: JSON.stringify({
         config_id: runningConfigForm.config_id,
-        config_path: runningConfigForm.config_path,
-        restart_cmd: runningConfigForm.restart_cmd,
-        sudo_pass: null,
         execute_update: executeUpdate,
+        sudo_pass: sudoPass,
       }),
     });
 
@@ -9159,17 +9267,58 @@ const saveRunningConfigSettings = async (executeUpdate) => {
 
         if (data.status === "success") {
           runningConfigModal.status = "success";
-          runningConfigModal.message = data.message || "运行配置更新成功！";
+          runningConfigModal.message =
+            data.message || "运行配置更新成功，服务已重启！";
           showToast("运行配置更新成功！");
+          if (sudoPass) {
+            setSessionSudoPassword(sudoPass);
+          }
           await loadRunningConfigSettings();
         } else {
           runningConfigModal.status = "failed";
           runningConfigModal.message = data.message || "运行配置更新失败";
-          showToast("运行配置更新失败，请查看日志", "danger");
+          const errLower = (data.message || "").toLowerCase();
+          const isPermissionErr =
+            errLower.includes("sudo 密码") ||
+            errLower.includes("root") ||
+            errLower.includes("权限") ||
+            errLower.includes("tun") ||
+            errLower.includes("tunsetiff") ||
+            errLower.includes("operation not permitted") ||
+            errLower.includes("permission denied");
+
+          if (isPermissionErr) {
+            setSessionSudoPassword("");
+            if (systemModeInfo.value) {
+              systemModeInfo.value.has_saved_sudo = false;
+            }
+            const isWrongPass =
+              errLower.includes("密码不正确") ||
+              errLower.includes("incorrect password") ||
+              errLower.includes("authentication failure");
+            const promptMsg = isWrongPass
+              ? "❌ 输入的 Sudo 密码不正确或已失效，请重新输入系统管理员密码（保存后将免去重复输入）："
+              : "🛡️ 应用运行配置（TUN 虚拟网卡）需要系统管理员权限。\n\n请输入系统 Sudo / 管理员密码（输入后将自动保存以实现一劳永逸）：";
+            const pass = await promptDialog(promptMsg, "", {
+              title: "需要管理员权限",
+              confirmText: "授权并保存更新",
+              inputType: "password",
+              inputPlaceholder: "输入系统 Sudo 密码",
+            });
+            if (pass !== null && pass.trim()) {
+              setSessionSudoPassword(pass.trim());
+              await saveRunningConfigSettings(true, pass.trim());
+              return;
+            } else {
+              showToast("已取消管理员提权授权", "warning");
+            }
+          } else {
+            showToast(data.message || "运行配置更新失败，请查看日志", "danger");
+          }
         }
         scrollToLogBottom();
       } else {
-        showToast("设置保存成功！");
+        showToast("运行配置设置保存成功！");
         await loadRunningConfigSettings();
         closeRunningConfigModal();
       }
@@ -9243,10 +9392,18 @@ const appendPresetProcess = (procName) => {
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (!lines.includes(procName)) {
-    lines.push(procName);
-    itemModal.tempFields.process_name = lines.join("\n");
+  const toAdd = Array.isArray(procName)
+    ? procName
+    : String(procName)
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+  for (const item of toAdd) {
+    if (!lines.includes(item)) {
+      lines.push(item);
+    }
   }
+  itemModal.tempFields.process_name = lines.join("\n");
 };
 
 const openSyncModal = (rule, sourceSection, index) => {

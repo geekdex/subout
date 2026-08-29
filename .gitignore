@@ -4,3 +4,7 @@ web/dist
 .playwright-mcp
 .idea
 .env
+/runtime/
+/runtime
+*.db
+.temp_singbox_*

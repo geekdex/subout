@@ -1,0 +1,717 @@
+```powershell
+# ==============================================================================
+# subout - Proxy Subscription Converter & Sing-box Web Panel
+# One-Click Install & Uninstall PowerShell Script for Windows
+# ==============================================================================
+
+[CmdletBinding(DefaultParameterSetName = "Default")]
+param (
+    [Parameter(Position = 0)]
+    [ValidateSet("install", "uninstall", "help")]
+    [string]$Action = "install",
+
+    [int]$Port = 1234,
+    [string]$BinPath = "",
+    [string]$BinDir = "C:\Program Files\Subout",
+    [string]$DataDir = "C:\ProgramData\Subout",
+    [switch]$NoService,
+    [switch]$Uninstall,
+    [switch]$Purge,
+    [switch]$Help
+)
+
+$ErrorActionPreference = "Stop"
+
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
+
+function Show-Help {
+    Write-Host "subout 一键安装与管理脚本 (Windows PowerShell)" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "用法:"
+    Write-Host "  .\install.ps1 [install|uninstall] [-Port <port>] [-BinPath <path>] [-NoService] [-Purge]"
+    Write-Host ""
+    Write-Host "也支持:"
+    Write-Host "  irm https://raw.githubusercontent.com/geekdex/subout/main/install.ps1 | iex"
+    Write-Host ""
+    Write-Host "命令:"
+    Write-Host "  install            安装 subout 并注册 Windows 服务 (默认命令)"
+    Write-Host "  uninstall          卸载 subout 并停止/注销 Windows 服务"
+    Write-Host ""
+    Write-Host "参数:"
+    Write-Host "  -Port <int>        指定 Web 面板监听端口 (默认: 1234)"
+    Write-Host "  -BinPath <string>  指定本地 subout.exe 可执行文件路径"
+    Write-Host "  -BinDir <string>   自定义安装目录 (默认: C:\Program Files\Subout)"
+    Write-Host "  -DataDir <string>  自定义数据目录 (默认: C:\ProgramData\Subout)"
+    Write-Host "  -NoService         仅安装二进制文件，不注册 Windows 服务"
+    Write-Host "  -Uninstall         卸载模式 (等同于 uninstall 命令)"
+    Write-Host "  -Purge             卸载时彻底删除数据、日志与配置"
+    Write-Host "  -Help              显示帮助信息"
+    Write-Host ""
+}
+
+function Test-IsAdmin {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+
+    return $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+function Add-Argument {
+    param (
+        [System.Collections.Generic.List[string]]$List,
+        [string]$Name,
+        [string]$Value
+    )
+
+    $List.Add($Name)
+
+    if ($Value -match '\s') {
+        $List.Add("`"$Value`"")
+    }
+    else {
+        $List.Add($Value)
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 1. Help
+# ------------------------------------------------------------------------------
+
+if ($Help -or $Action -eq "help") {
+    Show-Help
+    exit 0
+}
+
+# ------------------------------------------------------------------------------
+# 2. Normalize action
+# ------------------------------------------------------------------------------
+
+if ($Action -eq "uninstall") {
+    $Uninstall = $true
+}
+
+# ------------------------------------------------------------------------------
+# 3. Require Administrator Privileges
+#
+# Supports both:
+#
+#   .\install.ps1
+#
+# and:
+#
+#   irm https://raw.githubusercontent.com/geekdex/subout/main/install.ps1 | iex
+#
+# For irm | iex there is no physical script path. In that case we download
+# the current install.ps1 into %TEMP% and execute that physical file elevated.
+# ------------------------------------------------------------------------------
+
+if (-not (Test-IsAdmin)) {
+    Write-Host "[提示] 需要管理员权限，正在请求 UAC 提权..." -ForegroundColor Yellow
+
+    $scriptPath = $MyInvocation.MyCommand.Path
+    $temporaryScript = $false
+
+    # Normal local execution
+    if ($scriptPath -and (Test-Path -LiteralPath $scriptPath)) {
+        $elevatedScriptPath = $scriptPath
+    }
+    else {
+        # irm | iex execution
+        $elevatedScriptPath = Join-Path `
+            $env:TEMP `
+            "subout-install-$([Guid]::NewGuid().ToString('N')).ps1"
+
+        try {
+            $scriptUrl = "https://raw.githubusercontent.com/geekdex/subout/main/install.ps1"
+
+            Write-Host "[提示] 当前通过远程脚本执行，正在准备临时安装文件..." -ForegroundColor Gray
+
+            Invoke-WebRequest `
+                -Uri $scriptUrl `
+                -OutFile $elevatedScriptPath `
+                -UseBasicParsing `
+                -ErrorAction Stop
+
+            $temporaryScript = $true
+        }
+        catch {
+            Write-Host ""
+            Write-Host "错误: 无法下载安装脚本。" -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    # Build arguments
+    $argumentList = New-Object System.Collections.Generic.List[string]
+
+    $argumentList.Add("-NoProfile")
+    $argumentList.Add("-ExecutionPolicy")
+    $argumentList.Add("Bypass")
+    $argumentList.Add("-File")
+    $argumentList.Add("`"$elevatedScriptPath`"")
+
+    if ($Uninstall) {
+        $argumentList.Add("uninstall")
+    }
+    else {
+        $argumentList.Add("install")
+    }
+
+    if ($Purge) {
+        $argumentList.Add("-Purge")
+    }
+
+    if ($NoService) {
+        $argumentList.Add("-NoService")
+    }
+
+    if ($Port -ne 1234) {
+        Add-Argument -List $argumentList -Name "-Port" -Value ([string]$Port)
+    }
+
+    if ($BinPath) {
+        Add-Argument -List $argumentList -Name "-BinPath" -Value $BinPath
+    }
+
+    if ($BinDir -ne "C:\Program Files\Subout") {
+        Add-Argument -List $argumentList -Name "-BinDir" -Value $BinDir
+    }
+
+    if ($DataDir -ne "C:\ProgramData\Subout") {
+        Add-Argument -List $argumentList -Name "-DataDir" -Value $DataDir
+    }
+
+    try {
+        Start-Process `
+            -FilePath "powershell.exe" `
+            -Verb RunAs `
+            -ArgumentList ($argumentList -join " ") `
+            -Wait `
+            -ErrorAction Stop
+    }
+    catch {
+        Write-Host ""
+        Write-Host "错误: UAC 提权失败。" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        exit 1
+    }
+    finally {
+        if (
+            $temporaryScript -and
+            $elevatedScriptPath -and
+            (Test-Path -LiteralPath $elevatedScriptPath)
+        ) {
+            Remove-Item `
+                -LiteralPath $elevatedScriptPath `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
+
+    exit 0
+}
+
+# ------------------------------------------------------------------------------
+# 4. System Architecture & Paths Setup
+# ------------------------------------------------------------------------------
+
+$AppName = "subout"
+$ServiceName = "subout"
+$TargetExe = Join-Path $BinDir "$AppName.exe"
+$LogDir = Join-Path $DataDir "logs"
+$RuntimeDir = Join-Path $DataDir "run"
+$GitHubRepo = "geekdex/subout"
+
+$arch = $env:PROCESSOR_ARCHITECTURE
+
+if ($arch -eq "ARM64") {
+    $TargetTriple = "aarch64-pc-windows-msvc"
+}
+else {
+    $TargetTriple = "x86_64-pc-windows-msvc"
+}
+
+# ------------------------------------------------------------------------------
+# 5. UNINSTALL LOGIC
+# ------------------------------------------------------------------------------
+
+if ($Uninstall) {
+    Write-Host "======================================================" -ForegroundColor Cyan
+    Write-Host "       正在卸载 subout 服务与相关文件...             " -ForegroundColor Cyan
+    Write-Host "======================================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Stop and remove Windows Service
+
+    $service = Get-Service `
+        -Name $ServiceName `
+        -ErrorAction SilentlyContinue
+
+    if ($service) {
+        Write-Host "[1/3] 正在停止 Windows 服务 ($ServiceName)..." -ForegroundColor Blue
+
+        Stop-Service `
+            -Name $ServiceName `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+        Start-Sleep -Seconds 1
+
+        Write-Host "[2/3] 正在注销 Windows 服务 ($ServiceName)..." -ForegroundColor Blue
+
+        & sc.exe delete $ServiceName | Out-Null
+
+        Start-Sleep -Seconds 1
+    }
+    else {
+        Write-Host "[1/3] 未检测到已注册的 $ServiceName 服务。" -ForegroundColor Yellow
+        Write-Host "[2/3] 跳过服务注销。" -ForegroundColor Gray
+    }
+
+    # Remove binary
+
+    if (Test-Path -LiteralPath $TargetExe) {
+        Write-Host "[3/3] 正在删除可执行文件: $TargetExe" -ForegroundColor Blue
+
+        Remove-Item `
+            -LiteralPath $TargetExe `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+    else {
+        Write-Host "[3/3] 未找到 $TargetExe，跳过。" -ForegroundColor Gray
+    }
+
+    # Remove empty installation directory
+
+    if (Test-Path -LiteralPath $BinDir) {
+        $remainingFiles = @(
+            Get-ChildItem `
+                -LiteralPath $BinDir `
+                -Force `
+                -ErrorAction SilentlyContinue
+        )
+
+        if ($remainingFiles.Count -eq 0) {
+            Remove-Item `
+                -LiteralPath $BinDir `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Handle data directory
+
+    if ($Purge) {
+        if (Test-Path -LiteralPath $DataDir) {
+            Write-Host ""
+            Write-Host "正在彻底清理数据、日志与配置目录: $DataDir" -ForegroundColor Yellow
+
+            Remove-Item `
+                -LiteralPath $DataDir `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+            Write-Host "✓ 数据与日志目录已清理完毕。" -ForegroundColor Green
+        }
+    }
+    else {
+        if (Test-Path -LiteralPath $DataDir) {
+            Write-Host ""
+            Write-Host "提示: 用户业务数据与配置已保留: $DataDir" -ForegroundColor Yellow
+            Write-Host "如需彻底删除数据，请运行:" -ForegroundColor Yellow
+            Write-Host "  .\install.ps1 uninstall -Purge" -ForegroundColor Gray
+        }
+    }
+
+    Write-Host ""
+    Write-Host "======================================================" -ForegroundColor Green
+    Write-Host "✓ subout 卸载完成！" -ForegroundColor Green
+    Write-Host "======================================================" -ForegroundColor Green
+
+    exit 0
+}
+
+# ------------------------------------------------------------------------------
+# 6. INSTALL LOGIC
+# ------------------------------------------------------------------------------
+
+Write-Host "======================================================" -ForegroundColor Cyan
+Write-Host "        欢迎使用 subout 一键安装脚本 (Windows)        " -ForegroundColor Cyan
+Write-Host "======================================================" -ForegroundColor Cyan
+Write-Host "架构目标: $TargetTriple" -ForegroundColor White
+Write-Host "安装路径: $TargetExe" -ForegroundColor White
+Write-Host "数据目录: $DataDir" -ForegroundColor White
+Write-Host "日志目录: $LogDir" -ForegroundColor White
+Write-Host "Web 端口: $Port" -ForegroundColor White
+Write-Host ""
+
+# ------------------------------------------------------------------------------
+# 7. Locate or Download subout.exe
+# ------------------------------------------------------------------------------
+
+$SourceExe = $null
+
+# IMPORTANT:
+# $PSScriptRoot is empty when this script is executed with irm | iex.
+# Do NOT call Join-Path with an empty ScriptDir.
+#
+# Only perform local source/binary detection when a real script directory exists.
+
+$ScriptDir = $null
+
+if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) {
+    $ScriptDir = $PSScriptRoot
+}
+
+# ------------------------------------------------------------------------------
+# 7.1 User specified binary
+# ------------------------------------------------------------------------------
+
+if ($BinPath) {
+
+    if (Test-Path -LiteralPath $BinPath) {
+        Write-Host "[1/4] 使用用户指定的二进制文件: $BinPath" -ForegroundColor Blue
+        $SourceExe = (Resolve-Path -LiteralPath $BinPath).Path
+    }
+    else {
+        Write-Host "错误: 指定的二进制文件不存在: $BinPath" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 7.2 Local source/build detection
+# ------------------------------------------------------------------------------
+
+elseif ($ScriptDir) {
+
+    $CargoToml = Join-Path $ScriptDir "Cargo.toml"
+    $TargetTripleExe = Join-Path $ScriptDir "target\$TargetTriple\release\$AppName.exe"
+    $TargetReleaseExe = Join-Path $ScriptDir "target\release\$AppName.exe"
+    $LocalExe = Join-Path $ScriptDir "$AppName.exe"
+
+    if (
+        (Test-Path -LiteralPath $CargoToml) -and
+        (Get-Command cargo -ErrorAction SilentlyContinue)
+    ) {
+
+        Write-Host "[1/4] 检测到源码仓库，正在编译最新 release 产物 (cargo build --release)..." -ForegroundColor Blue
+
+        Push-Location $ScriptDir
+
+        try {
+            & cargo build --release
+
+            if ($LASTEXITCODE -ne 0) {
+                throw "cargo build --release 执行失败，退出码: $LASTEXITCODE"
+            }
+        }
+        finally {
+            Pop-Location
+        }
+
+        $SourceExe = $TargetReleaseExe
+    }
+
+    elseif (Test-Path -LiteralPath $TargetTripleExe) {
+
+        $SourceExe = $TargetTripleExe
+
+        Write-Host "[1/4] 检测到本地 release 构建产物: $SourceExe" -ForegroundColor Blue
+    }
+
+    elseif (Test-Path -LiteralPath $TargetReleaseExe) {
+
+        $SourceExe = $TargetReleaseExe
+
+        Write-Host "[1/4] 检测到本地 release 构建产物: $SourceExe" -ForegroundColor Blue
+    }
+
+    elseif (Test-Path -LiteralPath $LocalExe) {
+
+        $SourceExe = $LocalExe
+
+        Write-Host "[1/4] 检测到当前目录下的 $AppName.exe" -ForegroundColor Blue
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 7.3 Download latest GitHub Release
+# ------------------------------------------------------------------------------
+
+if (-not $SourceExe) {
+
+    Write-Host "[1/4] 正在从 GitHub Releases 下载最新预编译版本 ($TargetTriple)..." -ForegroundColor Blue
+
+    $TmpDir = Join-Path `
+        $env:TEMP `
+        "subout_install_$([Guid]::NewGuid().ToString('N'))"
+
+    New-Item `
+        -ItemType Directory `
+        -Force `
+        -Path $TmpDir | Out-Null
+
+    try {
+
+        $ReleaseInfo = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" `
+            -Headers @{
+                "User-Agent" = "subout-installer"
+            } `
+            -ErrorAction Stop
+
+        $LatestTag = $ReleaseInfo.tag_name
+
+        if (-not $LatestTag) {
+            throw "GitHub Releases 中未找到最新版本。"
+        }
+
+        $DownloadUrl = `
+            "https://github.com/$GitHubRepo/releases/download/$LatestTag/subout-$LatestTag-$TargetTriple.zip"
+
+        Write-Host "版本: $LatestTag" -ForegroundColor Cyan
+        Write-Host "下载地址: $DownloadUrl" -ForegroundColor Cyan
+
+        $ZipPath = Join-Path $TmpDir "subout.zip"
+
+        Invoke-WebRequest `
+            -Uri $DownloadUrl `
+            -OutFile $ZipPath `
+            -UseBasicParsing `
+            -ErrorAction Stop
+
+        Expand-Archive `
+            -Path $ZipPath `
+            -DestinationPath $TmpDir `
+            -Force
+
+        $ExtractedExe = Join-Path $TmpDir "$AppName.exe"
+
+        if (-not (Test-Path -LiteralPath $ExtractedExe)) {
+
+            # In case the zip contains a subdirectory, search recursively.
+            $FoundExe = Get-ChildItem `
+                -Path $TmpDir `
+                -Filter "$AppName.exe" `
+                -File `
+                -Recurse `
+                -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+
+            if ($FoundExe) {
+                $ExtractedExe = $FoundExe.FullName
+            }
+        }
+
+        if (Test-Path -LiteralPath $ExtractedExe) {
+            $SourceExe = $ExtractedExe
+        }
+        else {
+            throw "解压后的文件中未找到 $AppName.exe"
+        }
+    }
+    catch {
+
+        Write-Host ""
+        Write-Host "错误: 从 GitHub Releases 下载或解压预编译二进制文件失败。" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+
+        if (Test-Path -LiteralPath $TmpDir) {
+            Remove-Item `
+                -LiteralPath $TmpDir `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+
+        exit 1
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 8. Validate binary
+# ------------------------------------------------------------------------------
+
+if (
+    -not $SourceExe -or
+    -not (Test-Path -LiteralPath $SourceExe)
+) {
+    Write-Host ""
+    Write-Host "错误: 未能找到有效的 subout.exe 文件。" -ForegroundColor Red
+    exit 1
+}
+
+# ------------------------------------------------------------------------------
+# 9. Copy Binary to Installation Directory
+# ------------------------------------------------------------------------------
+
+Write-Host "[2/4] 正在安装二进制文件到 $TargetExe..." -ForegroundColor Blue
+
+if (-not (Test-Path -LiteralPath $BinDir)) {
+    New-Item `
+        -ItemType Directory `
+        -Force `
+        -Path $BinDir | Out-Null
+}
+
+Copy-Item `
+    -LiteralPath $SourceExe `
+    -Destination $TargetExe `
+    -Force
+
+# ------------------------------------------------------------------------------
+# 10. Create Data, Kernel & Logs Directory
+# ------------------------------------------------------------------------------
+
+Write-Host "[3/4] 正在初始化数据与日志目录 ($DataDir)..." -ForegroundColor Blue
+
+$KernelDir = Join-Path $DataDir "bin"
+$GeneratedDir = Join-Path $DataDir "generated"
+
+foreach ($dir in @(
+    $DataDir,
+    $KernelDir,
+    $GeneratedDir,
+    $LogDir,
+    $RuntimeDir
+)) {
+
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $dir | Out-Null
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 11. Configure & Start Windows Service
+# ------------------------------------------------------------------------------
+
+if ($NoService) {
+
+    Write-Host "[4/4] 已跳过 Windows 服务配置 (-NoService)。" -ForegroundColor Yellow
+}
+else {
+
+    Write-Host "[4/4] 正在配置 Windows 后台服务 ($ServiceName)..." -ForegroundColor Blue
+
+    # Stop existing service
+
+    $existingService = Get-Service `
+        -Name $ServiceName `
+        -ErrorAction SilentlyContinue
+
+    if ($existingService) {
+
+        if ($existingService.Status -ne "Stopped") {
+
+            Stop-Service `
+                -Name $ServiceName `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+            Start-Sleep -Seconds 1
+        }
+
+        & sc.exe delete $ServiceName | Out-Null
+
+        Start-Sleep -Seconds 1
+    }
+
+    # --------------------------------------------------------------------------
+    # Create service
+    #
+    # sc.exe requires:
+    #
+    #   binPath= "C:\Program Files\Subout\subout.exe" web -p 1234
+    #
+    # Keep the executable path quoted because Program Files contains a space.
+    # --------------------------------------------------------------------------
+
+    $binPathCommand = "`"$TargetExe`" web -p $Port"
+
+    & sc.exe create $ServiceName `
+        "binPath=$binPathCommand" `
+        "start=auto" `
+        "DisplayName=subout Proxy Manager" | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "创建 Windows 服务失败，退出码: $LASTEXITCODE"
+    }
+
+    # Configure service recovery
+
+    & sc.exe failure $ServiceName `
+        "reset=86400" `
+        "actions=restart/3000/restart/5000/restart/10000" | Out-Null
+
+    # Set environment variable for service mode
+
+    [Environment]::SetEnvironmentVariable(
+        "SUBOUT_SERVICE",
+        "1",
+        "Machine"
+    )
+
+    # Start service
+
+    & sc.exe start $ServiceName | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "启动 Windows 服务失败，退出码: $LASTEXITCODE"
+    }
+
+    Write-Host "✓ Windows 服务已注册并启动 ($ServiceName)" -ForegroundColor Green
+}
+
+# ------------------------------------------------------------------------------
+# 12. Cleanup temporary download directory
+# ------------------------------------------------------------------------------
+
+if ($TmpDir -and (Test-Path -LiteralPath $TmpDir)) {
+
+    Remove-Item `
+        -LiteralPath $TmpDir `
+        -Recurse `
+        -Force `
+        -ErrorAction SilentlyContinue
+}
+
+# ------------------------------------------------------------------------------
+# 13. Summary
+# ------------------------------------------------------------------------------
+
+Write-Host ""
+Write-Host "======================================================" -ForegroundColor Green
+Write-Host "🎉 subout 安装成功！" -ForegroundColor Green
+Write-Host "======================================================" -ForegroundColor Green
+Write-Host "📍 Web 管理面板地址 : http://127.0.0.1:$Port" -ForegroundColor Cyan
+Write-Host "🔑 默认登录密码     : admin (首次登录后建议修改)" -ForegroundColor White
+Write-Host "💾 持久化数据目录   : $DataDir" -ForegroundColor White
+Write-Host "📝 系统日志目录     : $LogDir" -ForegroundColor White
+Write-Host ""
+
+if (-not $NoService) {
+
+    Write-Host "常用服务管理命令 (PowerShell 管理员):" -ForegroundColor White
+    Write-Host "  • 查看服务状态 : Get-Service subout" -ForegroundColor Gray
+    Write-Host "  • 启动服务     : Start-Service subout" -ForegroundColor Gray
+    Write-Host "  • 停止服务     : Stop-Service subout" -ForegroundColor Gray
+    Write-Host "  • 重启服务     : Restart-Service subout" -ForegroundColor Gray
+    Write-Host ""
+}
+
+Write-Host "一键卸载命令 (PowerShell):" -ForegroundColor White
+Write-Host "  .\install.ps1 uninstall" -ForegroundColor Gray
+Write-Host "  .\install.ps1 uninstall -Purge" -ForegroundColor Gray
+Write-Host ""
+```

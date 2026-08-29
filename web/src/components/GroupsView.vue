@@ -252,7 +252,28 @@
                   </div>
                 </td>
               </tr>
-              <tr v-if="groups.length === 0">
+              <tr v-if="loadGroupsError">
+                <td
+                  colspan="5"
+                  style="
+                    text-align: center;
+                    padding: 2rem;
+                    color: var(--danger, #ef4444);
+                  "
+                >
+                  <div style="font-weight: 500; margin-bottom: 0.5rem">
+                    ⚠️ 加载分流组列表失败 ({{ loadGroupsError }})
+                  </div>
+                  <button
+                    class="btn btn-secondary"
+                    style="padding: 0.35rem 0.8rem; font-size: 0.85rem"
+                    @click="loadGroups"
+                  >
+                    🔄 重新加载
+                  </button>
+                </td>
+              </tr>
+              <tr v-else-if="groups.length === 0">
                 <td
                   colspan="5"
                   style="text-align: center; color: var(--text-muted)"
@@ -369,9 +390,41 @@
                     v-model="modal.tag"
                     type="text"
                     class="input-control"
+                    :style="
+                      tagValidationError
+                        ? 'border-color: var(--danger, #ef4444);'
+                        : ''
+                    "
                     placeholder="例如：proxy 或 AUTO-Test"
                     required
+                    @input="modal.tagTouched = true"
+                    @blur="modal.tagTouched = true"
                   />
+                  <div
+                    v-if="tagValidationError"
+                    style="
+                      color: var(--danger, #ef4444);
+                      font-size: 0.8rem;
+                      margin-top: 0.35rem;
+                      display: flex;
+                      align-items: center;
+                      gap: 0.25rem;
+                    "
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span>{{ tagValidationError }}</span>
+                  </div>
                 </div>
                 <div class="input-group" style="margin-top: 1rem">
                   <label>分组类型</label>
@@ -952,12 +1005,40 @@ const modal = reactive({
   isEdit: false,
   editId: null,
   tag: "",
+  tagTouched: false,
   type: "selector",
   url: "",
   interval: "",
   tolerance: 50,
   selectedNodeTags: [],
   use_dynamic: false,
+});
+
+const loadGroupsError = ref(null);
+
+const tagValidationError = computed(() => {
+  if (!modal.show) return "";
+  const tag = (modal.tag || "").trim();
+  if (!tag) {
+    return modal.tagTouched ? "出站 Tag 名字不能为空" : "";
+  }
+  const tagLower = tag.toLowerCase();
+  if (tagLower === "direct" || tagLower === "block" || tagLower === "dns-out") {
+    return `出站 Tag 不能使用系统保留名称 '${tag}'`;
+  }
+  const isGroupDuplicate = groups.value.some(
+    (g) => g.tag.toLowerCase() === tagLower && g.id !== modal.editId,
+  );
+  if (isGroupDuplicate) {
+    return `出站 Tag 名字必须唯一，'${tag}' 已存在于出站分组`;
+  }
+  const isNodeDuplicate = allNodes.value.some(
+    (n) => (n.tag || "").toLowerCase() === tagLower,
+  );
+  if (isNodeDuplicate) {
+    return `出站 Tag 不能与节点重名，'${tag}' 已存在于节点池`;
+  }
+  return "";
 });
 
 const getOutboundsList = (g) => {
@@ -982,6 +1063,7 @@ const getUrlTestDetail = (g) => {
 };
 
 const loadGroups = async () => {
+  loadGroupsError.value = null;
   try {
     const res = await fetch(`${API_BASE}/api/groups`, {
       headers: { Authorization: `Bearer ${token.value}` },
@@ -989,9 +1071,16 @@ const loadGroups = async () => {
     if (res.ok) {
       groups.value = await res.json();
     } else {
-      showToast("加载分流组失败", "danger");
+      let msg = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        if (errJson && errJson.error) msg = errJson.error;
+      } catch {}
+      loadGroupsError.value = msg;
+      showToast(`加载分流组失败 (${msg})`, "danger");
     }
   } catch {
+    loadGroupsError.value = "网络请求发生异常";
     showToast("加载分流组失败", "danger");
   }
 };
@@ -1125,6 +1214,7 @@ const openAddModal = () => {
   modal.isEdit = false;
   modal.editId = null;
   modal.tag = "";
+  modal.tagTouched = false;
   modal.type = "selector";
   presetUrlSelectGroups.value = "http://cp.cloudflare.com/generate_204";
   modal.url = "http://cp.cloudflare.com/generate_204";
@@ -1140,6 +1230,7 @@ const openEditModal = (g) => {
   modal.isEdit = true;
   modal.editId = g.id;
   modal.tag = g.tag;
+  modal.tagTouched = false;
   modal.type = g.group_type;
 
   const presets = [
@@ -1216,7 +1307,8 @@ const isTagGroup = (tag) => {
 };
 
 const isTagStandard = (tag) => {
-  return tag === "direct" || tag === "block";
+  const t = (tag || "").toLowerCase();
+  return t === "direct" || t === "block" || t === "dns-out";
 };
 
 const selectAllFiltered = () => {
@@ -1231,8 +1323,14 @@ const selectAllFiltered = () => {
 };
 
 const submitForm = async () => {
+  modal.tagTouched = true;
+  if (tagValidationError.value) {
+    showToast(`保存分组失败，${tagValidationError.value}`, "danger");
+    return;
+  }
+
   const payload = {
-    tag: modal.tag,
+    tag: modal.tag.trim(),
     group_type: modal.type,
   };
 
@@ -1280,7 +1378,14 @@ const submitForm = async () => {
       closeModal();
       loadGroups();
     } else {
-      showToast("保存分组失败，出站 Tag 名字必须唯一", "danger");
+      let errMsg = "保存分组失败";
+      try {
+        const errJson = await res.json();
+        if (errJson && errJson.error) {
+          errMsg = errJson.error;
+        }
+      } catch {}
+      showToast(errMsg, "danger");
     }
   } catch {
     showToast("保存出站组发生异常", "danger");

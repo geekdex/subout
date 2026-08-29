@@ -189,28 +189,29 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         let _ = conn.execute("ALTER TABLE nodes ADD COLUMN last_target_url TEXT", []);
     }
 
-    // Migration: check if outbound_groups has node_types column
-    let has_node_types: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('outbound_groups') WHERE name='node_types'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    if has_node_types == 0 {
-        let _ = conn.execute("ALTER TABLE outbound_groups ADD COLUMN node_types TEXT", []);
-        let _ = conn.execute(
-            "ALTER TABLE outbound_groups ADD COLUMN subscriptions TEXT",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE outbound_groups ADD COLUMN include_keywords TEXT",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE outbound_groups ADD COLUMN exclude_keywords TEXT",
-            [],
-        );
+    // Migration: check if outbound_groups has dynamic filter columns
+    for col in &[
+        "node_types",
+        "subscriptions",
+        "include_keywords",
+        "exclude_keywords",
+    ] {
+        let has_col: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('outbound_groups') WHERE name='{}'",
+                    col
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_col == 0 {
+            let _ = conn.execute(
+                &format!("ALTER TABLE outbound_groups ADD COLUMN {} TEXT", col),
+                [],
+            );
+        }
     }
 
     // Bootstrap default settings if empty
@@ -283,6 +284,11 @@ pub fn update_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
         "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
         [key, value],
     )?;
+    Ok(())
+}
+
+pub fn delete_setting(conn: &Connection, key: &str) -> Result<()> {
+    conn.execute("DELETE FROM settings WHERE key = ?", [key])?;
     Ok(())
 }
 
@@ -630,10 +636,17 @@ pub fn get_outbound_groups(conn: &Connection) -> Result<Vec<OutboundGroup>> {
     )?;
     let groups = stmt
         .query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let tag: String = row
+                .get::<_, Option<String>>(1)?
+                .unwrap_or_else(|| format!("group-{}", id));
+            let group_type: String = row
+                .get::<_, Option<String>>(2)?
+                .unwrap_or_else(|| "selector".to_string());
             Ok(OutboundGroup {
-                id: row.get(0)?,
-                tag: row.get(1)?,
-                group_type: row.get(2)?,
+                id,
+                tag,
+                group_type,
                 url: row.get(3)?,
                 interval: row.get(4)?,
                 tolerance: row.get(5)?,
