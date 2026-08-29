@@ -64,49 +64,7 @@ pub fn sanitize_outbound_value(outbound: &mut Value) {
 }
 
 pub fn sanitize_inbound_value(inbound: &mut Value) {
-    if let Some(obj) = inbound.as_object_mut() {
-        let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-
-        if !cfg!(target_os = "linux") {
-            obj.remove("auto_redirect");
-            if is_tun {
-                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str()) {
-                    if iface == "tun0" || (cfg!(target_os = "macos") && !iface.starts_with("utun")) {
-                        obj.insert("interface_name".to_string(), json!(""));
-                    }
-                }
-
-                // On macOS, FakeIP and TUN transparent proxy require stack: "mixed" or "gvisor".
-                // system stack on Darwin does not handle FakeIP reverse mapping or TCP interception.
-                if cfg!(target_os = "macos") {
-                    let current_stack = obj.get("stack").and_then(|s| s.as_str());
-                    if current_stack.is_none() || current_stack == Some("system") {
-                        obj.insert("stack".to_string(), json!("mixed"));
-                    }
-                }
-
-                // Ensure IPv6 dual-stack address is present on macOS/Windows to prevent IPv6 leakage / SSL_ERROR_SYSCALL
-                if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr.iter().any(|a| a.as_str().map_or(false, |s| s.contains(':')));
-                    if !has_ipv6 {
-                        addr_arr.push(json!("fd00::1/126"));
-                    }
-                } else {
-                    obj.insert("address".to_string(), json!(["172.19.0.1/30", "fd00::1/126"]));
-                }
-
-                // On macOS/Windows the routing stack is weaker than Linux nftables.
-                // strict_route MUST be true to prevent traffic from bypassing the TUN
-                // interface via the real network adapter. Unconditionally enforce this —
-                // even if the user explicitly set it to false in their config.
-                if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
-                    obj.insert("strict_route".to_string(), json!(true));
-                } else if !obj.contains_key("strict_route") {
-                    obj.insert("strict_route".to_string(), json!(true));
-                }
-            }
-        }
-    }
+    crate::platform::current_platform().sanitize_inbound(inbound);
 }
 
 pub fn sanitize_inbounds_value(inbounds: &mut Value) {
@@ -273,28 +231,46 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_inbounds_non_linux() {
-        let mut inbounds = json!([
-            {
-                "type": "tun",
-                "tag": "tun-in",
-                "interface_name": "tun0",
-                "auto_redirect": true
-            }
-        ]);
-        sanitize_inbounds_value(&mut inbounds);
-        if cfg!(target_os = "linux") {
-            assert_eq!(inbounds[0].get("auto_redirect"), Some(&json!(true)));
-            assert_eq!(inbounds[0].get("interface_name"), Some(&json!("tun0")));
-        } else {
-            assert_eq!(inbounds[0].get("auto_redirect"), None);
-            assert_eq!(inbounds[0].get("interface_name"), Some(&json!("")));
-            assert_eq!(inbounds[0].get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
-            assert_eq!(inbounds[0].get("strict_route"), Some(&json!(true)));
-            if cfg!(target_os = "macos") {
-                assert_eq!(inbounds[0].get("stack"), Some(&json!("mixed")));
-            }
-        }
+    fn test_sanitize_inbounds_strategies() {
+        use crate::platform::PlatformStrategy;
+
+        // Test Linux strategy
+        let mut linux_inbound = json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "tun0",
+            "auto_redirect": true
+        });
+        crate::platform::linux_platform().sanitize_inbound(&mut linux_inbound);
+        assert_eq!(linux_inbound.get("auto_redirect"), Some(&json!(true)));
+        assert_eq!(linux_inbound.get("interface_name"), Some(&json!("tun0")));
+
+        // Test macOS strategy
+        let mut macos_inbound = json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "tun0",
+            "auto_redirect": true
+        });
+        crate::platform::macos_platform().sanitize_inbound(&mut macos_inbound);
+        assert_eq!(macos_inbound.get("auto_redirect"), None);
+        assert_eq!(macos_inbound.get("interface_name"), Some(&json!("")));
+        assert_eq!(macos_inbound.get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
+        assert_eq!(macos_inbound.get("strict_route"), Some(&json!(true)));
+        assert_eq!(macos_inbound.get("stack"), Some(&json!("mixed")));
+
+        // Test Windows strategy
+        let mut win_inbound = json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "tun0",
+            "auto_redirect": true
+        });
+        crate::platform::windows_platform().sanitize_inbound(&mut win_inbound);
+        assert_eq!(win_inbound.get("auto_redirect"), None);
+        assert_eq!(win_inbound.get("interface_name"), Some(&json!("")));
+        assert_eq!(win_inbound.get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
+        assert_eq!(win_inbound.get("strict_route"), Some(&json!(true)));
     }
 
     #[test]

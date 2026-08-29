@@ -346,21 +346,18 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     // 4. Inbounds section
     let inbounds_val = match cfg.inbound.inbound_type.as_str() {
         "tun" => {
-            let effective_stack = if cfg!(target_os = "macos") && cfg.inbound.tun_stack == "system" {
-                "mixed"
-            } else {
-                cfg.inbound.tun_stack.as_str()
-            };
+            let platform = crate::platform::current_platform();
+            let effective_stack = platform.effective_tun_stack(cfg.inbound.tun_stack.as_str());
+            let iface_name = platform.default_tun_interface_name();
+            let strict_route = platform.default_tun_strict_route();
             json!([
                 {
                     "type": "tun",
                     "tag": "tun-in",
-                    "interface_name": if cfg!(target_os = "linux") { "tun0" } else { "" },
+                    "interface_name": iface_name,
                     "address": ["172.19.0.1/30", "fd00::1/126"],
                     "auto_route": cfg.inbound.tun_auto_route,
-                    // Linux has nftables/iptables to enforce routing; on macOS/Windows
-                    // strict_route must be true to prevent traffic bypassing the TUN.
-                    "strict_route": !cfg!(target_os = "linux"),
+                    "strict_route": strict_route,
                     "stack": effective_stack
                 }
             ])

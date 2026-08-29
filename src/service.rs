@@ -108,12 +108,12 @@ impl SingBoxServiceManager {
             return Ok(());
         }
 
-        #[cfg(unix)]
-        {
-            if !is_running_as_root() {
-                run_sudo_command("true", &[], Some(trimmed)).await
-                    .map_err(|e| anyhow!("Sudo 密码验证失败: {}", e))?;
-            }
+        let platform = crate::platform::current_platform();
+        if !platform.is_windows() && !platform.is_running_as_root() {
+            platform
+                .run_sudo_command("true", &[], Some(trimmed))
+                .await
+                .map_err(|e| anyhow!("Sudo 密码验证失败: {}", e))?;
         }
 
         self.save_sudo_pass(trimmed).await;
@@ -315,8 +315,9 @@ impl SingBoxServiceManager {
         let cached_pass = self.cached_sudo_pass.read().await.clone();
         let effective_sudo_pass = explicit_pass.or(cached_pass);
         let has_sudo_pass = effective_sudo_pass.is_some();
+        let platform = crate::platform::current_platform();
 
-        let use_sudo = cfg!(unix) && !as_root && has_sudo_pass;
+        let use_sudo = !platform.is_windows() && !as_root && has_sudo_pass;
 
         if use_sudo {
             self.append_log(&format!(
@@ -387,22 +388,7 @@ impl SingBoxServiceManager {
 
         cmd.kill_on_drop(true);
 
-        #[cfg(unix)]
-        cmd.process_group(0);
-
-        #[cfg(target_os = "linux")]
-        unsafe {
-            cmd.pre_exec(|| {
-                unsafe extern "C" {
-                    fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32;
-                }
-                // PR_SET_PDEATHSIG = 1. Signal = SIGTERM (15).
-                // Tells the Linux kernel: if parent (subout) exits for ANY reason,
-                // automatically kill this child process so it never becomes an orphan.
-                let _ = prctl(1, 15, 0, 0, 0);
-                Ok(())
-            });
-        }
+        platform.setup_child_process(&mut cmd);
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -538,16 +524,7 @@ impl SingBoxServiceManager {
             }
 
             if (tun_mode || err_upper.contains("TUNSETIFF") || err_upper.contains("OPERATION NOT PERMITTED") || err_upper.contains("PERMISSION DENIED") || err_upper.contains("WINTUN") || err_upper.contains("ACCESS IS DENIED")) && !as_root && !has_sudo_pass {
-                #[cfg(windows)]
-                let guide = format!(
-                    "TUN 模式启动失败 ({}): 创建 Wintun 虚拟网卡需要 Windows 系统管理员权限。请关闭 Subout，右键选择【以管理员身份运行】后重试。",
-                    err
-                );
-                #[cfg(not(windows))]
-                let guide = format!(
-                    "TUN 模式启动失败 ({}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行，或在终端执行 sudo setcap cap_net_admin=+ep {:?} (Linux) 授权免密运行。",
-                    err, singbox_bin
-                );
+                let guide = platform.tun_permission_error_guide(&err, &singbox_bin);
                 self.append_log(&format!("❌ {}", guide)).await;
                 *self.last_error.write().await = Some(guide.clone());
                 return Err(anyhow!(guide));
@@ -561,25 +538,18 @@ impl SingBoxServiceManager {
             self.save_sudo_pass(p).await;
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            let cached_pass = self.cached_sudo_pass.read().await.clone();
-            if let Some(port) = get_mixed_port_from_config(config_json) {
-                macos_proxy::enable_system_proxy(port, cached_pass.as_deref());
-                self.append_log(&format!("🌐 已自动设置 macOS 系统网络代理 (127.0.0.1:{})", port)).await;
-            }
-            if tun_mode {
-                let tun_ip = get_tun_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.1".to_string());
-                macos_proxy::enable_tun_dns(&tun_ip, cached_pass.as_deref());
-                self.append_log(&format!("🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({})", tun_ip)).await;
+        let cached_pass = self.cached_sudo_pass.read().await.clone();
+        if let Some(port) = get_mixed_port_from_config(config_json) {
+            platform.enable_system_proxy(port, cached_pass.as_deref());
+            if platform.is_macos() || platform.is_windows() {
+                self.append_log(&format!("🌐 已自动设置系统网络代理 (127.0.0.1:{})", port)).await;
             }
         }
-
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(port) = get_mixed_port_from_config(config_json) {
-                windows_proxy::enable_system_proxy(port);
-                self.append_log(&format!("🌐 已自动设置 Windows 系统网络代理 (127.0.0.1:{})", port)).await;
+        if tun_mode {
+            let tun_ip = get_tun_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.1".to_string());
+            platform.enable_tun_dns(&tun_ip, cached_pass.as_deref());
+            if platform.is_macos() {
+                self.append_log(&format!("🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({})", tun_ip)).await;
             }
         }
 
@@ -599,6 +569,7 @@ impl SingBoxServiceManager {
         let mut child_guard = self.child.write().await;
         let mut had_child = false;
         let mut pid_opt = None;
+        let platform = crate::platform::current_platform();
 
         if let Some(mut child) = child_guard.take() {
             had_child = true;
@@ -607,45 +578,16 @@ impl SingBoxServiceManager {
 
             let _ = child.start_kill();
 
-            #[cfg(unix)]
             let cached_pass = self.cached_sudo_pass.read().await.clone();
 
-            #[cfg(unix)]
             if let Some(pid) = pid_opt {
-                unsafe extern "C" {
-                    fn kill(pid: i32, sig: i32) -> i32;
-                }
-                unsafe {
-                    // Send SIGTERM to both process group and direct pid
-                    let _ = kill(-(pid as i32), 15);
-                    let _ = kill(pid as i32, 15);
-                }
-                if let Some(ref pass) = cached_pass {
-                    let _ = run_sudo_command("kill", &["-15", &pid.to_string()], Some(pass)).await;
-                }
-            }
-
-            #[cfg(windows)]
-            if let Some(pid) = pid_opt {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/T", "/PID", &pid.to_string()])
-                    .output();
+                platform.kill_process(pid, cached_pass.as_deref(), 15).await;
             }
 
             // Wait up to 500ms for graceful stop, otherwise force SIGKILL
             if (tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await).is_err() {
-                #[cfg(unix)]
                 if let Some(pid) = pid_opt {
-                    unsafe extern "C" {
-                        fn kill(pid: i32, sig: i32) -> i32;
-                    }
-                    unsafe {
-                        let _ = kill(-(pid as i32), 9);
-                        let _ = kill(pid as i32, 9);
-                    }
-                    if let Some(ref pass) = cached_pass {
-                        let _ = run_sudo_command("kill", &["-9", &pid.to_string()], Some(pass)).await;
-                    }
+                    platform.kill_process(pid, cached_pass.as_deref(), 9).await;
                 }
                 let _ = tokio::time::timeout(std::time::Duration::from_millis(200), child.wait()).await;
             }
@@ -653,18 +595,12 @@ impl SingBoxServiceManager {
 
         let cached_pass = self.cached_sudo_pass.read().await.clone();
         // Clean up any lingering Subout sing-box / sudo child processes
-        kill_all_subout_singbox_processes(cached_pass.as_deref(), pid_opt).await;
+        platform.kill_all_subout_processes(cached_pass.as_deref(), pid_opt, &Self::get_running_config_path()).await;
 
-        #[cfg(target_os = "macos")]
-        {
-            macos_proxy::disable_system_proxy_and_dns(cached_pass.as_deref());
-            self.append_log("🌐 已恢复 macOS 原始系统代理与 DNS 设置").await;
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            windows_proxy::disable_system_proxy();
-            self.append_log("🌐 已恢复 Windows 原始系统代理设置").await;
+        platform.disable_system_proxy(cached_pass.as_deref());
+        platform.disable_tun_dns(cached_pass.as_deref());
+        if platform.is_macos() || platform.is_windows() {
+            self.append_log("🌐 已恢复系统原始网络代理设置").await;
         }
 
         if had_child {
@@ -683,7 +619,9 @@ impl SingBoxServiceManager {
             return Err(anyhow!("无法终止受保护的系统进程 (PID: {})", pid));
         }
 
-        if !is_pid_alive(pid) {
+        let platform = crate::platform::current_platform();
+
+        if !platform.is_pid_alive(pid) {
             self.append_log(&format!("外部进程 (PID: {}) 已不再运行", pid)).await;
             return Ok(());
         }
@@ -697,122 +635,26 @@ impl SingBoxServiceManager {
             .map(|p| p.to_string())
             .or(cached_pass);
 
-        #[cfg(unix)]
-        {
-            let as_root = is_running_as_root();
-
-            // 1. Try systemctl stop sing-box if on Linux systemd
-            #[cfg(target_os = "linux")]
-            {
-                if as_root {
-                    let _ = tokio::process::Command::new("systemctl").args(["stop", "sing-box"]).output().await;
-                    let _ = tokio::process::Command::new("systemctl").args(["stop", "sing-box.service"]).output().await;
-                    let _ = tokio::process::Command::new("systemctl").args(["stop", "singbox"]).output().await;
-                    let _ = tokio::process::Command::new("systemctl").args(["stop", "singbox.service"]).output().await;
-                } else if let Some(ref pass) = pass_clean {
-                    if let Err(e) = run_sudo_command("systemctl", &["stop", "sing-box"], Some(pass)).await {
-                        if e.to_string().contains("Sudo 密码不正确") {
-                            self.clear_saved_sudo_pass().await;
-                            self.append_log(&format!("❌ 终止外部进程失败: {}", e)).await;
-                            return Err(e);
-                        }
-                    }
-                    let _ = run_sudo_command("systemctl", &["stop", "sing-box.service"], Some(pass)).await;
-                    let _ = run_sudo_command("systemctl", &["stop", "singbox"], Some(pass)).await;
-                    let _ = run_sudo_command("systemctl", &["stop", "singbox.service"], Some(pass)).await;
-                } else {
-                    let _ = run_sudo_command("systemctl", &["stop", "sing-box"], None).await;
-                    let _ = run_sudo_command("systemctl", &["stop", "sing-box.service"], None).await;
-                }
-            }
-
-            #[cfg(target_os = "macos")]
-            {
-                let _ = tokio::process::Command::new("brew").args(["services", "stop", "sing-box"]).output().await;
-                let _ = tokio::process::Command::new("brew").args(["services", "stop", "singbox"]).output().await;
-                if !as_root {
-                    let _ = run_sudo_command("brew", &["services", "stop", "sing-box"], pass_clean.as_deref()).await;
-                }
-            }
-
-            // 2. Direct SIGTERM signal
-            unsafe extern "C" {
-                fn kill(pid: i32, sig: i32) -> i32;
-            }
-            unsafe {
-                let _ = kill(pid as i32, 15);
-            }
-
-            if let Some(ref pass) = pass_clean {
-                let pid_str = pid.to_string();
-                if let Err(e) = run_sudo_command("kill", &["-15", &pid_str], Some(pass)).await {
-                    if e.to_string().contains("Sudo 密码不正确") {
-                        self.clear_saved_sudo_pass().await;
-                        self.append_log(&format!("❌ 终止外部进程失败: {}", e)).await;
-                        return Err(e);
-                    }
-                }
-            }
-
-            // 3. If still alive after 400ms, escalate to SIGKILL
-            tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
-            if is_pid_alive(pid) {
-                unsafe {
-                    let _ = kill(pid as i32, 9);
-                }
-                if let Some(ref pass) = pass_clean {
-                    let pid_str = pid.to_string();
-                    let _ = run_sudo_command("kill", &["-9", &pid_str], Some(pass)).await;
-                }
+        if let Err(e) = platform.stop_external_service_or_process(pid, pass_clean.as_deref()).await {
+            if e.to_string().contains("Sudo 密码不正确") {
+                self.clear_saved_sudo_pass().await;
+                self.append_log(&format!("❌ 终止外部进程失败: {}", e)).await;
+                return Err(e);
             }
         }
 
-        #[cfg(windows)]
-        {
-            let pid_str = pid.to_string();
-            let _ = tokio::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", "Stop-Service sing-box -ErrorAction SilentlyContinue; Stop-Service singbox -ErrorAction SilentlyContinue"])
-                .output()
-                .await;
-            let _ = tokio::process::Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &pid_str])
-                .output()
-                .await;
-        }
-
-        // 4. Verify whether the process has terminated
+        // Verify whether the process has terminated
         let mut is_dead = false;
         for _ in 0..15 {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            if !is_pid_alive(pid) {
+            if !platform.is_pid_alive(pid) {
                 is_dead = true;
                 break;
             }
         }
 
         if !is_dead {
-            #[cfg(unix)]
-            let msg = if pass_clean.is_none() && !is_running_as_root() {
-                format!(
-                    "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码进行授权终止，或在终端执行 sudo systemctl stop sing-box",
-                    pid
-                )
-            } else {
-                format!(
-                    "终止外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box / sudo kill -9 {}",
-                    pid, pid
-                )
-            };
-
-            #[cfg(windows)]
-            let msg = format!(
-                "终止外部进程 (PID: {}) 失败：进程仍在运行。请以管理员身份运行 Subout，或在任务管理器 / 终端中执行 taskkill /F /PID {} 终止该进程",
-                pid, pid
-            );
-
-            #[cfg(not(any(unix, windows)))]
-            let msg = format!("终止外部进程 (PID: {}) 失败：进程仍在运行", pid);
-
+            let msg = platform.external_process_stop_failed_message(pid, pass_clean.is_some());
             self.append_log(&format!("❌ {}", msg)).await;
             return Err(anyhow!(msg));
         }
@@ -835,25 +677,8 @@ impl SingBoxServiceManager {
     }
 }
 
-#[cfg(unix)]
 pub fn is_running_as_root() -> bool {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-    unsafe { geteuid() == 0 }
-}
-
-#[cfg(windows)]
-pub fn is_running_as_root() -> bool {
-    unsafe extern "system" {
-        fn IsUserAnAdmin() -> i32;
-    }
-    unsafe { IsUserAnAdmin() != 0 }
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn is_running_as_root() -> bool {
-    false
+    crate::platform::current_platform().is_running_as_root()
 }
 
 pub fn is_tun_mode(config_json: &Value) -> bool {
@@ -868,440 +693,18 @@ pub fn is_tun_mode(config_json: &Value) -> bool {
 }
 
 pub async fn kill_all_subout_singbox_processes(cached_sudo_pass: Option<&str>, exclude_pid: Option<u32>) {
-    let current_pid = std::process::id();
-    let config_path_str = SingBoxServiceManager::get_running_config_path().to_string_lossy().to_string();
-    let mut pids_to_kill: Vec<u32> = Vec::new();
-
-    #[cfg(unix)]
-    {
-        if let Ok(output) = std::process::Command::new("ps").args(["-eo", "pid,ppid,comm,args"]).output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines().skip(1) {
-                    let parts: Vec<&str> = line.trim().split_whitespace().collect();
-                    if parts.len() >= 3 {
-                        if let (Ok(pid), Ok(ppid)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                            if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid {
-                                continue;
-                            }
-                            let full_cmd = parts[2..].join(" ");
-                            let is_subout_instance = full_cmd.contains(&config_path_str)
-                                || full_cmd.contains("sing-box.json")
-                                || full_cmd.contains("sing-box-running.json")
-                                || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
-                            if is_subout_instance {
-                                pids_to_kill.push(pid);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(entries) = std::fs::read_dir("/proc") {
-            for entry in entries.flatten() {
-                if let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() {
-                    if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid || pids_to_kill.contains(&pid) {
-                        continue;
-                    }
-                    let cmdline_path = entry.path().join("cmdline");
-                    if let Ok(bytes) = std::fs::read(&cmdline_path) {
-                        let cmdline = bytes
-                            .split(|&b| b == 0)
-                            .filter(|s| !s.is_empty())
-                            .map(|s| String::from_utf8_lossy(s).to_string())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        if cmdline.contains(&config_path_str) || cmdline.contains("sing-box-running.json") {
-                            pids_to_kill.push(pid);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        if let Ok(output) = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or CommandLine like '%sing-box%'\" | ForEach-Object { \"$($_.ProcessId)|||$($_.ParentProcessId)|||$($_.CommandLine)\" }",
-            ])
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let parts: Vec<&str> = trimmed.split("|||").collect();
-                    if parts.len() >= 2 {
-                        if let (Ok(pid), Ok(ppid)) = (parts[0].trim().parse::<u32>(), parts[1].trim().parse::<u32>()) {
-                            if pid == current_pid || pid <= 4 || Some(pid) == exclude_pid {
-                                continue;
-                            }
-                            let cmdline = if parts.len() >= 3 { parts[2].trim() } else { "" };
-                            let is_subout_instance = cmdline.contains(&config_path_str)
-                                || cmdline.contains("sing-box-running.json")
-                                || ppid == current_pid
-                                || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
-                            if is_subout_instance {
-                                pids_to_kill.push(pid);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if pids_to_kill.is_empty() {
-        return;
-    }
-
-    #[cfg(unix)]
-    {
-        unsafe extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        for &pid in &pids_to_kill {
-            unsafe {
-                let _ = kill(-(pid as i32), 15);
-                let _ = kill(pid as i32, 15);
-            }
-        }
-
-        if let Some(pass) = cached_sudo_pass {
-            let pid_strs: Vec<String> = pids_to_kill.iter().map(|p| p.to_string()).collect();
-            let mut args = vec!["-15"];
-            for s in &pid_strs {
-                args.push(s.as_str());
-            }
-            let _ = run_sudo_command("kill", &args, Some(pass)).await;
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-        let mut remaining = Vec::new();
-        for &pid in &pids_to_kill {
-            if is_pid_alive(pid) {
-                remaining.push(pid);
-                unsafe {
-                    let _ = kill(-(pid as i32), 9);
-                    let _ = kill(pid as i32, 9);
-                }
-            }
-        }
-        if !remaining.is_empty() {
-            if let Some(pass) = cached_sudo_pass {
-                let pid_strs: Vec<String> = remaining.iter().map(|p| p.to_string()).collect();
-                let mut args = vec!["-9"];
-                for s in &pid_strs {
-                    args.push(s.as_str());
-                }
-                let _ = run_sudo_command("kill", &args, Some(pass)).await;
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        let _ = cached_sudo_pass;
-        for pid in pids_to_kill {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &pid.to_string()])
-                .output();
-        }
-    }
+    crate::platform::current_platform()
+        .kill_all_subout_processes(
+            cached_sudo_pass,
+            exclude_pid,
+            &SingBoxServiceManager::get_running_config_path(),
+        )
+        .await;
 }
 
 pub fn detect_conflicting_singbox_processes(managed_pid: Option<u32>) -> Vec<ConflictingProcessInfo> {
-    let current_pid = std::process::id();
-    let config_path_str = SingBoxServiceManager::get_running_config_path().to_string_lossy().to_string();
-    let mut results: Vec<ConflictingProcessInfo> = Vec::new();
-    let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-
-    #[cfg(unix)]
-    {
-        // 1. Primary for Linux & macOS: query ps with pid,ppid,comm,args
-        if let Ok(output) = std::process::Command::new("ps").args(["-eo", "pid,ppid,comm,args"]).output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines().skip(1) {
-                    let trimmed = line.trim();
-                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                    if parts.len() >= 3 {
-                        if let (Ok(pid), Ok(ppid)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                            if pid == current_pid || Some(pid) == managed_pid || pid == 0 || pid == 1 {
-                                continue;
-                            }
-                            if ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid) {
-                                continue;
-                            }
-                            let comm = parts[2];
-                            let full_cmd = if parts.len() >= 4 {
-                                parts[3..].join(" ")
-                            } else {
-                                comm.to_string()
-                            };
-
-                            let is_subout = comm == "subout"
-                                || comm.contains("subout")
-                                || full_cmd.contains("subout web")
-                                || full_cmd.contains("target/debug/subout")
-                                || full_cmd.contains("target/release/subout")
-                                || full_cmd.contains("cargo")
-                                || full_cmd.contains(&config_path_str)
-                                || full_cmd.contains("sing-box.json")
-                                || full_cmd.contains("sing-box-running.json");
-
-                            if is_subout {
-                                continue;
-                            }
-
-                            let is_singbox = comm == "sing-box"
-                                || comm.ends_with("/sing-box")
-                                || comm.contains("sing-box")
-                                || full_cmd.starts_with("/usr/bin/sing-box")
-                                || full_cmd.starts_with("/usr/local/bin/sing-box")
-                                || full_cmd.starts_with("/opt/homebrew/bin/sing-box")
-                                || full_cmd.starts_with("sing-box ")
-                                || full_cmd.contains("/sing-box run")
-                                || full_cmd.contains("sing-box run")
-                                || full_cmd.contains("sing-box -D")
-                                || full_cmd.contains("sing-box -C");
-
-                            if is_singbox {
-                                if seen_pids.insert(pid) {
-                                    results.push(ConflictingProcessInfo {
-                                        pid,
-                                        name: comm.to_string(),
-                                        cmdline: Some(full_cmd),
-                                        exe_path: None,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Linux fallback & systemd inspection: direct /proc scanning
-        #[cfg(target_os = "linux")]
-        {
-            if let Ok(entries) = std::fs::read_dir("/proc") {
-                for entry in entries.flatten() {
-                    let file_name = entry.file_name();
-                    let pid_str = file_name.to_string_lossy();
-                    if let Ok(pid) = pid_str.parse::<u32>() {
-                        if pid == current_pid || Some(pid) == managed_pid || pid == 0 || pid == 1 || seen_pids.contains(&pid) {
-                            continue;
-                        }
-
-                        let proc_path = entry.path();
-                        let stat_path = proc_path.join("stat");
-                        if let Ok(stat_str) = std::fs::read_to_string(&stat_path) {
-                            // stat fields: pid (comm) state ppid ...
-                            if let Some(rparen) = stat_str.rfind(')') {
-                                let after = stat_str[rparen + 1..].trim_start();
-                                let stat_parts: Vec<&str> = after.split_whitespace().collect();
-                                if stat_parts.len() >= 2 {
-                                    if let Ok(ppid) = stat_parts[1].parse::<u32>() {
-                                        if ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid) {
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        let comm_path = proc_path.join("comm");
-                        let cmdline_path = proc_path.join("cmdline");
-                        let exe_path = std::fs::read_link(proc_path.join("exe"))
-                            .ok()
-                            .map(|p| p.to_string_lossy().to_string());
-
-                        let comm = std::fs::read_to_string(&comm_path)
-                            .unwrap_or_default()
-                            .trim()
-                            .to_string();
-
-                        let cmdline = std::fs::read(&cmdline_path)
-                            .ok()
-                            .map(|bytes| {
-                                bytes
-                                    .split(|&b| b == 0)
-                                    .filter(|slice| !slice.is_empty())
-                                    .map(|slice| String::from_utf8_lossy(slice).to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(" ")
-                            });
-
-                        let is_subout = comm == "subout"
-                            || comm.contains("subout")
-                            || cmdline.as_deref().map(|c| c.contains("subout") || c.contains(&config_path_str) || c.contains("sing-box-running.json")).unwrap_or(false);
-
-                        if is_subout {
-                            continue;
-                        }
-
-                        let is_singbox = comm == "sing-box"
-                            || exe_path
-                                .as_deref()
-                                .map(|p| p.ends_with("/sing-box"))
-                                .unwrap_or(false)
-                            || cmdline
-                                .as_deref()
-                                .map(|c| c.starts_with("sing-box ") || c.contains("/sing-box ") || c.contains("sing-box run") || c == "sing-box")
-                                .unwrap_or(false);
-
-                        if is_singbox {
-                            if seen_pids.insert(pid) {
-                                results.push(ConflictingProcessInfo {
-                                    pid,
-                                    name: comm,
-                                    cmdline,
-                                    exe_path,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 3. Systemd service query
-            if let Ok(output) = std::process::Command::new("systemctl").args(["show", "sing-box", "-p", "MainPID", "-p", "ActiveState"]).output() {
-                if output.status.success() {
-                    let out_str = String::from_utf8_lossy(&output.stdout);
-                    let mut is_active = false;
-                    let mut s_pid = 0u32;
-                    for line in out_str.lines() {
-                        if line.starts_with("ActiveState=active") {
-                            is_active = true;
-                        } else if line.starts_with("MainPID=") {
-                            if let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>() {
-                                s_pid = p;
-                            }
-                        }
-                    }
-                    if is_active && s_pid > 1 && s_pid != current_pid && Some(s_pid) != managed_pid {
-                        if seen_pids.insert(s_pid) {
-                            results.push(ConflictingProcessInfo {
-                                pid: s_pid,
-                                name: "sing-box (systemd)".to_string(),
-                                cmdline: Some("systemctl: sing-box.service (Active)".to_string()),
-                                exe_path: Some("/usr/bin/sing-box".to_string()),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // 1. Primary: Use PowerShell to get full ProcessId, Name, CommandLine, and ExecutablePath
-        if let Ok(output) = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or CommandLine like '%sing-box%'\" | ForEach-Object { \"$($_.ProcessId)|||$($_.Name)|||$($_.CommandLine)|||$($_.ExecutablePath)\" }",
-            ])
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let parts: Vec<&str> = trimmed.split("|||").collect();
-                    if parts.len() >= 2 {
-                        if let Ok(pid) = parts[0].trim().parse::<u32>() {
-                            if pid == current_pid || Some(pid) == managed_pid {
-                                continue;
-                            }
-                            let name = parts[1].trim().to_string();
-                            let cmdline = if parts.len() >= 3 && !parts[2].trim().is_empty() {
-                                Some(parts[2].trim().to_string())
-                            } else {
-                                None
-                            };
-                            let exe_path = if parts.len() >= 4 && !parts[3].trim().is_empty() {
-                                Some(parts[3].trim().to_string())
-                            } else {
-                                None
-                            };
-
-                            let is_subout = name.to_lowercase().contains("subout")
-                                || cmdline.as_deref().map(|c| {
-                                    let c_lower = c.to_lowercase();
-                                    c_lower.contains("subout") || c.contains(&config_path_str) || c.contains("sing-box-running.json")
-                                }).unwrap_or(false);
-
-                            if !is_subout {
-                                if seen_pids.insert(pid) {
-                                    results.push(ConflictingProcessInfo {
-                                        pid,
-                                        name,
-                                        cmdline,
-                                        exe_path,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Secondary fallback: tasklist
-        if results.is_empty() {
-            if let Ok(output) = std::process::Command::new("tasklist")
-                .args(["/FI", "IMAGENAME eq sing-box.exe", "/FO", "CSV", "/NH"])
-                .output()
-            {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines() {
-                        let fields: Vec<String> = line
-                            .split(',')
-                            .map(|s| s.trim_matches('"').trim().to_string())
-                            .collect();
-                        if fields.len() >= 2 {
-                            if let Ok(pid) = fields[1].parse::<u32>() {
-                                if pid == current_pid || Some(pid) == managed_pid {
-                                    continue;
-                                }
-                                if seen_pids.insert(pid) {
-                                    results.push(ConflictingProcessInfo {
-                                        pid,
-                                        name: fields[0].clone(),
-                                        cmdline: None,
-                                        exe_path: None,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    results
+    crate::platform::current_platform()
+        .detect_conflicting_processes(managed_pid, &SingBoxServiceManager::get_running_config_path())
 }
 
 pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option<String> {
@@ -1348,113 +751,11 @@ pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option
 }
 
 pub fn is_pid_alive(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        unsafe extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        let res = unsafe { kill(pid as i32, 0) };
-        if res == 0 {
-            true
-        } else {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            errno == 1 // EPERM = 1 (process exists, insufficient permissions)
-        }
-    }
-    #[cfg(windows)]
-    {
-        type HANDLE = *mut std::ffi::c_void;
-        type BOOL = i32;
-        type DWORD = u32;
-
-        const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
-        const SYNCHRONIZE: DWORD = 0x00100000;
-        const WAIT_TIMEOUT: DWORD = 0x00000102;
-        const STILL_ACTIVE: DWORD = 259;
-        const ERROR_ACCESS_DENIED: DWORD = 5;
-
-        unsafe extern "system" {
-            fn OpenProcess(dwDesiredAccess: DWORD, bInheritHandle: BOOL, dwProcessId: DWORD) -> HANDLE;
-            fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
-            fn GetExitCodeProcess(hProcess: HANDLE, lpExitCode: *mut DWORD) -> BOOL;
-            fn CloseHandle(hObject: HANDLE) -> BOOL;
-        }
-
-        if pid == 0 {
-            return false;
-        }
-
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid) };
-        if !handle.is_null() {
-            let wait_res = unsafe { WaitForSingleObject(handle, 0) };
-            let mut exit_code: DWORD = 0;
-            let get_code_res = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
-            unsafe { CloseHandle(handle) };
-
-            wait_res == WAIT_TIMEOUT || (get_code_res != 0 && exit_code == STILL_ACTIVE)
-        } else {
-            let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as DWORD;
-            err == ERROR_ACCESS_DENIED
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-        false
-    }
+    crate::platform::current_platform().is_pid_alive(pid)
 }
 
 pub async fn run_sudo_command(cmd_name: &str, args: &[&str], sudo_pass: Option<&str>) -> Result<()> {
-    #[cfg(unix)]
-    {
-        if is_running_as_root() {
-            let _ = tokio::process::Command::new(cmd_name)
-                .args(args)
-                .output()
-                .await;
-            return Ok(());
-        }
-
-        if let Some(pass) = sudo_pass {
-            let mut cmd = tokio::process::Command::new("sudo");
-            cmd.arg("-S").arg("-k").arg("-p").arg("").arg("--").arg(cmd_name).args(args);
-            cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-            let mut child = cmd.spawn().map_err(|e| anyhow!("执行 sudo 失败: {}", e))?;
-            if let Some(mut stdin) = child.stdin.take() {
-                use tokio::io::AsyncWriteExt;
-                let _ = stdin.write_all(format!("{}\n", pass).as_bytes()).await;
-                let _ = stdin.flush().await;
-                drop(stdin);
-            }
-            let output = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait_with_output())
-                .await
-                .map_err(|_| anyhow!("执行 sudo 命令超时"))??;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if stderr.contains("incorrect password")
-                    || stderr.contains("authentication failure")
-                    || stderr.contains("Sorry, try again")
-                    || stderr.contains("1 incorrect password attempt")
-                    || stderr.contains("a password is required")
-                {
-                    return Err(anyhow!("Sudo 密码不正确，请重新输入"));
-                }
-            }
-        } else {
-            let mut cmd = tokio::process::Command::new("sudo");
-            cmd.arg("-n").arg("--").arg(cmd_name).args(args);
-            let _ = cmd.output().await;
-        }
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (cmd_name, args, sudo_pass);
-        Ok(())
-    }
+    crate::platform::current_platform().run_sudo_command(cmd_name, args, sudo_pass).await
 }
 
 pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
@@ -1490,137 +791,6 @@ pub fn get_tun_ip_from_config(config: &Value) -> Option<String> {
         }
     }
     None
-}
-
-#[cfg(target_os = "macos")]
-pub mod macos_proxy {
-    use std::process::Command;
-
-    fn run_netsetup(args: &[&str], sudo_pass: Option<&str>) {
-        if super::is_running_as_root() {
-            let _ = Command::new("networksetup").args(args).output();
-        } else if let Some(pass) = sudo_pass {
-            use std::io::Write;
-            let mut child = match Command::new("sudo")
-                .arg("-S")
-                .arg("-k")
-                .arg("-p")
-                .arg("")
-                .arg("--")
-                .arg("networksetup")
-                .args(args)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = writeln!(stdin, "{}", pass);
-            }
-            let _ = child.wait();
-        } else {
-            let _ = Command::new("networksetup").args(args).output();
-        }
-    }
-
-    pub fn get_network_services() -> Vec<String> {
-        let output = match Command::new("networksetup").arg("-listallnetworkservices").output() {
-            Ok(o) => o,
-            Err(_) => return Vec::new(),
-        };
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout
-            .lines()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty()
-                    && !trimmed.starts_with('*') // Disabled services marked with *
-                    && !trimmed.contains("An asterisk")
-            })
-            .map(|s| s.trim().to_string())
-            .collect()
-    }
-
-    pub fn enable_system_proxy(port: u16, sudo_pass: Option<&str>) {
-        let services = get_network_services();
-        let port_str = port.to_string();
-        for svc in services {
-            run_netsetup(&["-setwebproxy", &svc, "127.0.0.1", &port_str], sudo_pass);
-            run_netsetup(&["-setsecurewebproxy", &svc, "127.0.0.1", &port_str], sudo_pass);
-            run_netsetup(&["-setsocksfirewallproxy", &svc, "127.0.0.1", &port_str], sudo_pass);
-            run_netsetup(&["-setwebproxystate", &svc, "on"], sudo_pass);
-            run_netsetup(&["-setsecurewebproxystate", &svc, "on"], sudo_pass);
-            run_netsetup(&["-setsocksfirewallproxystate", &svc, "on"], sudo_pass);
-        }
-    }
-
-    pub fn enable_tun_dns(dns_ip: &str, sudo_pass: Option<&str>) {
-        let services = get_network_services();
-        for svc in services {
-            run_netsetup(&["-setdnsservers", &svc, dns_ip], sudo_pass);
-        }
-    }
-
-    pub fn disable_system_proxy_and_dns(sudo_pass: Option<&str>) {
-        let services = get_network_services();
-        for svc in services {
-            run_netsetup(&["-setwebproxystate", &svc, "off"], sudo_pass);
-            run_netsetup(&["-setsecurewebproxystate", &svc, "off"], sudo_pass);
-            run_netsetup(&["-setsocksfirewallproxystate", &svc, "off"], sudo_pass);
-            run_netsetup(&["-setdnsservers", &svc, "empty"], sudo_pass);
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-pub mod windows_proxy {
-    use std::process::Command;
-
-    pub fn enable_system_proxy(port: u16) {
-        let proxy_addr = format!("127.0.0.1:{}", port);
-        let override_hosts = "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*";
-
-        let _ = Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f"])
-            .output();
-
-        let _ = Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyServer", "/t", "REG_SZ", "/d", &proxy_addr, "/f"])
-            .output();
-
-        let _ = Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyOverride", "/t", "REG_SZ", "/d", override_hosts, "/f"])
-            .output();
-
-        refresh_wininet_proxy();
-    }
-
-    pub fn disable_system_proxy() {
-        let _ = Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f"])
-            .output();
-
-        refresh_wininet_proxy();
-    }
-
-    fn refresh_wininet_proxy() {
-        let script = r#"
-            $sig = @'
-            [DllImport("wininet.dll", SetLastError = true, CharSet=CharSet.Auto)]
-            public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
-'@
-            $type = Add-Type -MemberDefinition $sig -Name WinINetProxy -Namespace WinINet -PassThru
-            [WinINet.WinINetProxy]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)
-            [WinINet.WinINetProxy]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)
-        "#;
-
-        let _ = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script])
-            .output();
-    }
 }
 
 pub fn strip_ansi_codes(input: &str) -> String {

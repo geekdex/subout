@@ -81,6 +81,8 @@ impl AppPaths {
 
         let is_dev = !is_portable && Self::detect_dev_environment();
 
+        let platform = crate::platform::current_platform();
+
         // 1. Data Dir resolution
         let data_dir = if let Some(dir) = cli_data_dir {
             dir
@@ -90,19 +92,8 @@ impl AppPaths {
             PathBuf::from("./data")
         } else if is_dev {
             PathBuf::from("./runtime/data")
-        } else if cfg!(target_os = "linux") {
-            PathBuf::from("/var/lib/subout")
-        } else if cfg!(target_os = "macos") {
-            PathBuf::from("/Library/Application Support/Subout")
-        } else if cfg!(target_os = "windows") {
-            std::env::var("ProgramData")
-                .or_else(|_| std::env::var("ALLUSERSPROFILE"))
-                .map(|p| PathBuf::from(p).join("Subout"))
-                .unwrap_or_else(|_| PathBuf::from(r"C:\ProgramData\Subout"))
         } else {
-            dirs::data_dir()
-                .map(|d| d.join("subout"))
-                .unwrap_or_else(|| PathBuf::from("./runtime/data"))
+            platform.default_data_dir()
         };
 
         // 2. Config Dir resolution
@@ -114,16 +105,8 @@ impl AppPaths {
             PathBuf::from("./config")
         } else if is_dev {
             PathBuf::from("./runtime/config")
-        } else if cfg!(target_os = "linux") {
-            PathBuf::from("/etc/subout")
-        } else if cfg!(target_os = "macos") {
-            PathBuf::from("/Library/Application Support/Subout/config")
-        } else if cfg!(target_os = "windows") {
-            data_dir.join("config")
         } else {
-            dirs::config_dir()
-                .map(|c| c.join("subout"))
-                .unwrap_or_else(|| PathBuf::from("./runtime/config"))
+            platform.default_config_dir(&data_dir)
         };
 
         // 3. Log Dir resolution
@@ -135,14 +118,8 @@ impl AppPaths {
             PathBuf::from("./logs")
         } else if is_dev {
             PathBuf::from("./runtime/logs")
-        } else if cfg!(target_os = "linux") {
-            PathBuf::from("/var/log/subout")
-        } else if cfg!(target_os = "macos") {
-            PathBuf::from("/Library/Logs/Subout")
-        } else if cfg!(target_os = "windows") {
-            data_dir.join("logs")
         } else {
-            data_dir.join("logs")
+            platform.default_log_dir(&data_dir)
         };
 
         // 4. Runtime Dir resolution (for PID, sockets, transient sing-box temporary files)
@@ -154,14 +131,8 @@ impl AppPaths {
             PathBuf::from("./run")
         } else if is_dev {
             PathBuf::from("./runtime/run")
-        } else if cfg!(target_os = "linux") {
-            PathBuf::from("/run/subout")
-        } else if cfg!(target_os = "macos") {
-            PathBuf::from("/Library/Application Support/Subout/run")
-        } else if cfg!(target_os = "windows") {
-            data_dir.join("run")
         } else {
-            data_dir.join("run")
+            platform.default_runtime_dir(&data_dir)
         };
 
         Self {
@@ -257,11 +228,7 @@ impl AppPaths {
 
     /// Default target binary path for downloading kernel
     pub fn kernel_binary_path(&self) -> PathBuf {
-        let binary_name = if cfg!(target_os = "windows") {
-            "sing-box.exe"
-        } else {
-            "sing-box"
-        };
+        let binary_name = crate::platform::current_platform().kernel_binary_name();
         self.kernel_dir().join(binary_name)
     }
 
@@ -312,10 +279,8 @@ impl AppPaths {
                 candidates.push(dat_d.join("subout").join("singbox_auto.db"));
             }
 
-            // Legacy system locations
-            candidates.push(PathBuf::from("/var/lib/subout/subout.db"));
-            candidates.push(PathBuf::from("/Library/Application Support/subout/subout.db"));
-            candidates.push(PathBuf::from(r"C:\ProgramData\subout\subout.db"));
+            // Legacy system locations per platform
+            candidates.extend(crate::platform::current_platform().legacy_db_candidates(&self.config_dir));
 
             for src in candidates {
                 if src.exists() && src != target_db {
@@ -372,11 +337,7 @@ impl AppPaths {
         let min_version = std::env::var("SUBOUT_MIN_SINGBOX_VERSION")
             .unwrap_or_else(|_| "1.12.0".to_string());
 
-        let binary_name = if cfg!(target_os = "windows") {
-            "sing-box.exe"
-        } else {
-            "sing-box"
-        };
+        let binary_name = crate::platform::current_platform().kernel_binary_name();
 
         let mut candidates = Vec::new();
 
@@ -394,33 +355,8 @@ impl AppPaths {
         candidates.push(self.kernel_binary_path());
         candidates.push(self.data_dir.join("sing-box").join(binary_name));
 
-        // 4. Common standard system paths
-        let standard_candidates = if cfg!(target_os = "windows") {
-            vec![
-                PathBuf::from(format!(r"C:\Program Files\Subout\{}", binary_name)),
-                PathBuf::from(format!(r"C:\Program Files\sing-box\{}", binary_name)),
-                PathBuf::from(format!(r"C:\ProgramData\Subout\bin\{}", binary_name)),
-                PathBuf::from(format!(r"C:\ProgramData\subout\bin\{}", binary_name)),
-            ]
-        } else if cfg!(target_os = "macos") {
-            vec![
-                PathBuf::from("/usr/local/bin/sing-box"),
-                PathBuf::from("/opt/homebrew/bin/sing-box"),
-                PathBuf::from("/opt/local/bin/sing-box"),
-                PathBuf::from("/usr/bin/sing-box"),
-                PathBuf::from("/Library/Application Support/Subout/bin/sing-box"),
-            ]
-        } else {
-            vec![
-                PathBuf::from("/usr/local/bin/sing-box"),
-                PathBuf::from("/usr/bin/sing-box"),
-                PathBuf::from("/bin/sing-box"),
-                PathBuf::from("/usr/sbin/sing-box"),
-                PathBuf::from("/var/lib/subout/sing-box/sing-box"),
-                PathBuf::from("/var/lib/subout/bin/sing-box"),
-            ]
-        };
-        candidates.extend(standard_candidates);
+        // 4. Common standard system paths from platform strategy
+        candidates.extend(crate::platform::current_platform().standard_singbox_candidates(binary_name));
 
         // 5. Dev / local directories
         candidates.push(PathBuf::from(format!("./runtime/data/bin/{}", binary_name)));
@@ -516,20 +452,8 @@ pub fn is_valid_singbox(path: &Path) -> bool {
 
 /// Helper to find executable in PATH
 fn find_in_path(cmd_name: &str) -> Option<PathBuf> {
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    if let Ok(output) = std::process::Command::new(which_cmd).arg(cmd_name).output() {
-        if output.status.success() {
-            let out_str = String::from_utf8_lossy(&output.stdout);
-            for line in out_str.lines() {
-                let trimmed = line.trim();
-                if !trimmed.is_empty() {
-                    let p = PathBuf::from(trimmed);
-                    if p.exists() {
-                        return Some(p);
-                    }
-                }
-            }
-        }
+    if let Some(p) = crate::platform::current_platform().find_in_path(cmd_name) {
+        return Some(p);
     }
     // Try running directly
     if let Ok(output) = std::process::Command::new(cmd_name).arg("version").output() {

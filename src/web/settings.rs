@@ -23,11 +23,12 @@ pub async fn get_settings(
     headers: HeaderMap,
 ) -> Result<Json<SettingsResponse>, StatusCode> {
     check_auth(&state, &headers).await?;
+    let platform = crate::platform::current_platform();
     let is_password_env_set = std::env::var("ADMIN_PASSWORD").is_ok();
-    let is_root = crate::service::is_running_as_root();
-    let os = std::env::consts::OS.to_string();
-    let is_linux = cfg!(target_os = "linux");
-    let is_macos = cfg!(target_os = "macos");
+    let is_root = platform.is_running_as_root();
+    let os = platform.os_name().to_string();
+    let is_linux = platform.is_linux();
+    let is_macos = platform.is_macos();
     let binary_path = crate::kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
     let has_saved_sudo_pass = state.service_manager.has_saved_sudo_pass().await;
     Ok(Json(SettingsResponse {

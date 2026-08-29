@@ -24,8 +24,9 @@ pub async fn get_system_info(
     headers: HeaderMap,
 ) -> Result<Json<SystemInfoResponse>, StatusCode> {
     check_auth(&state, &headers).await?;
-    let os = std::env::consts::OS.to_string();
-    let is_linux = cfg!(target_os = "linux");
+    let platform = crate::platform::current_platform();
+    let os = platform.os_name().to_string();
+    let is_linux = platform.is_linux();
     Ok(Json(SystemInfoResponse { os, is_linux }))
 }
 
@@ -139,10 +140,11 @@ pub async fn get_system_mode(
         .unwrap_or(None)
         .unwrap_or_default() == "true";
 
-    let os = std::env::consts::OS.to_string();
+    let platform = crate::platform::current_platform();
+    let os = platform.os_name().to_string();
     let arch = std::env::consts::ARCH.to_string();
-    let is_linux = cfg!(target_os = "linux");
-    let is_root = crate::service::is_running_as_root();
+    let is_linux = platform.is_linux();
+    let is_root = platform.is_running_as_root();
 
     let kernel_exec = crate::kernel::get_singbox_executable();
     let kernel_installed = kernel_exec.is_some();

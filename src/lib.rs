@@ -5,6 +5,7 @@ pub mod generator;
 pub mod kernel;
 pub mod parser;
 pub mod paths;
+pub mod platform;
 pub mod service;
 pub mod simple_config;
 pub mod web;
