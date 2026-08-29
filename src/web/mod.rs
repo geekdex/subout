@@ -269,15 +269,8 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
                     bind_result = Some(l);
                     break;
                 }
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::AddrInUse {
-                        println!("[Warning] Port {} is in use, trying next port...", try_port);
-                    } else {
-                        println!(
-                            "[Warning] Failed to bind to port {}: {}, trying next port...",
-                            try_port, e
-                        );
-                    }
+                Err(_) => {
+                    // Port is occupied, continue probing next port
                 }
             }
         }

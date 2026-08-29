@@ -202,7 +202,7 @@ mod tests {
             "auto_redirect": true
         });
         macos.sanitize_inbound(&mut inbound);
-        assert_eq!(inbound.get("interface_name"), Some(&json!("")));
+        assert_eq!(inbound.get("interface_name"), None);
         assert_eq!(inbound.get("auto_redirect"), None);
         assert_eq!(inbound.get("strict_route"), Some(&json!(true)));
         assert_eq!(inbound.get("stack"), Some(&json!("mixed")));
@@ -226,7 +226,7 @@ mod tests {
             "auto_redirect": true
         });
         windows.sanitize_inbound(&mut inbound);
-        assert_eq!(inbound.get("interface_name"), Some(&json!("")));
+        assert_eq!(inbound.get("interface_name"), None);
         assert_eq!(inbound.get("auto_redirect"), None);
         assert_eq!(inbound.get("strict_route"), Some(&json!(true)));
     }

@@ -348,4 +348,97 @@ describe("DashboardView - Mode Switch Confirmation", () => {
     expect(dialog.confirmText).toBe("确认切换");
     expect(dialog.isDanger).toBe(false);
   });
+
+  it("disables start proxy service button when kernel is not installed", async () => {
+    const { default: DashboardView } = await import("./DashboardView.vue");
+    const { kernelInfo, serviceStatus } = await import("../store.js");
+
+    kernelInfo.value.is_installed = false;
+    kernelInfo.value.version = null;
+    serviceStatus.value.running = false;
+    serviceStatus.value.conflicting_processes = [];
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/dashboard/stats")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ subs: 1, nodes: 5, groups: 2 }),
+        });
+      }
+      if (url.includes("/api/kernel/info")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              is_installed: false,
+              version: null,
+              download_status: { status: "idle" },
+            }),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ running: false, conflicting_processes: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(DashboardView);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const startBtn = wrapper.find(".service-power-actions .btn-primary");
+    expect(startBtn.exists()).toBe(true);
+    expect(startBtn.text()).toContain("启动代理服务");
+    expect(startBtn.attributes("disabled")).toBeDefined();
+    expect(startBtn.element.disabled).toBe(true);
+  });
+
+  it("enables start proxy service button when kernel is installed and ready", async () => {
+    const { default: DashboardView } = await import("./DashboardView.vue");
+    const { kernelInfo, serviceStatus } = await import("../store.js");
+
+    kernelInfo.value.is_installed = true;
+    kernelInfo.value.version = "sing-box version 1.13.19";
+    kernelInfo.value.download_status = { status: "idle" };
+    serviceStatus.value.running = false;
+    serviceStatus.value.conflicting_processes = [];
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/dashboard/stats")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ subs: 1, nodes: 5, groups: 2 }),
+        });
+      }
+      if (url.includes("/api/kernel/info")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              is_installed: true,
+              version: "sing-box version 1.13.19",
+              download_status: { status: "idle" },
+            }),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ running: false, conflicting_processes: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(DashboardView);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const startBtn = wrapper.find(".service-power-actions .btn-primary");
+    expect(startBtn.exists()).toBe(true);
+    expect(startBtn.text()).toContain("启动代理服务");
+    expect(startBtn.attributes("disabled")).toBeUndefined();
+    expect(startBtn.element.disabled).toBe(false);
+  });
 });

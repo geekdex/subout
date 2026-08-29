@@ -357,13 +357,15 @@
             class="btn btn-primary btn-lg"
             :disabled="
               startingService ||
-              !kernelInfo.is_installed ||
+              !isKernelReady ||
               conflictingProcesses.length > 0
             "
             :title="
               conflictingProcesses.length > 0
                 ? '检测到外部 sing-box 进程冲突，请先关闭'
-                : ''
+                : !isKernelReady
+                  ? 'sing-box 内核尚未安装，请先点击上方卡片下载安装内核'
+                  : ''
             "
             @click="handleStartService()"
           >
@@ -698,6 +700,7 @@ import {
   appMode,
   switchAppMode,
   kernelInfo,
+  fetchKernelInfo,
   serviceStatus,
   systemModeInfo,
   fetchServiceStatus,
@@ -725,6 +728,15 @@ const killingPid = ref(null);
 const conflictingProcesses = computed(
   () => serviceStatus.value.conflicting_processes || [],
 );
+
+const isDownloading = computed(() => {
+  const s = kernelInfo.value?.download_status?.status;
+  return s === "downloading" || s === "extracting";
+});
+
+const isKernelReady = computed(() => {
+  return !!kernelInfo.value?.is_installed && !isDownloading.value;
+});
 
 let statusTimer = null;
 
@@ -912,8 +924,13 @@ const handleStartService = async (customSudoPass = null) => {
     );
     return;
   }
-  if (!kernelInfo.value.is_installed) {
-    showToast("sing-box 内核尚未安装，请先点击上方卡片下载安装内核", "danger");
+  if (!isKernelReady.value) {
+    showToast(
+      isDownloading.value
+        ? "sing-box 内核正在下载配置中，请稍候..."
+        : "sing-box 内核尚未安装，请先点击上方卡片下载安装内核",
+      "danger",
+    );
     return;
   }
   startingService.value = true;
@@ -1092,6 +1109,7 @@ const loadDashboardData = async () => {
     if (res.ok) {
       stats.value = await res.json();
     }
+    await fetchKernelInfo();
     await fetchServiceStatus();
   } catch {
     showToast("加载控制台统计失败", "danger");
@@ -1134,8 +1152,9 @@ const triggerFetchAll = async () => {
   }
 };
 
-onMounted(() => {
-  loadDashboardData();
+onMounted(async () => {
+  await fetchKernelInfo();
+  await loadDashboardData();
   initAjv();
   statusTimer = setInterval(fetchServiceStatus, 2000);
 });

@@ -35,7 +35,13 @@ impl PlatformStrategy for WindowsPlatform {
         Box::pin(async move { Ok(()) })
     }
 
-    fn setup_child_process(&self, _cmd: &mut tokio::process::Command) {}
+    fn setup_child_process(&self, _cmd: &mut tokio::process::Command) {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            _cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+    }
 
     fn tun_permission_error_guide(&self, err: &str, _singbox_bin: &Path) -> String {
         format!(
@@ -293,8 +299,8 @@ impl PlatformStrategy for WindowsPlatform {
             obj.remove("auto_redirect");
             if is_tun {
                 if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str()) {
-                    if iface == "tun0" {
-                        obj.insert("interface_name".to_string(), json!(""));
+                    if iface == "tun0" || iface.is_empty() {
+                        obj.remove("interface_name");
                     }
                 }
 
@@ -491,19 +497,25 @@ pub fn filter_conflicting_processes(
 }
 
 pub fn refresh_wininet_proxy() {
-    let script = r#"
-        $sig = @'
-        [DllImport("wininet.dll", SetLastError = true, CharSet=CharSet.Auto)]
-        public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
-'@
-        $type = Add-Type -MemberDefinition $sig -Name WinINetProxy -Namespace WinINet -PassThru
-        [WinINet.WinINetProxy]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)
-        [WinINet.WinINetProxy]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)
-    "#;
-
-    let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script])
-        .output();
+    #[cfg(windows)]
+    {
+        unsafe extern "system" {
+            fn InternetSetOptionW(
+                h_internet: *mut std::ffi::c_void,
+                dw_option: u32,
+                lp_buffer: *mut std::ffi::c_void,
+                dw_buffer_length: u32,
+            ) -> i32;
+        }
+        const INTERNET_OPTION_SETTINGS_CHANGED: u32 = 39;
+        const INTERNET_OPTION_REFRESH: u32 = 37;
+        unsafe {
+            InternetSetOptionW(std::ptr::null_mut(), INTERNET_OPTION_SETTINGS_CHANGED, std::ptr::null_mut(), 0);
+            InternetSetOptionW(std::ptr::null_mut(), INTERNET_OPTION_REFRESH, std::ptr::null_mut(), 0);
+        }
+    }
+    #[cfg(not(windows))]
+    {}
 }
 
 #[cfg(test)]

@@ -187,12 +187,12 @@ const logBox = ref(null);
 let pollTimer = null;
 
 const filteredLogs = computed(() => {
-  if (!logs.value || logs.value.length === 0) return "";
+  if (!Array.isArray(logs.value) || logs.value.length === 0) return "";
   if (!filterKeyword.value.trim()) {
     return logs.value.join("\n");
   }
   const kw = filterKeyword.value.toLowerCase();
-  return logs.value.filter((l) => l.toLowerCase().includes(kw)).join("\n");
+  return logs.value.filter((l) => typeof l === "string" && l.toLowerCase().includes(kw)).join("\n");
 });
 
 const scrollToBottom = () => {
@@ -210,7 +210,8 @@ const fetchLogs = async () => {
       headers: { Authorization: `Bearer ${token.value}` },
     });
     if (res.ok) {
-      logs.value = await res.json();
+      const data = await res.json();
+      logs.value = Array.isArray(data) ? data : [];
       scrollToBottom();
     }
     await fetchServiceStatus();

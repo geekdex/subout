@@ -404,8 +404,8 @@ impl PlatformStrategy for MacOsPlatform {
             obj.remove("auto_redirect");
             if is_tun {
                 if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str()) {
-                    if iface == "tun0" || !iface.starts_with("utun") {
-                        obj.insert("interface_name".to_string(), json!(""));
+                    if iface == "tun0" || iface.is_empty() || !iface.starts_with("utun") {
+                        obj.remove("interface_name");
                     }
                 }
 

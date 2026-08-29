@@ -639,9 +639,9 @@ else {
     $binPathCommand = "`"$TargetExe`" web -p $Port"
 
     & sc.exe create $ServiceName `
-        "binPath=$binPathCommand" `
-        "start=auto" `
-        "DisplayName=subout Proxy Manager" | Out-Null
+        "binPath= $binPathCommand" `
+        "start= auto" `
+        "DisplayName= subout Proxy Manager" | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
         throw "创建 Windows 服务失败，退出码: $LASTEXITCODE"
@@ -650,8 +650,8 @@ else {
     # Configure service recovery
 
     & sc.exe failure $ServiceName `
-        "reset=86400" `
-        "actions=restart/3000/restart/5000/restart/10000" | Out-Null
+        "reset= 86400" `
+        "actions= restart/3000/restart/5000/restart/10000" | Out-Null
 
     # Set environment variable for service mode
 

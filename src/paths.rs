@@ -284,20 +284,18 @@ impl AppPaths {
 
             for src in candidates {
                 if src.exists() && src != target_db {
-                    if let Err(e) = std::fs::rename(&src, &target_db) {
-                        eprintln!(
-                            "[Warning] Failed to move database from {:?} to {:?}: {}",
-                            src, target_db, e
-                        );
-                        // Try copying if moving across filesystems failed
-                        if let Ok(_) = std::fs::copy(&src, &target_db) {
-                            let _ = std::fs::remove_file(&src);
-                            println!("[Info] Migrated database file from {:?} to {:?}", src, target_db);
-                            break;
-                        }
-                    } else {
+                    if std::fs::rename(&src, &target_db).is_ok() {
                         println!("[Info] Migrated database file from {:?} to {:?}", src, target_db);
                         break;
+                    } else if std::fs::copy(&src, &target_db).is_ok() {
+                        let _ = std::fs::remove_file(&src);
+                        println!("[Info] Migrated database file from {:?} to {:?}", src, target_db);
+                        break;
+                    } else {
+                        eprintln!(
+                            "[Warning] Failed to migrate database from {:?} to {:?}",
+                            src, target_db
+                        );
                     }
                 }
             }

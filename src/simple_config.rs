@@ -350,17 +350,18 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             let effective_stack = platform.effective_tun_stack(cfg.inbound.tun_stack.as_str());
             let iface_name = platform.default_tun_interface_name();
             let strict_route = platform.default_tun_strict_route();
-            json!([
-                {
-                    "type": "tun",
-                    "tag": "tun-in",
-                    "interface_name": iface_name,
-                    "address": ["172.19.0.1/30", "fd00::1/126"],
-                    "auto_route": cfg.inbound.tun_auto_route,
-                    "strict_route": strict_route,
-                    "stack": effective_stack
-                }
-            ])
+            let mut tun_obj = json!({
+                "type": "tun",
+                "tag": "tun-in",
+                "address": ["172.19.0.1/30", "fd00::1/126"],
+                "auto_route": cfg.inbound.tun_auto_route,
+                "strict_route": strict_route,
+                "stack": effective_stack
+            });
+            if !iface_name.is_empty() {
+                tun_obj["interface_name"] = json!(iface_name);
+            }
+            json!([tun_obj])
         }
         _ => {
             // Mixed port HTTP / SOCKS5
