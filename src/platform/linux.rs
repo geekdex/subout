@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+#[cfg(unix)]
+use anyhow::anyhow;
 use serde_json::Value;
 
 use crate::platform::{BoxFuture, PlatformStrategy};
@@ -95,13 +97,13 @@ impl PlatformStrategy for LinuxPlatform {
         })
     }
 
-    fn setup_child_process(&self, cmd: &mut tokio::process::Command) {
+    fn setup_child_process(&self, _cmd: &mut tokio::process::Command) {
         #[cfg(unix)]
-        cmd.process_group(0);
+        _cmd.process_group(0);
 
         #[cfg(target_os = "linux")]
         unsafe {
-            cmd.pre_exec(|| {
+            _cmd.pre_exec(|| {
                 unsafe extern "C" {
                     fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32;
                 }
@@ -149,13 +151,13 @@ impl PlatformStrategy for LinuxPlatform {
         managed_pid: Option<u32>,
         running_config_path: &Path,
     ) -> Vec<ConflictingProcessInfo> {
-        let current_pid = std::process::id();
-        let config_path_str = running_config_path.to_string_lossy().to_string();
-        let mut results: Vec<ConflictingProcessInfo> = Vec::new();
-        let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-
         #[cfg(unix)]
         {
+            let current_pid = std::process::id();
+            let config_path_str = running_config_path.to_string_lossy().to_string();
+            let mut results: Vec<ConflictingProcessInfo> = Vec::new();
+            let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
             // 1. Query ps
             if let Ok(output) = std::process::Command::new("ps")
                 .args(["-eo", "pid,ppid,comm,args"])
@@ -228,9 +230,8 @@ impl PlatformStrategy for LinuxPlatform {
                     }
                 }
             }
-        }
 
-        // 2. Linux /proc inspection
+            // 2. Linux /proc inspection
         if let Ok(entries) = std::fs::read_dir("/proc") {
             for entry in entries.flatten() {
                 let file_name = entry.file_name();
@@ -326,37 +327,43 @@ impl PlatformStrategy for LinuxPlatform {
         }
 
         // 3. Systemd inspection
-        if let Ok(output) = std::process::Command::new("systemctl")
-            .args(["show", "sing-box", "-p", "MainPID", "-p", "ActiveState"])
-            .output()
-        {
-            if output.status.success() {
-                let out_str = String::from_utf8_lossy(&output.stdout);
-                let mut is_active = false;
-                let mut s_pid = 0u32;
-                for line in out_str.lines() {
-                    if line.starts_with("ActiveState=active") {
-                        is_active = true;
-                    } else if line.starts_with("MainPID=") {
-                        if let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>() {
-                            s_pid = p;
+            if let Ok(output) = std::process::Command::new("systemctl")
+                .args(["show", "sing-box", "-p", "MainPID", "-p", "ActiveState"])
+                .output()
+            {
+                if output.status.success() {
+                    let out_str = String::from_utf8_lossy(&output.stdout);
+                    let mut is_active = false;
+                    let mut s_pid = 0u32;
+                    for line in out_str.lines() {
+                        if line.starts_with("ActiveState=active") {
+                            is_active = true;
+                        } else if line.starts_with("MainPID=") {
+                            if let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>() {
+                                s_pid = p;
+                            }
+                        }
+                    }
+                    if is_active && s_pid > 1 && s_pid != current_pid && Some(s_pid) != managed_pid {
+                        if seen_pids.insert(s_pid) {
+                            results.push(ConflictingProcessInfo {
+                                pid: s_pid,
+                                name: "sing-box (systemd)".to_string(),
+                                cmdline: Some("systemctl: sing-box.service (Active)".to_string()),
+                                exe_path: Some("/usr/bin/sing-box".to_string()),
+                            });
                         }
                     }
                 }
-                if is_active && s_pid > 1 && s_pid != current_pid && Some(s_pid) != managed_pid {
-                    if seen_pids.insert(s_pid) {
-                        results.push(ConflictingProcessInfo {
-                            pid: s_pid,
-                            name: "sing-box (systemd)".to_string(),
-                            cmdline: Some("systemctl: sing-box.service (Active)".to_string()),
-                            exe_path: Some("/usr/bin/sing-box".to_string()),
-                        });
-                    }
-                }
             }
-        }
 
-        results
+            results
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (managed_pid, running_config_path);
+            Vec::new()
+        }
     }
 
     fn kill_process<'a>(
@@ -396,12 +403,12 @@ impl PlatformStrategy for LinuxPlatform {
         running_config_path: &'a Path,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
-            let current_pid = std::process::id();
-            let config_path_str = running_config_path.to_string_lossy().to_string();
-            let mut pids_to_kill: Vec<u32> = Vec::new();
-
             #[cfg(unix)]
             {
+                let current_pid = std::process::id();
+                let config_path_str = running_config_path.to_string_lossy().to_string();
+                let mut pids_to_kill: Vec<u32> = Vec::new();
+
                 if let Ok(output) = std::process::Command::new("ps")
                     .args(["-eo", "pid,ppid,comm,args"])
                     .output()
@@ -430,50 +437,54 @@ impl PlatformStrategy for LinuxPlatform {
                         }
                     }
                 }
-            }
 
-            if let Ok(entries) = std::fs::read_dir("/proc") {
-                for entry in entries.flatten() {
-                    if let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() {
-                        if pid == current_pid
-                            || pid <= 1
-                            || Some(pid) == exclude_pid
-                            || pids_to_kill.contains(&pid)
-                        {
-                            continue;
-                        }
-                        let cmdline_path = entry.path().join("cmdline");
-                        if let Ok(bytes) = std::fs::read(&cmdline_path) {
-                            let cmdline = bytes
-                                .split(|&b| b == 0)
-                                .filter(|s| !s.is_empty())
-                                .map(|s| String::from_utf8_lossy(s).to_string())
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            if cmdline.contains(&config_path_str)
-                                || cmdline.contains("sing-box-running.json")
+                if let Ok(entries) = std::fs::read_dir("/proc") {
+                    for entry in entries.flatten() {
+                        if let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() {
+                            if pid == current_pid
+                                || pid <= 1
+                                || Some(pid) == exclude_pid
+                                || pids_to_kill.contains(&pid)
                             {
-                                pids_to_kill.push(pid);
+                                continue;
+                            }
+                            let cmdline_path = entry.path().join("cmdline");
+                            if let Ok(bytes) = std::fs::read(&cmdline_path) {
+                                let cmdline = bytes
+                                    .split(|&b| b == 0)
+                                    .filter(|s| !s.is_empty())
+                                    .map(|s| String::from_utf8_lossy(s).to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                if cmdline.contains(&config_path_str)
+                                    || cmdline.contains("sing-box-running.json")
+                                {
+                                    pids_to_kill.push(pid);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if pids_to_kill.is_empty() {
-                return;
-            }
-
-            for &pid in &pids_to_kill {
-                self.kill_process(pid, sudo_pass, 15).await;
-            }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-            for &pid in &pids_to_kill {
-                if self.is_pid_alive(pid) {
-                    self.kill_process(pid, sudo_pass, 9).await;
+                if pids_to_kill.is_empty() {
+                    return;
                 }
+
+                for &pid in &pids_to_kill {
+                    self.kill_process(pid, sudo_pass, 15).await;
+                }
+
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+                for &pid in &pids_to_kill {
+                    if self.is_pid_alive(pid) {
+                        self.kill_process(pid, sudo_pass, 9).await;
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (sudo_pass, exclude_pid, running_config_path);
             }
         })
     }

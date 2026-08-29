@@ -38,7 +38,6 @@ impl PlatformStrategy for WindowsPlatform {
     fn setup_child_process(&self, _cmd: &mut tokio::process::Command) {
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             _cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
     }

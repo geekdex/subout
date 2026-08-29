@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+#[cfg(unix)]
+use anyhow::anyhow;
 use serde_json::{Value, json};
 
 use crate::platform::{BoxFuture, PlatformStrategy};
@@ -138,13 +140,13 @@ impl PlatformStrategy for MacOsPlatform {
         managed_pid: Option<u32>,
         running_config_path: &Path,
     ) -> Vec<ConflictingProcessInfo> {
-        let current_pid = std::process::id();
-        let config_path_str = running_config_path.to_string_lossy().to_string();
-        let mut results: Vec<ConflictingProcessInfo> = Vec::new();
-        let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-
         #[cfg(unix)]
         {
+            let current_pid = std::process::id();
+            let config_path_str = running_config_path.to_string_lossy().to_string();
+            let mut results: Vec<ConflictingProcessInfo> = Vec::new();
+            let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
             if let Ok(output) = std::process::Command::new("ps")
                 .args(["-eo", "pid,ppid,comm,args"])
                 .output()
@@ -216,9 +218,14 @@ impl PlatformStrategy for MacOsPlatform {
                     }
                 }
             }
-        }
 
-        results
+            results
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (managed_pid, running_config_path);
+            Vec::new()
+        }
     }
 
     fn kill_process<'a>(
@@ -258,12 +265,12 @@ impl PlatformStrategy for MacOsPlatform {
         running_config_path: &'a Path,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
-            let current_pid = std::process::id();
-            let config_path_str = running_config_path.to_string_lossy().to_string();
-            let mut pids_to_kill: Vec<u32> = Vec::new();
-
             #[cfg(unix)]
             {
+                let current_pid = std::process::id();
+                let config_path_str = running_config_path.to_string_lossy().to_string();
+                let mut pids_to_kill: Vec<u32> = Vec::new();
+
                 if let Ok(output) = std::process::Command::new("ps")
                     .args(["-eo", "pid,ppid,comm,args"])
                     .output()
@@ -292,22 +299,26 @@ impl PlatformStrategy for MacOsPlatform {
                         }
                     }
                 }
-            }
 
-            if pids_to_kill.is_empty() {
-                return;
-            }
-
-            for &pid in &pids_to_kill {
-                self.kill_process(pid, sudo_pass, 15).await;
-            }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-            for &pid in &pids_to_kill {
-                if self.is_pid_alive(pid) {
-                    self.kill_process(pid, sudo_pass, 9).await;
+                if pids_to_kill.is_empty() {
+                    return;
                 }
+
+                for &pid in &pids_to_kill {
+                    self.kill_process(pid, sudo_pass, 15).await;
+                }
+
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+                for &pid in &pids_to_kill {
+                    if self.is_pid_alive(pid) {
+                        self.kill_process(pid, sudo_pass, 9).await;
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (sudo_pass, exclude_pid, running_config_path);
             }
         })
     }
