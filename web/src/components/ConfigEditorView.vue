@@ -9278,6 +9278,10 @@ const saveRunningConfigSettings = async (
           runningConfigModal.status = "failed";
           runningConfigModal.message = data.message || "运行配置更新失败";
           const errLower = (data.message || "").toLowerCase();
+          const isWindows =
+            systemModeInfo.value?.os === "windows" ||
+            (data.message || "").includes("Windows") ||
+            (data.message || "").includes("以管理员身份运行");
           const isPermissionErr =
             errLower.includes("sudo 密码") ||
             errLower.includes("root") ||
@@ -9287,7 +9291,7 @@ const saveRunningConfigSettings = async (
             errLower.includes("operation not permitted") ||
             errLower.includes("permission denied");
 
-          if (isPermissionErr) {
+          if (isPermissionErr && !isWindows) {
             setSessionSudoPassword("");
             if (systemModeInfo.value) {
               systemModeInfo.value.has_saved_sudo = false;

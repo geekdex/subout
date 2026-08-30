@@ -378,6 +378,9 @@ export function promptDialog(
  * @returns {Promise<string|null>}
  */
 export async function promptSudoPassword(customMessage = "") {
+  if (systemModeInfo.value?.os === "windows") {
+    return null;
+  }
   const defaultMsg =
     "🛡️ 开启 TUN 虚拟网卡需要系统管理员 (root) 权限以接管系统流量。\n\n请输入系统的 Sudo / 管理员密码进行提权授权：";
   const pass = await promptDialog(customMessage || defaultMsg, "", {

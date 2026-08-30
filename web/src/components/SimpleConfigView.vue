@@ -933,6 +933,10 @@ const saveConfig = async (apply = false, customSudoPass = null) => {
     } else {
       const err = await res.text();
       const errLower = err.toLowerCase();
+      const isWindows =
+        systemModeInfo.value?.os === "windows" ||
+        err.includes("Windows") ||
+        err.includes("以管理员身份运行");
       const isPermissionErr =
         err.includes("Sudo 密码") ||
         err.includes("root") ||
@@ -942,7 +946,7 @@ const saveConfig = async (apply = false, customSudoPass = null) => {
         errLower.includes("operation not permitted") ||
         errLower.includes("permission denied");
 
-      if (apply && isPermissionErr) {
+      if (apply && isPermissionErr && !isWindows) {
         setSessionSudoPassword("");
         if (systemModeInfo.value) {
           systemModeInfo.value.has_saved_sudo = false;

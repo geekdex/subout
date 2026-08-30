@@ -433,17 +433,18 @@ impl SingBoxServiceManager {
                     let clean = strip_ansi_codes(&line);
                     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                     let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
-                    let lower = clean.to_lowercase();
-                    if lower.contains("sing-box started")
-                        || lower.contains("server started at")
-                        || lower.contains("started inbound")
-                        || lower.contains("inbound/")
-                        || lower.contains("router: started")
-                    {
-                        *ready_clone.write().await = true;
-                    }
                     if is_actual_singbox_error(&clean) {
                         *last_error_clone.write().await = Some(clean.clone());
+                    } else {
+                        let lower = clean.to_lowercase();
+                        if lower.contains("sing-box started")
+                            || lower.contains("server started at")
+                            || lower.contains("started inbound")
+                            || lower.contains(": started")
+                            || lower.contains("router: started")
+                        {
+                            *ready_clone.write().await = true;
+                        }
                     }
                     let mut l = logs_clone.write().await;
                     if l.len() >= MAX_LOG_LINES {
@@ -465,17 +466,18 @@ impl SingBoxServiceManager {
                     let clean = strip_ansi_codes(&line);
                     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                     let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
-                    let lower = clean.to_lowercase();
-                    if lower.contains("sing-box started")
-                        || lower.contains("server started at")
-                        || lower.contains("started inbound")
-                        || lower.contains("inbound/")
-                        || lower.contains("router: started")
-                    {
-                        *ready_clone.write().await = true;
-                    }
                     if is_actual_singbox_error(&clean) {
                         *last_error_clone.write().await = Some(clean.clone());
+                    } else {
+                        let lower = clean.to_lowercase();
+                        if lower.contains("sing-box started")
+                            || lower.contains("server started at")
+                            || lower.contains("started inbound")
+                            || lower.contains(": started")
+                            || lower.contains("router: started")
+                        {
+                            *ready_clone.write().await = true;
+                        }
                     }
                     let mut l = logs_clone.write().await;
                     if l.len() >= MAX_LOG_LINES {
@@ -495,7 +497,13 @@ impl SingBoxServiceManager {
             if !self.is_running().await {
                 break;
             }
-            if *self.ready.read().await {
+            if self.last_error.read().await.is_some() {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                if !self.is_running().await {
+                    break;
+                }
+            }
+            if *self.ready.read().await && self.last_error.read().await.is_none() {
                 started_ready = true;
                 break;
             }
@@ -523,7 +531,16 @@ impl SingBoxServiceManager {
                 return Err(anyhow!(guide));
             }
 
-            if (tun_mode || err_upper.contains("TUNSETIFF") || err_upper.contains("OPERATION NOT PERMITTED") || err_upper.contains("PERMISSION DENIED") || err_upper.contains("WINTUN") || err_upper.contains("ACCESS IS DENIED")) && !as_root && !has_sudo_pass {
+            let is_permission_err = err_upper.contains("TUNSETIFF")
+                || err_upper.contains("OPERATION NOT PERMITTED")
+                || err_upper.contains("PERMISSION DENIED")
+                || err_upper.contains("WINTUN")
+                || err_upper.contains("ACCESS IS DENIED")
+                || err_upper.contains("REQUIRES ROOT")
+                || err_upper.contains("REQUIRE ROOT")
+                || err_upper.contains("MUST BE ROOT");
+
+            if is_permission_err && !as_root && !has_sudo_pass {
                 let guide = platform.tun_permission_error_guide(&err, &singbox_bin);
                 self.append_log(&format!("❌ {}", guide)).await;
                 *self.last_error.write().await = Some(guide.clone());
@@ -822,7 +839,6 @@ pub fn is_actual_singbox_error(line: &str) -> bool {
         || upper.contains("OPERATION NOT PERMITTED")
         || upper.contains("PERMISSION DENIED")
         || upper.contains("TUNSETIFF")
-        || upper.contains("WINTUN")
         || upper.contains("ACCESS IS DENIED")
         || upper.contains("BAD TUN NAME")
         || upper.contains("INCORRECT PASSWORD")
@@ -863,9 +879,12 @@ mod tests {
         assert!(!is_actual_singbox_error("INFO network: updated default interface"));
         assert!(!is_actual_singbox_error("INFO router: dns rule action predefined rcode NOERROR"));
         assert!(!is_actual_singbox_error("INFO sing-box started (1.10s)"));
+        assert!(!is_actual_singbox_error("INFO[0000] inbound/tun[tun-in]: started"));
 
         // Genuine fatal or errors
         assert!(is_actual_singbox_error("FATAL[0000] create service: rule-set error"));
+        assert!(is_actual_singbox_error("FATAL[0002] start service: start logger: open /var/log/sing-box.log: The network path was not found."));
+        assert!(is_actual_singbox_error("FATAL[0001] start service: start inbound/tun[tun-in]: configure tun interface: Access is denied."));
         assert!(is_actual_singbox_error("ERROR inbound/mixed[mixed-in]: tcp server failed to bind: address already in use"));
         assert!(is_actual_singbox_error("panic: runtime error"));
         assert!(is_actual_singbox_error("operation not permitted"));

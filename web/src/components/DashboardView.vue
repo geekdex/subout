@@ -953,6 +953,10 @@ const handleStartService = async (customSudoPass = null) => {
     } else {
       const err = await res.text();
       const errLower = err.toLowerCase();
+      const isWindows =
+        systemModeInfo.value?.os === "windows" ||
+        err.includes("Windows") ||
+        err.includes("以管理员身份运行");
       const isPermissionErr =
         err.includes("Sudo 密码") ||
         err.includes("root") ||
@@ -961,7 +965,7 @@ const handleStartService = async (customSudoPass = null) => {
         errLower.includes("tunsetiff") ||
         errLower.includes("operation not permitted") ||
         errLower.includes("permission denied");
-      if (isPermissionErr) {
+      if (isPermissionErr && !isWindows) {
         setSessionSudoPassword("");
         if (systemModeInfo.value) {
           systemModeInfo.value.has_saved_sudo = false;
@@ -1056,6 +1060,10 @@ const handleRestartService = async (customSudoPass = null) => {
     } else {
       const err = await res.text();
       const errLower = err.toLowerCase();
+      const isWindows =
+        systemModeInfo.value?.os === "windows" ||
+        err.includes("Windows") ||
+        err.includes("以管理员身份运行");
       const isPermissionErr =
         err.includes("Sudo 密码") ||
         err.includes("root") ||
@@ -1064,7 +1072,7 @@ const handleRestartService = async (customSudoPass = null) => {
         errLower.includes("tunsetiff") ||
         errLower.includes("operation not permitted") ||
         errLower.includes("permission denied");
-      if (isPermissionErr) {
+      if (isPermissionErr && !isWindows) {
         setSessionSudoPassword("");
         if (systemModeInfo.value) {
           systemModeInfo.value.has_saved_sudo = false;
