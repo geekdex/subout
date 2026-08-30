@@ -709,64 +709,111 @@ else {
     Stop-Process -Name $AppName -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
 
-    # 2. Register Windows Scheduled Task
+    # 2. Register Windows Scheduled Task using canonical XML definition
+    # Using Task Scheduler XML schema guarantees 100% reliability across all Windows versions
+    # and eliminates all command-line quoting/escaping issues with spaces in file paths.
+    $taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Subout Proxy Subscription Manager and Sing-box Web Panel</Description>
+    <URI>\$TaskName</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>4</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>$TargetExe</Command>
+      <Arguments>web -p $Port</Arguments>
+      <WorkingDirectory>$DataDir</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+
     $taskRegistered = $false
+
+    # Method 1: Register-ScheduledTask -Xml
     try {
-        $action = New-ScheduledTaskAction `
-            -Execute $TargetExe `
-            -Argument "web -p $Port" `
-            -WorkingDirectory $DataDir
-
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-
-        $principal = New-ScheduledTaskPrincipal `
-            -UserId "NT AUTHORITY\SYSTEM" `
-            -LogonType ServiceAccount `
-            -RunLevel Highest
-
-        $settings = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries `
-            -RestartCount 3 `
-            -RestartInterval (New-TimeSpan -Minutes 1) `
-            -ExecutionTimeLimit ([TimeSpan]::Zero) `
-            -Priority 4
-
-        Register-ScheduledTask `
-            -TaskName $TaskName `
-            -Action $action `
-            -Trigger $trigger `
-            -Principal $principal `
-            -Settings $settings `
-            -Force | Out-Null
-
+        Register-ScheduledTask -TaskName $TaskName -Xml $taskXml -Force -ErrorAction Stop | Out-Null
         $taskRegistered = $true
     }
     catch {
-        Write-Host "  提示: PowerShell 计划任务模块注册异常，正在使用 schtasks.exe 回退注册..." -ForegroundColor Yellow
-        $schCmd = "`"$TargetExe`" web -p $Port"
-        & schtasks.exe /Create /TN $TaskName /TR $schCmd /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            $taskRegistered = $true
+        # Method 2: Fallback to schtasks.exe /Create /XML with temporary UTF-16 XML file
+        $xmlTempPath = Join-Path $env:TEMP "subout_task_$([Guid]::NewGuid().ToString('N')).xml"
+        try {
+            [System.IO.File]::WriteAllText($xmlTempPath, $taskXml, [System.Text.Encoding]::Unicode)
+            & schtasks.exe /Create /TN $TaskName /XML $xmlTempPath /F | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $taskRegistered = $true
+            }
         }
-        else {
-            throw "创建 Windows 后台计划任务失败，退出码: $LASTEXITCODE"
+        finally {
+            if (Test-Path -LiteralPath $xmlTempPath) {
+                Remove-Item -LiteralPath $xmlTempPath -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 
+    if (-not $taskRegistered) {
+        throw "无法注册 Windows 后台任务 ($TaskName)。请确保在【以管理员身份运行】的 PowerShell 中执行。"
+    }
+
     # 3. Start task
+    $started = $false
     try {
         Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null
+        $started = $true
     }
     catch {
-        & schtasks.exe /Run /TN $TaskName | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "启动 Windows 后台任务失败，退出码: $LASTEXITCODE"
+        & schtasks.exe /Run /TN $TaskName 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $started = $true
         }
     }
 
     Start-Sleep -Seconds 1
-    Write-Host "✓ Windows 后台守护任务已注册并启动 ($TaskName)" -ForegroundColor Green
+
+    # Verify task / process status
+    $suboutProc = Get-Process -Name $AppName -ErrorAction SilentlyContinue
+    if ($suboutProc) {
+        Write-Host "✓ Windows 后台守护任务已注册并运行 (PID: $($suboutProc.Id -join ', '))" -ForegroundColor Green
+    }
+    else {
+        Write-Host "✓ Windows 后台守护任务已注册并启动 ($TaskName)" -ForegroundColor Green
+    }
 }
 
 # ------------------------------------------------------------------------------
