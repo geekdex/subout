@@ -14,17 +14,41 @@ fn main() {
     }
     let index_path = dest_dir.join("index.html");
 
-    // Try building the frontend if npm is available and web/package.json exists
+    // Try building the frontend if pnpm / npm is available and web/package.json exists
     let web_dir = Path::new("web");
     if web_dir.join("package.json").exists() {
         let should_build = !index_path.exists() || is_web_src_newer(&index_path);
         if should_build {
+            let pnpm_cmd = if cfg!(target_os = "windows") { "pnpm.cmd" } else { "pnpm" };
             let npm_cmd = if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" };
-            let status = Command::new(npm_cmd)
+
+            // Install dependencies if node_modules is missing
+            if !web_dir.join("node_modules").exists() {
+                let _ = Command::new(pnpm_cmd)
+                    .current_dir("web")
+                    .arg("install")
+                    .status()
+                    .or_else(|_| {
+                        Command::new(npm_cmd)
+                            .current_dir("web")
+                            .arg("install")
+                            .status()
+                    });
+            }
+
+            // Try building with pnpm first, then fallback to npm
+            let status = Command::new(pnpm_cmd)
                 .current_dir("web")
                 .arg("run")
                 .arg("build")
-                .status();
+                .status()
+                .or_else(|_| {
+                    Command::new(npm_cmd)
+                        .current_dir("web")
+                        .arg("run")
+                        .arg("build")
+                        .status()
+                });
             if status.map(|s| s.success()).unwrap_or(false) {
                 let mod_path = Path::new("src/web/mod.rs");
                 if mod_path.exists() {

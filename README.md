@@ -1,21 +1,38 @@
-# subout
+# 🚀 subout
 
-专为 **sing-box** 生态打造的轻量级代理订阅转换 CLI 工具与 Web 可视化管理面板。
+> **专为 sing-box 打造的下一代跨平台代理订阅转换与 Web 可视化管理面板。**  
+> *打破单订阅孤岛壁垒，汇聚多源节点统一调度；兼顾小白开箱即用与专业深度定制，支持三大操作系统无感透明代理。*
 
 [![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange?logo=rust)](https://www.rust-lang.org/)
-[![sing-box](https://img.shields.io/badge/sing--box-Outbounds-blue)](https://sing-box.sagernet.org/)
+[![sing-box](https://img.shields.io/badge/sing--box-1.12%2B-blue)](https://sing-box.sagernet.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#-快速开始-quick-start)
 [![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-green)](LICENSE-MIT)
-
-`subout` 旨在解决 sing-box 配置过程中订阅转换繁琐、节点清洗困难以及多订阅管理复杂的问题。支持一键解析 VMess/VLESS/SS/Trojan/Socks/HTTP/Anytls/Hysteria(2) 等代理协议并导出为 sing-box `outbounds` 配置，同时提供嵌入式 Web 面板用于多订阅聚合、策略组配置与版本历史管理。
 
 ---
 
-## 🚀 一、直接使用 (Usage & Quick Start)
+## 💡 为什么选择 subout？
 
-### 1. 安装与服务部署
+市面上多数代理客户端只能「选定单个订阅使用单个订阅内的节点」，不同机场服务商与自建节点割裂严重，多订阅用户体验繁琐。  
+**subout 彻底重构了这一体验**：
 
-#### 方式 A：在线一键安装（推荐普通用户）
-自动从 GitHub 下载最新 Release 预编译产物，并注册系统后台守护服务：
+* 🔄 **跨订阅全局节点池**：将多个不同服务商的订阅链接、本地文件、自建节点或 Base64 汇集为统一「节点池」，策略组（如 `AUTO 自动测速`、`流媒体`、`AI 专线`）可跨订阅自由调度所有节点。
+* 🎭 **双模式自由切换**：
+  * **小白极简模式**：10 秒快速上手，填入订阅即可一键开启透明代理，全自动配置 DNS 与国内外分流。
+  * **专业高定制模式**：全功能可视化配置中心，精细掌控 DNS、自定义策略组、可视化路由规则链、实时配置语法校验与历史版本秒级回滚。
+* 🌐 **全平台无感透明代理**：
+  * **macOS**：自动接管网络代理，TUN 模式下**独创系统 DNS 转发至虚拟网关 (`172.19.0.1`)**，彻底终结 `mDNSResponder` 导致的 DNS 污染与死锁，退出时自动还原 DHCP DNS，绝不残留断网。
+  * **Windows**：自动配置系统代理并**广播 WinINet API 实时刷新**，浏览器无需重启即可即时生效；退出时自动恢复直连。
+  * **Linux**：原生基于 TUN 虚拟网卡与网络 Capabilities (`CAP_NET_ADMIN`) 实现内核级透明代理。
+* ⚡ **单文件零依赖 & 极速启停**：前端 Vue 3 UI 编译期嵌入单个可执行文件，无外部静态资源依赖；服务重启/退出经针对性优化，可在 **0.3 秒内瞬间完成**。
+* 🛡️ **智能净化与安全审计**：自动过滤到期/流量/官网等非节点广告信息，智能追加重名序号，主动扫描并预警 `allowInsecure: true` 等中间人攻击安全隐患。
+
+---
+
+## 🚀 快速开始 (Quick Start)
+
+### 1. 方式 A：在线一键安装（推荐普通用户）
+
+脚本会自动识别操作系统与 CPU 架构，从 GitHub Releases 下载最新预编译包并配置开机自启后台守护服务：
 
 * **Linux & macOS (Bash)**:
   ```bash
@@ -26,69 +43,81 @@
   irm https://raw.githubusercontent.com/geekdex/subout/main/install.ps1 | iex
   ```
 
-#### 方式 B：开发者源码本地编译安装（推荐开发者）
-在源码目录中一键编译最新程序并一步安装注册到系统：
+安装成功后打开浏览器访问：`http://127.0.0.1:1234`（默认登录密码：`admin`）。
+
+---
+
+### 2. 方式 B：开发者源码本地编译安装（推荐二次开发）
+
+在源码目录下直接执行安装脚本，会自动进入 `web` 执行 `pnpm build` 前端打包，并返回根目录执行 `cargo build --release` 后覆盖安装并重启服务：
 
 * **Linux & macOS (Bash)**:
   ```bash
-  # 运行源码安装脚本（自动调用 cargo build --release 编译最新代码并覆盖安装至 /usr/local/bin/subout）
   sudo ./install.sh
-
-  # 【常用高级选项】
-  sudo ./install.sh -p 8080       # 指定 Web 面板服务端口
-  sudo ./install.sh --no-service  # 仅安装二进制文件，不配置/启动守护服务
   ```
-  > 💡 *提示：只要在源码目录下运行 `sudo ./install.sh`，脚本会自动调用 `cargo build --release` 编译最新代码并覆盖安装，随后运行重启命令即可立即生效。*
-
 * **Windows (PowerShell 管理员)**:
   ```powershell
-  # 1. 编译最新 Release 产物
-  cargo build --release
-
-  # 2. 运行安装脚本（安装至 C:\Program Files\Subout 并注册 Windows 服务）
   .\install.ps1
-
-  # 【常用高级选项】
-  .\install.ps1 -Port 8080        # 指定 Web 面板服务端口
-  .\install.ps1 -NoService        # 仅安装二进制文件，不注册 Windows 服务
   ```
 
 ---
 
-### 2. 运行模式
+### 3. 常用服务管理与一键卸载速查表
 
-#### 模式 A：Web 可视化面板模式
-未提供 CLI 导出参数时默认启动 Web 面板：
+| 操作需求 | Linux | macOS | Windows (PowerShell) |
+| :--- | :--- | :--- | :--- |
+| **查看服务状态** | `systemctl status subout` | `launchctl list \| grep subout` | `Get-Service subout` |
+| **查看实时日志** | `sudo journalctl -u subout -f` | `tail -f "/Library/Logs/Subout/stdout.log"` | `Get-Content C:\ProgramData\Subout\logs\stdout.log -Wait -Tail 50` |
+| **重启后台服务** | `sudo systemctl restart subout` | `sudo launchctl kickstart -k system/io.github.geekdex.subout` | `Restart-Service subout` |
+| **停止后台服务** | `sudo systemctl stop subout` | `sudo launchctl unload -w "/Library/LaunchDaemons/io.github.geekdex.subout.plist"` | `Stop-Service subout` |
+| **一键卸载 (保留数据)** | `sudo ./install.sh uninstall` | `sudo ./install.sh uninstall` | `.\install.ps1 uninstall` |
+| **彻底卸载 (清理数据)** | `sudo ./install.sh uninstall --purge` | `sudo ./install.sh uninstall --purge` | `.\install.ps1 uninstall -Purge` |
+
+---
+
+## 🌟 核心功能全景
+
+### 1️⃣ 多订阅聚合与统一节点池
+* **全协议兼容**：支持 VMess / VLESS / Shadowsocks / Trojan / SOCKS5 / HTTP / Anytls / Hysteria / Hysteria2 等协议。
+* **跨源汇聚**：可添加多条不同机场的 HTTP/HTTPS 订阅链接、Base64 编码文本、节点 URI 或本地文件。
+* **智能去重与净化**：自动剔除包含 `流量`、`到期`、`官网`、`公告` 的非代理节点；自动重名消重（`-1`、`-2`）。
+* **节点网络测速**：支持节点批量 TCP/ICMP 延迟测试与真实网站连通性测速（Google、YouTube、GitHub、OpenAI）。
+* **自动定时更新**：支持按指定时间间隔在后台自动同步更新订阅节点，并平滑热重载内核。
+
+### 2️⃣ 双模式自由切换
+* **小白模式 (Simple Mode)**：
+  * 面向追求省心快捷的用户。
+  * 仅需添加订阅并选择出站模式（**规则分流**、**全局代理**、**直接连接**、**TUN 虚拟网卡**），一键启动代理。
+  * 自动预设纯净 DNS 解析方案与国内/国外/广告拦截分流策略。
+* **专业模式 (Expert Mode)**：
+  * 面向追求深度定制与复杂网络分流的用户。
+  * **策略组管理**：自由创建 `selector`（手动选择）、`urltest`（自动延迟优选）、`fallback`、`direct`、`block` 策略组；支持静态节点勾选或动态正则过滤规则。
+  * **可视化 DNS 编辑器**：自定义 Direct/Remote/FakeIP DNS 服务器与 DNS 路由规则。
+  * **可视化路由规则链**：支持基于域名 (Domain/DomainSuffix/DomainKeyword)、GeoIP、GeoSite、端口、协议等规则进行精准分流。
+  * **配置快照历史**：每一次保存与修改均自动生成版本快照，支持配置差异对比与一键快速回滚。
+  * **语法防御校验**：集成 `sing-box check` 语法检查，错误精准高亮定位，防止配置失误导致服务异常。
+
+### 3️⃣ sing-box 内核生命周期管理
+* **智能内核检索**：优先级为 `--kernel-path` > 环境变量 `SUBOUT_SINGBOX_PATH` > 系统 `PATH` > `<data_dir>/bin/sing-box` > 平台标准路径。
+* **一键在线安装/更新**：若系统未安装 sing-box，可在 Web 面板中一键下载官方最新内核至数据目录。
+* **进程冲突防护**：启动时自动扫描并提示外部冲突的 sing-box 进程，支持在 Web 界面上一键查杀释放端口。
+
+---
+
+## 💻 命令行 CLI 模式 (自动化与脚本集成)
+
+除 Web 面板外，`subout` 还可作为高性能单次订阅转换 CLI 工具使用，适用于自动化流水线或 Linux 定时任务：
 
 ```bash
-# 默认启动（自动进入开发模式或生产环境）
-subout
-
-# 指定端口启动
-subout web -p 8080
-
-# 便携模式运行（数据直接保存在当前目录 ./data/）
-subout --portable web -p 1234
-```
-
-* **📍 访问地址**：`http://127.0.0.1:1234`（默认端口 `1234`，占用时自动在 `1234`~`1244` 探测空闲端口）
-* **🔑 默认密码**：`admin`（建议首次登录后修改）
-* **🌐 环境变量配置**：
-  * `PORT=8080`：显式指定 Web 面板监听端口
-  * `ADMIN_PASSWORD=your_password`：环境变量级别锁定管理员密码（锁定后禁用面板界面修改）
-
-#### 模式 B：CLI 命令行转换模式
-适用于单次订阅转换、Shell 自动化脚本或 Cron 定时任务：
-
-```bash
-# 从远程 HTTP(S) 订阅解析并导出 sing-box outbounds JSON
+# 1. 从远程 HTTP(S) 订阅解析并导出 sing-box outbounds 配置
 subout -s "https://example.com/sub/token" -o outbounds.json -v
 
-# 从本地订阅文件 / 纯文本 / Base64 / 节点 URI 解析导出
+# 2. 从本地订阅文件 / 纯文本 / Base64 解析导出
 subout -s ./subscription.txt -o outbounds.json
 
-# Linux Cron 定时任务示例（每 6 小时自动更新节点并重启 sing-box）
-0 */6 * * * /usr/local/bin/subout -s "https://example.com/sub" -o /var/lib/subout/generated/sing-box.json && systemctl restart sing-box
+# 3. 指定端口或便携模式启动 Web 面板
+subout web -p 8080
+subout --portable web -p 1234
 ```
 
 **CLI 参数完全指南**：
@@ -100,7 +129,7 @@ subout -s ./subscription.txt -o outbounds.json
 | `-v` | `--verbose` | Flag | 开启详细输出，显示协议统计与 TLS 安全审计警告 |
 | `-p` | `--port` | `u16` | 指定 Web 面板运行端口 (默认: `1234`) |
 | | `--portable` | Flag | 启动便携模式，强行使用当前目录下的 `./data`、`./logs`、`./config` |
-| | `--singbox-path` / `--kernel-path` | `Path` | 显式指定外部 `sing-box` 可执行文件路径 |
+| | `--kernel-path` | `Path` | 显式指定外部 `sing-box` 可执行文件路径 |
 | | `--data-dir` | `Path` | 自定义持久化数据目录 (覆盖默认系统路径) |
 | | `--config-dir` | `Path` | 自定义配置文件目录 |
 | | `--log-dir` | `Path` | 自定义日志输出目录 |
@@ -109,129 +138,53 @@ subout -s ./subscription.txt -o outbounds.json
 
 ---
 
-### 3. 常用服务管理与一键卸载速查表
-
-| 平台 | 查看实时日志 | 重启守护服务 | 停止守护服务 | 一键卸载 (保留数据) | 彻底卸载 (清理数据) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Linux** | `sudo journalctl -u subout -f` | `sudo systemctl restart subout` | `sudo systemctl stop subout` | `sudo ./install.sh uninstall` | `sudo ./install.sh uninstall --purge` |
-| **macOS** | `tail -f "/Library/Logs/Subout/stdout.log"` | `sudo launchctl kickstart -k system/io.github.geekdex.subout` | `sudo launchctl unload -w "/Library/LaunchDaemons/io.github.geekdex.subout.plist"` | `sudo ./install.sh uninstall` | `sudo ./install.sh uninstall --purge` |
-| **Windows** | `Get-Content C:\ProgramData\Subout\logs\stdout.log -Wait -Tail 50` | `Restart-Service subout` | `Stop-Service subout` | `.\install.ps1 uninstall` | `.\install.ps1 uninstall -Purge` |
-
----
-
-## 💡 二、核心原理 (Principles & Architecture)
-
-### 1. 订阅解析与节点净化工作流
-`subout` 内置高性能 Rust 解析引擎与自动净化机制：
-1. **全协议解析**：自适应解析 VMess, VLESS, Shadowsocks, Trojan, SOCKS5, HTTP, Anytls, Hysteria, Hysteria2 等协议。
-2. **公告净化**：自动识别并剔除包含`流量`、`到期`、`官网`、`公告`等无实际代理功能的非节点信息。
-3. **Tag 去重**：当订阅节点重名时，自动追加 `-1`, `-2` 后缀，防止 sing-box 配置校验通过失败。
-4. **安全审计**：扫描并警告 `allowInsecure: true` 等存在中间人攻击隐患的不安全 TLS 设置。
-
-### 2. 架构设计与 sing-box 联动
-* **单文件零依赖**：Axum 后端 + Vite/Vue 3 前端静态资源在编译期打包入单二进制文件，零外置 UI 依赖。
-* **SQLite 持久化**：Web 模式下在数据目录保存 SQLite 数据库（管理多订阅源、分流策略组 `selector`/`urltest`、版本历史对比回滚与日志）。
-* **sing-box 内核发现与调度**：
-  * **查找优先级**：`--singbox-path` 参数 > 环境变量 `SUBOUT_SINGBOX_PATH` > 系统 `PATH` (`sing-box`) > `<data_dir>/bin/sing-box` (面板一键在线下载) > 系统常用路径 (`/opt/homebrew/bin/sing-box` 等)。
-  * Subout 可派生生成完整 `sing-box.json` 并调用内核执行语法检查 (`sing-box check`) 及后台守护。
-
-### 3. 跨平台运行目录规范与路径优先级
-
-| 运行模式 / 平台 | 数据目录 (`data_dir`) | 日志目录 (`log_dir`) | 配置文件目录 (`config_dir`) | 临时运行目录 (`runtime_dir`) |
-| :--- | :--- | :--- | :--- | :--- |
-| **开发环境 (`cargo run`)** | `./runtime/data/` | `./runtime/logs/` | `./runtime/config/` | `./runtime/run/` |
-| **便携模式 (`--portable`)** | `./data/` | `./logs/` | `./config/` | `./run/` |
-| **Linux (生产环境)** | `/var/lib/subout/` | `/var/log/subout/` | `/etc/subout/` | `/run/subout/` |
-| **macOS (生产环境)** | `/Library/Application Support/Subout/` | `/Library/Logs/Subout/` | `/Library/Application Support/Subout/config/` | `/Library/Application Support/Subout/run/` |
-| **Windows (生产环境)** | `C:\ProgramData\Subout\` | `C:\ProgramData\Subout\logs\` | `C:\ProgramData\Subout\config\` | `C:\ProgramData\Subout\run\` |
-
-* **数据目录内部结构**：
-  * `subout.db`：SQLite 业务数据库（订阅源、分流组、历史版本）
-  * `bin/sing-box`：自动下载与管理的 sing-box 内核
-  * `generated/sing-box.json`：由 Subout 派生生成的完整 sing-box 运行配置
-* **路径优先级解析**：CLI 命令行参数 > 环境变量 (`SUBOUT_*`) > 便携模式 (`--portable`) > 开发模式 (`cargo run`) > 系统默认生产路径。
-
-### 4. 跨平台全自动系统代理与 TUN DNS 调度（无感透明代理）
-
-Subout 调度器在拉起 sing-box 内核的同时，会在系统底层自动完成网络接管与安全还原，彻底抹平跨平台网络协议栈的引流差异：
-
-| 平台 | 启动时自动接管 (无感代理) | 退出时自动还原 (安全无残留) |
-| :--- | :--- | :--- |
-| **macOS (Apple)** | • 自动调用 `networksetup` 为所有活动网络接口（Wi-Fi/以太网）开启系统 HTTP、HTTPS、SOCKS 代理。<br>• **TUN 模式下自动将系统 DNS 转发至 TUN 虚拟网关 (`172.19.0.1`)**，彻底解决 macOS `mDNSResponder` 绕过 TUN 导致的 DNS 污染与死锁。 | 停止或退出时，自动注销系统代理并恢复系统原始 DHCP DNS，绝不残留断网。 |
-| **Windows** | • 自动写入注册表 `Internet Settings` 系统代理 (`ProxyEnable=1`) 并设置局域网绕过白名单。<br>• **自动调用 WinINet API 广播系统刷新**，Edge、Chrome 等运行中的浏览器立即生效，无需重启应用。 | 停止或退出时，自动置 `ProxyEnable=0` 并广播刷新 WinINet，恢复系统直连状态。 |
-| **Linux** | • 原生依靠 TUN 网卡、路由表及 Capabilities (`CAP_NET_ADMIN`) 完成内核级透明代理接管。 | 退出时自动释放虚拟网卡与系统路由表。 |
-
-> 💡 **真正的全局无感代理**：在 macOS / Linux / Windows 下启动服务后，无需在终端手动配置 `export http_proxy`，也不需要在浏览器安装代理插件，终端命令（如 `curl "https://www.google.com"`、`git`、`pip`）与图形界面软件全部自动透明走代理。
-
-### 5. 配置体系设计：100% 所见即所得 (WYSIWYG)
-
-* **配置与调度严格解耦**：你在 Web 面板、CLI 或从 SFM (sing-box for macOS) 导入的 JSON 配置保持 100% 原汁原味（所见即所得），Subout 不会在后台破坏或擅自重排你的自定义分流规则。
-* **跨平台语法防御**：仅在跨平台不兼容时（如 macOS/Windows 遇到 Linux 特有的 `auto_redirect`）做语法级防御过滤，确保内核稳定启动。
-
-### 6. 守护服务快速重启与平滑退出机制
-* **秒级响应重启**：捕获 `SIGTERM` / `SIGINT` 信号后，主程序立即终止底层 sing-box 进程并清理网卡路由，同时限制 HTTP Socket 优雅退出最大超时为 `300ms`。
-* **避免命令卡顿**：解决执行 `sudo launchctl kickstart -k system/io.github.geekdex.subout` (macOS) 或 `sudo systemctl restart subout` (Linux) 时因等待 HTTP 保持连接超时而卡顿 20+ 秒的问题，重启命令可在 **0.5 秒内瞬间完成**。
-
----
-
-## 🛠️ 三、本地开发 (Development)
+## 🛠️ 本地二次开发 (Development)
 
 ### 1. 开发环境依赖
 * **Rust**: 1.70+ (`cargo` / `rustc`)
-* **Node.js**: 18+ 与 `npm` (用于 Vue 3 前端构建)
+* **Node.js**: 18+ 与 `pnpm` (推荐，或 `npm`)
 
-### 2. 本地开发与调试
-后端在开发模式下自动将数据隔离至 `./runtime/` 目录，完全免 Root 权限：
+### 2. 开发调试流程
+后端在开发模式下运行 `cargo run` 会自动识别开发环境，并将所有数据与日志隔离在本地 `./runtime/` 目录中，完全无需 Root 权限：
 
 ```bash
-# 前端开发 (在 web 目录下启动 Vite 热更新服务)
+# 启动前端 Vite 热更新开发服务 (调试 UI)
 cd web
-npm install
-npm run dev
+pnpm install
+pnpm dev
 
-# 后端开发 (在项目根目录下启动 Rust 后端)
+# 启动 Rust 后端服务 (自动检测前端静态资源并嵌入)
 cargo run -- web -p 1234
 ```
 
-### 3. 本地构建打包
-Rust 的 `build.rs` 脚本在编译后端时会自动检测 `web/` 目录中的改动，并自动调用 `npm run build` 将前端静态资源打包嵌入二进制：
+### 3. 本地全量构建与安装
+`build.rs` 在编译 Rust 后端时会自动调用 `pnpm build` 将前端打包为单文件并嵌入 Rust 二进制中：
 
 ```bash
-# 编译包含前端 UI 的最终单文件二进制
+# 仅编译单二进制 Release 产物
 cargo build --release
-```
-编译产物位于：`./target/release/subout` (Windows 下为 `subout.exe`)
 
-### 4. 源码目录一键安装最新程序到系统
-源码修改并编译完成后，可以直接调用本地安装脚本一键覆盖安装并重启服务：
-
-```bash
-# Linux & macOS
-sudo ./install.sh
-
-# Windows (PowerShell 管理员)
-.\install.ps1
+# 一键本地构建 + 覆盖安装并重启系统守护服务
+sudo ./install.sh   # Linux & macOS
+.\install.ps1        # Windows (PowerShell 管理员)
 ```
 
 ---
 
-## 🔧 常见问题与故障排查
+## 📂 跨平台运行目录规范
 
-* **端口被占用**：启动时提示端口被占用，可通过 `subout web -p 8080` 或环境变量 `PORT=8080` 指定空闲端口。
-* **权限错误**：安装服务或向 `/usr/local/bin` / `/var/lib/subout` 写入文件时，需确保使用 `sudo` (Linux/macOS) 或以管理员身份运行 PowerShell (Windows)。
+| 运行环境 / 平台 | 数据目录 (`data_dir`) | 日志目录 (`log_dir`) | 配置目录 (`config_dir`) | 临时运行目录 (`runtime_dir`) |
+| :--- | :--- | :--- | :--- | :--- |
+| **开发环境 (`cargo run`)** | `./runtime/data/` | `./runtime/logs/` | `./runtime/config/` | `./runtime/run/` |
+| **便携模式 (`--portable`)** | `./data/` | `./logs/` | `./config/` | `./run/` |
+| **Linux (生产守护)** | `/var/lib/subout/` | `/var/log/subout/` | `/etc/subout/` | `/run/subout/` |
+| **macOS (生产守护)** | `/Library/Application Support/Subout/` | `/Library/Logs/Subout/` | `/Library/Application Support/Subout/config/` | `/Library/Application Support/Subout/run/` |
+| **Windows (生产守护)** | `C:\ProgramData\Subout\` | `C:\ProgramData\Subout\logs\` | `C:\ProgramData\Subout\config\` | `C:\ProgramData\Subout\run\` |
 
----
-
-## 📂 项目结构
-
-```txt
-├── Cargo.toml          # Rust 后端依赖与配置
-├── build.rs            # 前端静态资源自动打包与嵌入脚本
-├── install.sh          # Linux / macOS 一键安装与服务守护脚本
-├── install.ps1         # Windows 一键安装与服务守护脚本
-├── src/                # 后端源码 (Axum Web + SQLite + Parser + sing-box 调度)
-└── web/                # 前端源码 (Vue 3 + Vite + Vanilla CSS)
-```
+> **数据目录内容结构**：
+> * `subout.db`：SQLite 业务数据库（订阅源、分流组、节点池、历史版本）
+> * `bin/sing-box`：自动管理与下载的 sing-box 官方内核
+> * `generated/sing-box.json`：由 Subout 派生生成的完整 sing-box 运行配置
 
 ---
 
@@ -240,5 +193,3 @@ sudo ./install.sh
 本项目采用双重开源协议：
 - [MIT License](LICENSE-MIT)
 - [Apache License 2.0](LICENSE-APACHE)
-
-

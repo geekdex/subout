@@ -13,6 +13,10 @@ param (
     [string]$BinPath = "",
     [string]$BinDir = "C:\Program Files\Subout",
     [string]$DataDir = "C:\ProgramData\Subout",
+    [string]$Tag = "",
+    [string]$Version = "",
+    [switch]$FromRelease,
+    [switch]$Online,
     [switch]$NoService,
     [switch]$Uninstall,
     [switch]$Purge,
@@ -31,7 +35,7 @@ function Show-Help {
     Write-Host "用法:"
     Write-Host "  .\install.ps1 [install|uninstall] [-Port <port>] [-BinPath <path>] [-NoService] [-Purge]"
     Write-Host ""
-    Write-Host "也支持:"
+    Write-Host "也支持在 PowerShell (管理员) 中一键在线安装:"
     Write-Host "  irm https://raw.githubusercontent.com/geekdex/subout/main/install.ps1 | iex"
     Write-Host ""
     Write-Host "命令:"
@@ -43,6 +47,8 @@ function Show-Help {
     Write-Host "  -BinPath <string>  指定本地 subout.exe 可执行文件路径"
     Write-Host "  -BinDir <string>   自定义安装目录 (默认: C:\Program Files\Subout)"
     Write-Host "  -DataDir <string>  自定义数据目录 (默认: C:\ProgramData\Subout)"
+    Write-Host "  -Tag <string>      指定安装的 GitHub Release 版本标签 (如 v0.1.0)"
+    Write-Host "  -FromRelease       强制从 GitHub Releases 下载预编译文件 (即使在源码目录中)"
     Write-Host "  -NoService         仅安装二进制文件，不注册 Windows 服务"
     Write-Host "  -Uninstall         卸载模式 (等同于 uninstall 命令)"
     Write-Host "  -Purge             卸载时彻底删除数据、日志与配置"
@@ -93,19 +99,12 @@ if ($Action -eq "uninstall") {
     $Uninstall = $true
 }
 
+if ($Version -and -not $Tag) {
+    $Tag = $Version
+}
+
 # ------------------------------------------------------------------------------
 # 3. Require Administrator Privileges
-#
-# Supports both:
-#
-#   .\install.ps1
-#
-# and:
-#
-#   irm https://raw.githubusercontent.com/geekdex/subout/main/install.ps1 | iex
-#
-# For irm | iex there is no physical script path. In that case we download
-# the current install.ps1 into %TEMP% and execute that physical file elevated.
 # ------------------------------------------------------------------------------
 
 if (-not (Test-IsAdmin)) {
@@ -169,6 +168,14 @@ if (-not (Test-IsAdmin)) {
         $argumentList.Add("-NoService")
     }
 
+    if ($FromRelease -or $Online) {
+        $argumentList.Add("-FromRelease")
+    }
+
+    if ($Tag) {
+        Add-Argument -List $argumentList -Name "-Tag" -Value $Tag
+    }
+
     if ($Port -ne 1234) {
         Add-Argument -List $argumentList -Name "-Port" -Value ([string]$Port)
     }
@@ -224,6 +231,10 @@ $ServiceName = "subout"
 $TargetExe = Join-Path $BinDir "$AppName.exe"
 $LogDir = Join-Path $DataDir "logs"
 $RuntimeDir = Join-Path $DataDir "run"
+$KernelDir = Join-Path $DataDir "bin"
+$GeneratedDir = Join-Path $DataDir "generated"
+$SubscriptionsDir = Join-Path $DataDir "subscriptions"
+$NodesDir = Join-Path $DataDir "nodes"
 $GitHubRepo = "geekdex/subout"
 
 $arch = $env:PROCESSOR_ARCHITECTURE
@@ -236,7 +247,7 @@ else {
 }
 
 # ------------------------------------------------------------------------------
-# 5. UNINSTALL LOGIC
+# 5. UNINSTALL LOGIC (Requirement 1: 干净卸载)
 # ------------------------------------------------------------------------------
 
 if ($Uninstall) {
@@ -245,8 +256,7 @@ if ($Uninstall) {
     Write-Host "======================================================" -ForegroundColor Cyan
     Write-Host ""
 
-    # Stop and remove Windows Service
-
+    # 1. Stop and remove Windows Service
     $service = Get-Service `
         -Name $ServiceName `
         -ErrorAction SilentlyContinue
@@ -272,8 +282,10 @@ if ($Uninstall) {
         Write-Host "[2/3] 跳过服务注销。" -ForegroundColor Gray
     }
 
-    # Remove binary
+    # Stop any lingering processes
+    Stop-Process -Name $AppName -Force -ErrorAction SilentlyContinue
 
+    # 2. Remove binary
     if (Test-Path -LiteralPath $TargetExe) {
         Write-Host "[3/3] 正在删除可执行文件: $TargetExe" -ForegroundColor Blue
 
@@ -287,7 +299,6 @@ if ($Uninstall) {
     }
 
     # Remove empty installation directory
-
     if (Test-Path -LiteralPath $BinDir) {
         $remainingFiles = @(
             Get-ChildItem `
@@ -304,12 +315,11 @@ if ($Uninstall) {
         }
     }
 
-    # Handle data directory
-
+    # 3. Handle data directory
     if ($Purge) {
         if (Test-Path -LiteralPath $DataDir) {
             Write-Host ""
-            Write-Host "正在彻底清理数据、日志与配置目录: $DataDir" -ForegroundColor Yellow
+            Write-Host "正在彻底清理数据、日志与配置目录 (--Purge): $DataDir" -ForegroundColor Yellow
 
             Remove-Item `
                 -LiteralPath $DataDir `
@@ -357,14 +367,7 @@ Write-Host ""
 
 $SourceExe = $null
 
-# IMPORTANT:
-# $PSScriptRoot is empty when this script is executed with irm | iex.
-# Do NOT call Join-Path with an empty ScriptDir.
-#
-# Only perform local source/binary detection when a real script directory exists.
-
 $ScriptDir = $null
-
 if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) {
     $ScriptDir = $PSScriptRoot
 }
@@ -374,7 +377,6 @@ if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) {
 # ------------------------------------------------------------------------------
 
 if ($BinPath) {
-
     if (Test-Path -LiteralPath $BinPath) {
         Write-Host "[1/4] 使用用户指定的二进制文件: $BinPath" -ForegroundColor Blue
         $SourceExe = (Resolve-Path -LiteralPath $BinPath).Path
@@ -386,22 +388,77 @@ if ($BinPath) {
 }
 
 # ------------------------------------------------------------------------------
-# 7.2 Local source/build detection
+# 7.2 Local source development build: pnpm build (web) + cargo build (root) (Requirement 2)
 # ------------------------------------------------------------------------------
 
-elseif ($ScriptDir) {
-
+elseif ($ScriptDir -and (-not $FromRelease) -and (-not $Online)) {
     $CargoToml = Join-Path $ScriptDir "Cargo.toml"
-    $TargetTripleExe = Join-Path $ScriptDir "target\$TargetTriple\release\$AppName.exe"
-    $TargetReleaseExe = Join-Path $ScriptDir "target\release\$AppName.exe"
-    $LocalExe = Join-Path $ScriptDir "$AppName.exe"
+    $WebPackageJson = Join-Path $ScriptDir "web\package.json"
+    $SrcMainRs = Join-Path $ScriptDir "src\main.rs"
 
     if (
         (Test-Path -LiteralPath $CargoToml) -and
-        (Get-Command cargo -ErrorAction SilentlyContinue)
+        (Test-Path -LiteralPath $WebPackageJson) -and
+        (Test-Path -LiteralPath $SrcMainRs)
     ) {
+        Write-Host "[1/4] 检测到本地源码仓库，正在执行完整开发编译构建..." -ForegroundColor Blue
 
-        Write-Host "[1/4] 检测到源码仓库，正在编译最新 release 产物 (cargo build --release)..." -ForegroundColor Blue
+        # Step 1.1: Build frontend UI in web directory (pnpm build)
+        Write-Host "  -> [步骤 1/2] 进入 web 目录编译前端 UI (pnpm build)..." -ForegroundColor Blue
+        $WebDir = Join-Path $ScriptDir "web"
+        $WebNodeModules = Join-Path $WebDir "node_modules"
+        $WebDistIndex = Join-Path $WebDir "dist\index.html"
+
+        Push-Location $WebDir
+
+        try {
+            $hasPnpm = Get-Command pnpm -ErrorAction SilentlyContinue
+            $hasNpm = Get-Command npm -ErrorAction SilentlyContinue
+
+            if (-not $hasPnpm -and -not $hasNpm) {
+                throw "未检测到 pnpm 或 npm。构建前端 UI 需要 Node.js 与 pnpm/npm 环境。请先安装 Node.js 与 pnpm。"
+            }
+
+            $pkgMgr = if ($hasPnpm) { "pnpm" } else { "npm" }
+
+            if (-not $hasPnpm) {
+                Write-Host "  提示: 系统未安装 pnpm，自动降级使用 npm 进行构建..." -ForegroundColor Yellow
+            }
+
+            # Install dependencies if node_modules missing
+            if (-not (Test-Path -LiteralPath $WebNodeModules)) {
+                Write-Host "  -> 前端依赖未初始化，正在执行 $pkgMgr install..." -ForegroundColor Blue
+                & $pkgMgr install
+                if ($LASTEXITCODE -ne 0) {
+                    throw "$pkgMgr install 执行失败，退出码: $LASTEXITCODE"
+                }
+            }
+
+            # Run build
+            if ($pkgMgr -eq "pnpm") {
+                & pnpm build
+            }
+            else {
+                & npm run build
+            }
+
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $WebDistIndex)) {
+                throw "前端 UI 构建失败，未生成 $WebDistIndex"
+            }
+
+            Write-Host "  ✓ 前端 UI 构建完成 ($WebDistIndex)" -ForegroundColor Green
+        }
+        finally {
+            Pop-Location
+        }
+
+        # Step 1.2: Build backend with Cargo
+        Write-Host "  -> [步骤 2/2] 返回项目根目录编译后端 (cargo build --release)..." -ForegroundColor Blue
+
+        $hasCargo = Get-Command cargo -ErrorAction SilentlyContinue
+        if (-not $hasCargo) {
+            throw "未检测到 cargo 命令。请先安装 Rust 工具链 (https://rustup.rs)。"
+        }
 
         Push-Location $ScriptDir
 
@@ -416,38 +473,23 @@ elseif ($ScriptDir) {
             Pop-Location
         }
 
-        $SourceExe = $TargetReleaseExe
-    }
-
-    elseif (Test-Path -LiteralPath $TargetTripleExe) {
-
-        $SourceExe = $TargetTripleExe
-
-        Write-Host "[1/4] 检测到本地 release 构建产物: $SourceExe" -ForegroundColor Blue
-    }
-
-    elseif (Test-Path -LiteralPath $TargetReleaseExe) {
-
-        $SourceExe = $TargetReleaseExe
-
-        Write-Host "[1/4] 检测到本地 release 构建产物: $SourceExe" -ForegroundColor Blue
-    }
-
-    elseif (Test-Path -LiteralPath $LocalExe) {
-
-        $SourceExe = $LocalExe
-
-        Write-Host "[1/4] 检测到当前目录下的 $AppName.exe" -ForegroundColor Blue
+        $TargetReleaseExe = Join-Path $ScriptDir "target\release\$AppName.exe"
+        if (Test-Path -LiteralPath $TargetReleaseExe) {
+            $SourceExe = $TargetReleaseExe
+            Write-Host "  ✓ 本地构建成功: $SourceExe" -ForegroundColor Green
+        }
+        else {
+            throw "未找到编译生成的二进制文件: $TargetReleaseExe"
+        }
     }
 }
 
 # ------------------------------------------------------------------------------
-# 7.3 Download latest GitHub Release
+# 7.3 Download latest GitHub Release (Requirement 3)
 # ------------------------------------------------------------------------------
 
 if (-not $SourceExe) {
-
-    Write-Host "[1/4] 正在从 GitHub Releases 下载最新预编译版本 ($TargetTriple)..." -ForegroundColor Blue
+    Write-Host "[1/4] 正在从 GitHub Releases 获取预编译版本 ($TargetTriple)..." -ForegroundColor Blue
 
     $TmpDir = Join-Path `
         $env:TEMP `
@@ -459,34 +501,58 @@ if (-not $SourceExe) {
         -Path $TmpDir | Out-Null
 
     try {
-
-        $ReleaseInfo = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" `
-            -Headers @{
-                "User-Agent" = "subout-installer"
-            } `
-            -ErrorAction Stop
-
-        $LatestTag = $ReleaseInfo.tag_name
+        $LatestTag = $Tag
 
         if (-not $LatestTag) {
-            throw "GitHub Releases 中未找到最新版本。"
+            Write-Host "  正在查询最新 Release 版本号..." -ForegroundColor Gray
+            try {
+                $ReleaseInfo = Invoke-RestMethod `
+                    -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" `
+                    -Headers @{ "User-Agent" = "subout-installer" } `
+                    -ErrorAction Stop
+
+                $LatestTag = $ReleaseInfo.tag_name
+            }
+            catch {
+                # Fallback header location redirect
+                $req = [System.Net.WebRequest]::Create("https://github.com/$GitHubRepo/releases/latest")
+                $req.Method = "HEAD"
+                $req.AllowAutoRedirect = $false
+                try {
+                    $resp = $req.GetResponse()
+                    $loc = $resp.GetResponseHeader("Location")
+                    if ($loc -match 'tag/(.+)$') {
+                        $LatestTag = $matches[1].Trim()
+                    }
+                    $resp.Close()
+                }
+                catch {
+                    # Ignore
+                }
+            }
         }
 
-        $DownloadUrl = `
-            "https://github.com/$GitHubRepo/releases/download/$LatestTag/subout-$LatestTag-$TargetTriple.zip"
+        if (-not $LatestTag) {
+            throw "未能获取 GitHub 最新版本标签。请检查网络连接或使用 -Tag 参数指定版本 (如: -Tag v0.1.0)。"
+        }
 
-        Write-Host "版本: $LatestTag" -ForegroundColor Cyan
-        Write-Host "下载地址: $DownloadUrl" -ForegroundColor Cyan
+        $ArchiveName = "subout-$LatestTag-$TargetTriple.zip"
+        $DownloadUrl = "https://github.com/$GitHubRepo/releases/download/$LatestTag/$ArchiveName"
+
+        Write-Host "  版本标签 : $LatestTag" -ForegroundColor Cyan
+        Write-Host "  下载文件 : $ArchiveName" -ForegroundColor Cyan
+        Write-Host "  下载地址 : $DownloadUrl" -ForegroundColor Cyan
 
         $ZipPath = Join-Path $TmpDir "subout.zip"
 
+        Write-Host "正在下载预编译产物..." -ForegroundColor Gray
         Invoke-WebRequest `
             -Uri $DownloadUrl `
             -OutFile $ZipPath `
             -UseBasicParsing `
             -ErrorAction Stop
 
+        Write-Host "正在解压产物..." -ForegroundColor Gray
         Expand-Archive `
             -Path $ZipPath `
             -DestinationPath $TmpDir `
@@ -495,7 +561,6 @@ if (-not $SourceExe) {
         $ExtractedExe = Join-Path $TmpDir "$AppName.exe"
 
         if (-not (Test-Path -LiteralPath $ExtractedExe)) {
-
             # In case the zip contains a subdirectory, search recursively.
             $FoundExe = Get-ChildItem `
                 -Path $TmpDir `
@@ -512,13 +577,13 @@ if (-not $SourceExe) {
 
         if (Test-Path -LiteralPath $ExtractedExe) {
             $SourceExe = $ExtractedExe
+            Write-Host "  ✓ 预编译产物下载并解压成功。" -ForegroundColor Green
         }
         else {
             throw "解压后的文件中未找到 $AppName.exe"
         }
     }
     catch {
-
         Write-Host ""
         Write-Host "错误: 从 GitHub Releases 下载或解压预编译二进制文件失败。" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
@@ -572,17 +637,15 @@ Copy-Item `
 
 Write-Host "[3/4] 正在初始化数据与日志目录 ($DataDir)..." -ForegroundColor Blue
 
-$KernelDir = Join-Path $DataDir "bin"
-$GeneratedDir = Join-Path $DataDir "generated"
-
 foreach ($dir in @(
     $DataDir,
     $KernelDir,
     $GeneratedDir,
+    $SubscriptionsDir,
+    $NodesDir,
     $LogDir,
     $RuntimeDir
 )) {
-
     if (-not (Test-Path -LiteralPath $dir)) {
         New-Item `
             -ItemType Directory `
@@ -591,28 +654,33 @@ foreach ($dir in @(
     }
 }
 
+# Check sing-box existence in system
+$hasSingBox = Get-Command sing-box -ErrorAction SilentlyContinue
+if ($hasSingBox) {
+    Write-Host "✓ 检测到系统中已存在 sing-box: $($hasSingBox.Source)" -ForegroundColor Green
+}
+else {
+    Write-Host "提示: 当前系统 PATH 中未检测到 sing-box 内核。" -ForegroundColor Yellow
+    Write-Host "  可在 Web 控制面板中一键在线下载，将自动保存至 $KernelDir\sing-box.exe。" -ForegroundColor Gray
+}
+
 # ------------------------------------------------------------------------------
 # 11. Configure & Start Windows Service
 # ------------------------------------------------------------------------------
 
 if ($NoService) {
-
     Write-Host "[4/4] 已跳过 Windows 服务配置 (-NoService)。" -ForegroundColor Yellow
 }
 else {
-
     Write-Host "[4/4] 正在配置 Windows 后台服务 ($ServiceName)..." -ForegroundColor Blue
 
     # Stop existing service
-
     $existingService = Get-Service `
         -Name $ServiceName `
         -ErrorAction SilentlyContinue
 
     if ($existingService) {
-
         if ($existingService.Status -ne "Stopped") {
-
             Stop-Service `
                 -Name $ServiceName `
                 -Force `
@@ -626,16 +694,7 @@ else {
         Start-Sleep -Seconds 1
     }
 
-    # --------------------------------------------------------------------------
     # Create service
-    #
-    # sc.exe requires:
-    #
-    #   binPath= "C:\Program Files\Subout\subout.exe" web -p 1234
-    #
-    # Keep the executable path quoted because Program Files contains a space.
-    # --------------------------------------------------------------------------
-
     $binPathCommand = "`"$TargetExe`" web -p $Port"
 
     & sc.exe create $ServiceName `
@@ -648,21 +707,11 @@ else {
     }
 
     # Configure service recovery
-
     & sc.exe failure $ServiceName `
         "reset= 86400" `
         "actions= restart/3000/restart/5000/restart/10000" | Out-Null
 
-    # Set environment variable for service mode
-
-    [Environment]::SetEnvironmentVariable(
-        "SUBOUT_SERVICE",
-        "1",
-        "Machine"
-    )
-
     # Start service
-
     & sc.exe start $ServiceName | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
@@ -677,7 +726,6 @@ else {
 # ------------------------------------------------------------------------------
 
 if ($TmpDir -and (Test-Path -LiteralPath $TmpDir)) {
-
     Remove-Item `
         -LiteralPath $TmpDir `
         -Recurse `
@@ -700,7 +748,6 @@ Write-Host "📝 系统日志目录     : $LogDir" -ForegroundColor White
 Write-Host ""
 
 if (-not $NoService) {
-
     Write-Host "常用服务管理命令 (PowerShell 管理员):" -ForegroundColor White
     Write-Host "  • 查看服务状态 : Get-Service subout" -ForegroundColor Gray
     Write-Host "  • 启动服务     : Start-Service subout" -ForegroundColor Gray
