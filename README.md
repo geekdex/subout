@@ -94,7 +94,7 @@
 </details>
 
 <details open>
-<summary><b>🪟 Windows (PowerShell 管理员)</b></summary>
+<summary><b>▦ Windows (PowerShell 管理员)</b></summary>
 
 | 操作需求 | 执行命令 |
 | :--- | :--- |
