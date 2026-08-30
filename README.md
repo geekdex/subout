@@ -98,10 +98,10 @@
 
 | 操作需求 | 执行命令 |
 | :--- | :--- |
-| **查看服务状态** | `Get-Service subout` |
-| **查看实时日志** | `Get-Content C:\ProgramData\Subout\logs\stdout.log -Wait -Tail 50` |
-| **重启后台服务** | `Restart-Service subout` |
-| **停止后台服务** | `Stop-Service subout` |
+| **查看运行状态** | `Get-ScheduledTask -TaskName Subout` |
+| **启动后台任务** | `Start-ScheduledTask -TaskName Subout` |
+| **停止后台任务** | `Stop-ScheduledTask -TaskName Subout` |
+| **重启后台任务** | `Stop-ScheduledTask -TaskName Subout; Start-ScheduledTask -TaskName Subout` |
 | **一键卸载 (保留数据)** | `.\install.ps1 uninstall` |
 | **彻底卸载 (清理数据)** | `.\install.ps1 uninstall -Purge` |
 
