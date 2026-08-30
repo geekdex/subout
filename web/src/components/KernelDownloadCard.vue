@@ -237,12 +237,7 @@ const hasDownloadError = computed(() => {
 });
 
 const isCorrupted = computed(() => {
-  return (
-    !!kernelInfo.value.os &&
-    !!kernelInfo.value.binary_path &&
-    !!kernelInfo.value.is_installed &&
-    !kernelInfo.value.version
-  );
+  return !!kernelInfo.value.is_installed && !kernelInfo.value.version;
 });
 
 const hasKernelError = computed(() => {

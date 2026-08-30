@@ -35,7 +35,7 @@ pub struct SimpleInboundConfig {
 impl Default for SimpleInboundConfig {
     fn default() -> Self {
         Self {
-            inbound_type: "mixed".to_string(),
+            inbound_type: "tun".to_string(),
             mixed_port: 2080,
             allow_lan: false,
             tun_stack: "system".to_string(),
@@ -49,7 +49,7 @@ pub struct SimpleRouteConfig {
     pub mode: String, // "smart" (白名单/绕过大陆) | "global" (全局代理) | "gfw" (仅代理被阻断)
     pub block_ads: bool,
     pub bypass_lan: bool,
-    pub default_outbound: String, // "AUTO-Test" | "proxy"
+    pub default_outbound: String, // "AUTO-Test" | "proxy" | "direct"
 }
 
 impl Default for SimpleRouteConfig {
@@ -58,7 +58,7 @@ impl Default for SimpleRouteConfig {
             mode: "smart".to_string(),
             block_ads: true,
             bypass_lan: true,
-            default_outbound: "direct".to_string(),
+            default_outbound: "AUTO-Test".to_string(),
         }
     }
 }
@@ -631,12 +631,21 @@ mod tests {
     #[test]
     fn test_simple_config_tun_mode() {
         let conn = crate::db::init_db(":memory:").unwrap();
-        let mut cfg = SimpleConfig::default();
-        cfg.inbound.inbound_type = "tun".to_string();
-        let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        let cfg = SimpleConfig::default();
+        // Verify default inbound is TUN and default outbound is AUTO-Test
+        assert_eq!(cfg.inbound.inbound_type, "tun");
+        assert_eq!(cfg.route.default_outbound, "AUTO-Test");
 
+        let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
         let inbounds = generated_cfg.get("inbounds").unwrap().as_array().unwrap();
         assert_eq!(inbounds[0].get("type").unwrap().as_str(), Some("tun"));
+
+        // Test mixed mode fallback/customization
+        let mut mixed_cfg = SimpleConfig::default();
+        mixed_cfg.inbound.inbound_type = "mixed".to_string();
+        let generated_mixed = generate_simple_singbox_config(&conn, &mixed_cfg).unwrap();
+        let mixed_inbounds = generated_mixed.get("inbounds").unwrap().as_array().unwrap();
+        assert_eq!(mixed_inbounds[0].get("type").unwrap().as_str(), Some("mixed"));
     }
 
     #[test]

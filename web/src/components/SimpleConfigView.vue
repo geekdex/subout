@@ -201,20 +201,20 @@
             <button
               type="button"
               class="btn"
-              :class="isDirect ? '' : 'btn-secondary'"
-              style="padding: 0.35rem 0.75rem; font-size: 0.8rem"
-              @click="setOutboundMode('direct')"
-            >
-              🟢 默认直连 (Direct)
-            </button>
-            <button
-              type="button"
-              class="btn"
               :class="isAutoTest ? '' : 'btn-secondary'"
               style="padding: 0.35rem 0.75rem; font-size: 0.8rem"
               @click="setOutboundMode('auto')"
             >
               ⚡ 自动测速优选 (AUTO-Test)
+            </button>
+            <button
+              type="button"
+              class="btn"
+              :class="isDirect ? '' : 'btn-secondary'"
+              style="padding: 0.35rem 0.75rem; font-size: 0.8rem"
+              @click="setOutboundMode('direct')"
+            >
+              🟢 默认直连 (Direct)
             </button>
             <button
               type="button"
@@ -229,7 +229,15 @@
         </div>
 
         <div
-          v-if="isDirect"
+          v-if="isAutoTest"
+          style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5"
+        >
+          💡
+          系统将定期自动对所有已启用的订阅节点进行测速（URLTest），并将流量实时路由至最低延迟节点。
+        </div>
+
+        <div
+          v-else-if="isDirect"
           style="
             font-size: 0.8rem;
             color: var(--text-muted);
@@ -245,7 +253,7 @@
           >：网络流量默认全部直接连接，无需代理节点，适用于未导入节点或无需代理时的安全直连环境。
         </div>
 
-        <div v-else-if="!isAutoTest" style="margin-top: 0.5rem">
+        <div v-else style="margin-top: 0.5rem">
           <div
             v-if="enabledNodes.length > 0"
             class="input-group"
@@ -273,10 +281,10 @@
               class="input-control"
               style="width: 100%"
             >
+              <option value="AUTO-Test">⚡ 自动测速优选 (AUTO-Test)</option>
               <option value="direct">
                 🟢 默认直连 (direct - 流量直接连接)
               </option>
-              <option value="AUTO-Test">⚡ 自动测速优选 (AUTO-Test)</option>
               <option value="proxy">🎯 全部节点选择组 (proxy 策略组)</option>
               <optgroup
                 v-if="filteredNodes.length > 0"
@@ -360,14 +368,6 @@
               </a>
             </div>
           </div>
-        </div>
-
-        <div
-          v-else
-          style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5"
-        >
-          💡
-          系统将定期自动对所有已启用的订阅节点进行测速（URLTest），并将流量实时路由至最低延迟节点。
         </div>
       </div>
     </div>
@@ -489,6 +489,23 @@
       >
         <div
           class="option-card"
+          :class="{ active: form.inbound.inbound_type === 'tun' }"
+          @click="form.inbound.inbound_type = 'tun'"
+        >
+          <div class="option-card-header">
+            <div class="flex items-center gap-2">
+              <span class="option-icon">🛡️</span>
+              <span class="option-title">TUN 虚拟网卡 (整机透明代理)</span>
+            </div>
+            <span class="badge badge-success">推荐</span>
+          </div>
+          <p class="option-desc">
+            创建虚拟网卡接管所有系统网络流量（需要管理员 / Root 权限）。
+          </p>
+        </div>
+
+        <div
+          class="option-card"
           :class="{ active: form.inbound.inbound_type === 'mixed' }"
           @click="form.inbound.inbound_type = 'mixed'"
         >
@@ -503,51 +520,10 @@
             在本地端口监听，只需在系统或浏览器配置代理端口即可使用。
           </p>
         </div>
-
-        <div
-          class="option-card"
-          :class="{ active: form.inbound.inbound_type === 'tun' }"
-          @click="form.inbound.inbound_type = 'tun'"
-        >
-          <div class="option-card-header">
-            <div class="flex items-center gap-2">
-              <span class="option-icon">🛡️</span>
-              <span class="option-title">TUN 虚拟网卡 (整机透明代理)</span>
-            </div>
-          </div>
-          <p class="option-desc">
-            创建虚拟网卡接管所有系统网络流量（需要管理员 / Root 权限）。
-          </p>
-        </div>
       </div>
 
       <div
-        v-if="form.inbound.inbound_type === 'mixed'"
-        class="inbound-config-row"
-      >
-        <div class="input-group" style="margin-bottom: 0; min-width: 160px">
-          <label>混合监听端口</label>
-          <input
-            v-model.number="form.inbound.mixed_port"
-            type="number"
-            class="input-control"
-            placeholder="2080"
-          />
-        </div>
-
-        <div
-          class="input-group"
-          style="margin-bottom: 0; align-self: flex-end; padding-bottom: 0.5rem"
-        >
-          <label class="switch-item" style="cursor: pointer">
-            <input v-model="form.inbound.allow_lan" type="checkbox" />
-            <span>允许局域网设备连接 (绑定 0.0.0.0)</span>
-          </label>
-        </div>
-      </div>
-
-      <div
-        v-else
+        v-if="form.inbound.inbound_type === 'tun'"
         class="inbound-config-row"
         style="flex-direction: column; gap: 0.75rem"
       >
@@ -575,6 +551,31 @@
           网卡需要系统管理员 (Root)
           权限。启动服务或应用配置时，系统将直接在弹窗中提示输入 Sudo
           密码进行即时授权运行（Windows 系统无需输入密码）。
+        </div>
+      </div>
+
+      <div
+        v-else
+        class="inbound-config-row"
+      >
+        <div class="input-group" style="margin-bottom: 0; min-width: 160px">
+          <label>混合监听端口</label>
+          <input
+            v-model.number="form.inbound.mixed_port"
+            type="number"
+            class="input-control"
+            placeholder="2080"
+          />
+        </div>
+
+        <div
+          class="input-group"
+          style="margin-bottom: 0; align-self: flex-end; padding-bottom: 0.5rem"
+        >
+          <label class="switch-item" style="cursor: pointer">
+            <input v-model="form.inbound.allow_lan" type="checkbox" />
+            <span>允许局域网设备连接 (绑定 0.0.0.0)</span>
+          </label>
         </div>
       </div>
     </div>
@@ -738,11 +739,12 @@ const formatLatency = (node) => {
   return "";
 };
 
-const isDirect = computed(
+const isDirect = computed(() => form.route.default_outbound === "direct");
+const isAutoTest = computed(
   () =>
-    form.route.default_outbound === "direct" || !form.route.default_outbound,
+    form.route.default_outbound === "AUTO-Test" ||
+    !form.route.default_outbound,
 );
-const isAutoTest = computed(() => form.route.default_outbound === "AUTO-Test");
 
 const setOutboundMode = (mode) => {
   if (mode === "direct") {
@@ -767,7 +769,7 @@ const form = reactive({
     foreign_dns: "https://1.1.1.1/dns-query",
   },
   inbound: {
-    inbound_type: "mixed",
+    inbound_type: "tun",
     mixed_port: 2080,
     allow_lan: false,
     tun_stack: "system",
@@ -777,7 +779,7 @@ const form = reactive({
     mode: "smart",
     block_ads: true,
     bypass_lan: true,
-    default_outbound: "direct",
+    default_outbound: "AUTO-Test",
   },
 });
 

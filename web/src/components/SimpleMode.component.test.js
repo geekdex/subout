@@ -92,7 +92,7 @@ describe("KernelDownloadCard", () => {
 });
 
 describe("SimpleConfigView", () => {
-  it("renders compact simplified DNS and Route cards", () => {
+  it("renders compact simplified DNS and Route cards with AUTO-Test and TUN first", () => {
     global.fetch = vi.fn().mockImplementation((url) => {
       if (url.includes("/api/nodes")) {
         return Promise.resolve({
@@ -120,7 +120,7 @@ describe("SimpleConfigView", () => {
                 foreign_dns: "https://1.1.1.1/dns-query",
               },
               inbound: {
-                inbound_type: "mixed",
+                inbound_type: "tun",
                 mixed_port: 2080,
                 allow_lan: false,
                 tun_stack: "system",
@@ -142,14 +142,26 @@ describe("SimpleConfigView", () => {
     expect(wrapper.text()).toContain("极简配置管理");
     expect(wrapper.text()).toContain("智能分流");
     expect(wrapper.text()).toContain("阿里 + Cloudflare DoH");
+    expect(wrapper.text()).toContain("TUN 虚拟网卡 (整机透明代理)");
     expect(wrapper.text()).toContain("混合端口 (Mixed HTTP + SOCKS5)");
     expect(wrapper.text()).toContain("查看配置预览");
     expect(wrapper.text()).toContain("默认出口策略与节点");
     expect(wrapper.text()).toContain("自动测速优选");
     expect(wrapper.text()).toContain("手动指定节点");
+
+    // Verify inbound cards order: TUN first, Mixed second
+    const inboundCards = wrapper.findAll(".option-grid")[2].findAll(".option-card");
+    expect(inboundCards[0].text()).toContain("TUN 虚拟网卡");
+    expect(inboundCards[1].text()).toContain("混合端口");
+
+    // Verify outbound buttons order: AUTO-Test first, Direct second, Manual third
+    const outboundBtns = wrapper.find(".outbound-box").findAll("button.btn");
+    expect(outboundBtns[0].text()).toContain("自动测速优选");
+    expect(outboundBtns[1].text()).toContain("默认直连");
+    expect(outboundBtns[2].text()).toContain("手动指定节点");
   });
 
-  it("prompts for sudo password when applying TUN mode on Linux as non-root", async () => {
+  it("prompts for sudo password when applying default TUN mode on Linux as non-root", async () => {
     const { systemModeInfo, dialog, kernelInfo, sessionSudoPassword } =
       await import("../store.js");
     sessionSudoPassword.value = "";
@@ -174,7 +186,7 @@ describe("SimpleConfigView", () => {
                   foreign_dns: "https://1.1.1.1/dns-query",
                 },
                 inbound: {
-                  inbound_type: "mixed",
+                  inbound_type: "tun",
                   mixed_port: 2080,
                   allow_lan: false,
                   tun_stack: "system",
@@ -197,14 +209,7 @@ describe("SimpleConfigView", () => {
     const wrapper = mount(SimpleConfigView);
     await new Promise((r) => setTimeout(r, 20));
 
-    // Switch to TUN mode
-    const tunCard = wrapper
-      .findAll(".option-card")
-      .find((c) => c.text().includes("TUN 虚拟网卡"));
-    expect(tunCard).toBeDefined();
-    await tunCard.trigger("click");
-
-    // Click "保存并应用" button
+    // Click "保存并应用" button directly with default TUN mode
     const applyBtn = wrapper
       .findAll("button")
       .find((b) => b.text().includes("保存并应用"));
