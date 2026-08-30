@@ -442,6 +442,7 @@ pub async fn test_node_web_latency(
     target_url: String,
     sem: Arc<Semaphore>,
 ) -> Option<u64> {
+    let singbox_bin = crate::kernel::get_singbox_executable()?;
     let _permit = sem.acquire().await.ok()?;
 
     tokio::time::timeout(Duration::from_secs(7), async {
@@ -492,9 +493,6 @@ pub async fn test_node_web_latency(
         std::fs::write(&temp_file_path, config_str).ok()?;
 
         // 4. Start sing-box process for local node testing
-        let singbox_bin = crate::kernel::get_singbox_executable()
-            .unwrap_or_else(|| std::path::PathBuf::from("sing-box"));
-
         let mut child = tokio::process::Command::new(&singbox_bin)
             .args(["run", "-c", temp_file_path.to_str()?])
             .stdout(std::process::Stdio::null())
@@ -556,9 +554,20 @@ pub async fn ping_nodes(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<PingRequest>,
-) -> Result<Json<Vec<PingResponse>>, StatusCode> {
-    check_auth(&state, &headers).await?;
-    let conn = get_db_conn(&state.db_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<Vec<PingResponse>>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    let test_type = payload.test_type.as_deref().unwrap_or("tcp");
+    if test_type == "web" && crate::kernel::get_singbox_executable().is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "当前系统尚未安装 sing-box 内核，无法执行节点网页延迟测试。请先在【内核管理】中一键下载安装内核。".to_string(),
+        ));
+    }
+
+    let conn = get_db_conn(&state.db_path).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "数据库连接失败".to_string()))?;
 
     let mut nodes_to_ping = Vec::new();
     for id in payload.ids {
@@ -576,7 +585,6 @@ pub async fn ping_nodes(
 
     drop(conn);
 
-    let test_type = payload.test_type.as_deref().unwrap_or("tcp");
     let target_url = payload
         .target_url
         .unwrap_or_else(|| "http://www.gstatic.com/generate_204".to_string());
