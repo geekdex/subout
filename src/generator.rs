@@ -64,11 +64,7 @@ pub fn sanitize_outbound_value(outbound: &mut Value) {
 }
 
 pub fn sanitize_inbound_value(inbound: &mut Value) {
-    if let Some(obj) = inbound.as_object_mut() {
-        if !cfg!(target_os = "linux") {
-            obj.remove("auto_redirect");
-        }
-    }
+    crate::platform::current_platform().sanitize_inbound(inbound);
 }
 
 pub fn sanitize_inbounds_value(inbounds: &mut Value) {
@@ -87,17 +83,78 @@ pub fn sanitize_outbounds_value(outbounds: &mut Value) {
     }
 }
 
+pub fn sanitize_dns_value(dns: &mut Value) {
+    if let Some(obj) = dns.as_object_mut() {
+        if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
+            for server in servers {
+                if let Some(srv_obj) = server.as_object_mut() {
+                    if srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
+                        if !srv_obj.contains_key("inet4_range") {
+                            srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
+                        }
+                        if !srv_obj.contains_key("inet6_range") {
+                            srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn sanitize_route_value(route: &mut Value) {
+    if let Some(obj) = route.as_object_mut() {
+        // Ensure auto_detect_interface is true to prevent routing loops
+        if !obj.contains_key("auto_detect_interface") {
+            obj.insert("auto_detect_interface".to_string(), json!(true));
+        }
+
+        // Reorder route rules so that DNS hijacking rules and sniff rules always precede
+        // any IP CIDR / private IP direct rules. Otherwise, DNS queries to router IPs (e.g. 192.168.0.1:53)
+        // match the private CIDR rule and bypass DNS hijacking entirely.
+        if let Some(rules_arr) = obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
+            let mut sniff_rules = Vec::new();
+            let mut dns_hijack_rules = Vec::new();
+            let mut other_rules = Vec::new();
+
+            for rule in rules_arr.drain(..) {
+                let action = rule.get("action").and_then(|a| a.as_str()).unwrap_or("");
+                let is_dns_hijack = action == "hijack-dns"
+                    || rule.get("protocol").and_then(|p| p.as_str()) == Some("dns")
+                    || (rule.get("port").map_or(false, |p| {
+                        p.as_u64() == Some(53)
+                            || p.as_array().map_or(false, |arr| arr.iter().any(|v| v.as_u64() == Some(53)))
+                    }) && action == "hijack-dns");
+
+                if action == "sniff" {
+                    sniff_rules.push(rule);
+                } else if is_dns_hijack {
+                    dns_hijack_rules.push(rule);
+                } else {
+                    other_rules.push(rule);
+                }
+            }
+
+            rules_arr.extend(sniff_rules);
+            rules_arr.extend(dns_hijack_rules);
+            rules_arr.extend(other_rules);
+        }
+    }
+}
+
 pub fn generate_config_with_base(
     _conn: &Connection,
     log: Value,
-    dns: Value,
+    mut dns: Value,
     mut inbounds: Value,
     mut outbounds: Value,
-    route: Value,
+    mut route: Value,
     experimental: Value,
 ) -> Result<Value> {
+    sanitize_dns_value(&mut dns);
     sanitize_inbounds_value(&mut inbounds);
     sanitize_outbounds_value(&mut outbounds);
+    sanitize_route_value(&mut route);
     Ok(json!({
         "log": log,
         "dns": dns,
@@ -137,7 +194,7 @@ mod tests {
                 "tag": "direct"
             }
         ]);
-        let route = json!({ "final": "direct" });
+        let route = json!({ "final": "direct", "auto_detect_interface": true });
         let experimental = json!({});
 
         let result = generate_config_with_base(
@@ -151,8 +208,7 @@ mod tests {
         )
         .unwrap();
 
-        // The generated config should be exactly the merge of the 6 sections,
-        // with no expansion, deduplication, or DB lookup.
+        // The generated config should be the sanitized merge of the 6 sections
         assert_eq!(result.get("log"), Some(&log));
         assert_eq!(result.get("dns"), Some(&dns));
         assert_eq!(result.get("inbounds"), Some(&inbounds));
@@ -175,19 +231,62 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_inbounds_non_linux() {
-        let mut inbounds = json!([
-            {
-                "type": "tun",
-                "tag": "tun-in",
-                "auto_redirect": true
-            }
-        ]);
-        sanitize_inbounds_value(&mut inbounds);
-        if cfg!(target_os = "linux") {
-            assert_eq!(inbounds[0].get("auto_redirect"), Some(&json!(true)));
-        } else {
-            assert_eq!(inbounds[0].get("auto_redirect"), None);
-        }
+    fn test_sanitize_inbounds_strategies() {
+        use crate::platform::PlatformStrategy;
+
+        // Test Linux strategy
+        let mut linux_inbound = json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "tun0",
+            "auto_redirect": true
+        });
+        crate::platform::linux_platform().sanitize_inbound(&mut linux_inbound);
+        assert_eq!(linux_inbound.get("auto_redirect"), Some(&json!(true)));
+        assert_eq!(linux_inbound.get("interface_name"), Some(&json!("tun0")));
+
+        // Test macOS strategy
+        let mut macos_inbound = json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "tun0",
+            "auto_redirect": true
+        });
+        crate::platform::macos_platform().sanitize_inbound(&mut macos_inbound);
+        assert_eq!(macos_inbound.get("auto_redirect"), None);
+        assert_eq!(macos_inbound.get("interface_name"), None);
+        assert_eq!(macos_inbound.get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
+        assert_eq!(macos_inbound.get("strict_route"), Some(&json!(true)));
+        assert_eq!(macos_inbound.get("stack"), Some(&json!("mixed")));
+
+        // Test Windows strategy
+        let mut win_inbound = json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "tun0",
+            "auto_redirect": true
+        });
+        crate::platform::windows_platform().sanitize_inbound(&mut win_inbound);
+        assert_eq!(win_inbound.get("auto_redirect"), None);
+        assert_eq!(win_inbound.get("interface_name"), None);
+        assert_eq!(win_inbound.get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
+        assert_eq!(win_inbound.get("strict_route"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn test_sanitize_route_reorders_hijack_dns() {
+        let mut route = json!({
+            "rules": [
+                { "outbound": "direct", "ip_cidr": ["192.168.0.0/24"] },
+                { "action": "sniff" },
+                { "action": "hijack-dns", "protocol": "dns" }
+            ]
+        });
+        sanitize_route_value(&mut route);
+        let rules = route.get("rules").unwrap().as_array().unwrap();
+        assert_eq!(rules[0].get("action").unwrap().as_str(), Some("sniff"));
+        assert_eq!(rules[1].get("action").unwrap().as_str(), Some("hijack-dns"));
+        assert_eq!(rules[2].get("ip_cidr").is_some(), true);
+        assert_eq!(route.get("auto_detect_interface"), Some(&json!(true)));
     }
 }

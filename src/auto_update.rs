@@ -7,7 +7,10 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 
-pub async fn check_and_run_auto_update(db_path: &str) -> Result<()> {
+pub async fn check_and_run_auto_update(
+    db_path: &str,
+    service_manager: Option<Arc<crate::service::SingBoxServiceManager>>,
+) -> Result<()> {
     let conn = Connection::open(db_path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
@@ -55,7 +58,7 @@ pub async fn check_and_run_auto_update(db_path: &str) -> Result<()> {
             next_run, now
         );
         drop(conn);
-        if let Err(e) = run_auto_update_process(db_path).await {
+        if let Err(e) = run_auto_update_process(db_path, service_manager).await {
             eprintln!("[AutoUpdate] Scheduled update failed: {}", e);
         }
     }
@@ -63,7 +66,10 @@ pub async fn check_and_run_auto_update(db_path: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_auto_update_process(db_path: &str) -> Result<String> {
+pub async fn run_auto_update_process(
+    db_path: &str,
+    service_manager: Option<Arc<crate::service::SingBoxServiceManager>>,
+) -> Result<String> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let now_str = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
@@ -142,6 +148,7 @@ pub async fn run_auto_update_process(db_path: &str) -> Result<String> {
         }
     };
 
+    let service_mgr_for_run = service_manager.clone();
     let run_impl = async {
         // Step 1: Select currently running configuration as the base template
         update_log("步骤 1: 正在选择当前运行的配置作为基础模板...");
@@ -165,35 +172,6 @@ pub async fn run_auto_update_process(db_path: &str) -> Result<String> {
             "  -> 已载入当前运行配置模板 (ID: {}, 备注: {})",
             running_id, history_detail
         ));
-
-        // Execute pre-command if configured
-        let pre_cmd = {
-            let conn_pre = Connection::open(db_path)?;
-            conn_pre.busy_timeout(std::time::Duration::from_secs(5))?;
-            crate::db::get_setting(&conn_pre, "auto_update_pre_command")?.unwrap_or_default()
-        };
-        let sudo_pass = {
-            let conn_sudo = Connection::open(db_path)?;
-            conn_sudo.busy_timeout(std::time::Duration::from_secs(5))?;
-            crate::db::get_setting(&conn_sudo, "running_sudo_pass")?.unwrap_or_default()
-        };
-
-        if !pre_cmd.trim().is_empty() {
-            update_log(&format!("正在执行前置命令: {}...", pre_cmd));
-            match crate::web::config::run_command_with_sudo(&pre_cmd, &sudo_pass).await {
-                Ok(out) if out.status.success() => {
-                    let out_msg = String::from_utf8_lossy(&out.stdout).into_owned();
-                    update_log(&format!("  -> 前置命令执行成功！\n{}", out_msg));
-                }
-                Ok(out) => {
-                    let err_str = String::from_utf8_lossy(&out.stderr).into_owned();
-                    update_log(&format!("  -> 警告: 前置命令执行失败: {}", err_str));
-                }
-                Err(e) => {
-                    update_log(&format!("  -> 警告: 前置命令执行出错: {}", e));
-                }
-            }
-        }
 
         // Step 2: Update all active subscriptions in subscription management
         update_log("步骤 2: 正在挨个更新订阅源管理中的所有节点...");
@@ -303,19 +281,9 @@ pub async fn run_auto_update_process(db_path: &str) -> Result<String> {
         update_log(
             "步骤 5: 正在构建更新后的出站配置 (保留系统出站前置、同步最新策略组及有效代理节点)...",
         );
-        let (config_path, restart_cmd, sudo_pass, outbounds_list) = {
+        let outbounds_list = {
             let conn_sync = Connection::open(db_path)?;
             conn_sync.busy_timeout(std::time::Duration::from_secs(5))?;
-
-            let config_path =
-                crate::db::get_setting(&conn_sync, "running_config_path")?.unwrap_or_default();
-            if config_path.is_empty() {
-                return Err(anyhow!("未配置运行配置的保存路径"));
-            }
-            let restart_cmd =
-                crate::db::get_setting(&conn_sync, "running_restart_cmd")?.unwrap_or_default();
-            let sudo_pass =
-                crate::db::get_setting(&conn_sync, "running_sudo_pass")?.unwrap_or_default();
 
             let outbounds_list = build_updated_outbounds(&conn_sync, &full_config, &deleted_tags)?;
 
@@ -324,7 +292,7 @@ pub async fn run_auto_update_process(db_path: &str) -> Result<String> {
                 outbounds_list.len()
             ));
 
-            (config_path, restart_cmd, sudo_pass, outbounds_list)
+            outbounds_list
         };
 
         // Step 6: Validate configuration using sing-box
@@ -357,71 +325,15 @@ pub async fn run_auto_update_process(db_path: &str) -> Result<String> {
         }
         update_log("  -> sing-box 校验成功！");
 
-        // Step 7: Save to disk and execute restart
-        update_log("步骤 7: 正在部署配置文件并重启服务...");
+        // Step 7: Save to disk and execute restart via SingBoxServiceManager
+        update_log("步骤 7: 正在部署配置文件至 sing-box 运行环境...");
+        let running_config_path = crate::service::SingBoxServiceManager::get_running_config_path();
+        if let Some(parent) = running_config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let new_config_str = serde_json::to_string_pretty(&final_config)?;
-        let temp_dir = std::env::temp_dir();
-        let temp_file_path =
-            temp_dir.join(format!("subout_auto_update_{}.json", std::process::id()));
-        std::fs::write(&temp_file_path, &new_config_str)?;
-
-        let mut cp_success = false;
-        let mut cp_err_msg = String::new();
-
-        if std::fs::copy(&temp_file_path, &config_path).is_ok() {
-            cp_success = true;
-        } else {
-            let parent_dir = std::path::Path::new(&config_path)
-                .parent()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "/etc/sing-box".to_string());
-
-            let mkdir_cmd = format!("sudo mkdir -p {:?}", parent_dir);
-            let _ = crate::web::config::run_command_with_sudo(&mkdir_cmd, &sudo_pass).await;
-
-            let cp_cmd = format!("sudo cp -f {:?} {:?}", temp_file_path, config_path);
-            match crate::web::config::run_command_with_sudo(&cp_cmd, &sudo_pass).await {
-                Ok(output) => {
-                    if output.status.success() {
-                        cp_success = true;
-                    } else {
-                        cp_err_msg = String::from_utf8_lossy(&output.stderr).into_owned();
-                    }
-                }
-                Err(e) => {
-                    cp_err_msg = format!("执行 cp 命令失败: {}", e);
-                }
-            }
-        }
-
-        let _ = std::fs::remove_file(&temp_file_path);
-
-        if !cp_success {
-            return Err(anyhow!("覆盖配置文件失败: {}", cp_err_msg));
-        }
-        update_log("  -> 配置文件部署成功");
-
-        // Run restart command
-        if !restart_cmd.trim().is_empty() {
-            update_log(&format!("  -> 正在执行服务重启命令: {}", restart_cmd));
-            let restart_res =
-                crate::web::config::run_command_with_sudo(&restart_cmd, &sudo_pass).await;
-            match restart_res {
-                Ok(out) if out.status.success() => {
-                    let out_msg = String::from_utf8_lossy(&out.stdout).into_owned();
-                    update_log(&format!("  -> 重启命令执行成功！\n{}", out_msg));
-                }
-                Ok(out) => {
-                    let err_str = String::from_utf8_lossy(&out.stderr).into_owned();
-                    return Err(anyhow!("重启命令执行失败: {}", err_str));
-                }
-                Err(e) => {
-                    return Err(anyhow!("重启命令执行出错: {}", e));
-                }
-            }
-        } else {
-            update_log("  -> 跳过重启（未配置重启命令）");
-        }
+        std::fs::write(&running_config_path, &new_config_str)?;
+        update_log(&format!("  -> 配置文件已成功保存至 {:?}", running_config_path));
 
         // Save history config and update active config id
         let new_history_desc = format!(
@@ -446,6 +358,23 @@ pub async fn run_auto_update_process(db_path: &str) -> Result<String> {
                 "  -> 已生成全新历史配置记录 (ID: {}) 并设置为当前运行配置",
                 new_history_id
             ));
+        }
+
+        // Restart sing-box service if service manager is available
+        if let Some(ref mgr) = service_mgr_for_run {
+            if mgr.is_running().await {
+                update_log("  -> sing-box 服务正在运行，正在重启服务应用最新节点配置...");
+                match mgr.restart_with_sudo(&final_config, None).await {
+                    Ok(_) => {
+                        update_log("  -> sing-box 核心服务已成功重启并生效！");
+                    }
+                    Err(e) => {
+                        update_log(&format!("  -> 警告: 重启 sing-box 服务失败: {}", e));
+                    }
+                }
+            } else {
+                update_log("  -> sing-box 核心服务当前未运行，最新配置已就绪。");
+            }
         }
 
         let next_run_time_str = Local::now()

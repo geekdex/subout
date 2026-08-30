@@ -462,9 +462,7 @@ pub async fn test_node_web_latency(
         }
 
         // 3. Write a temporary config file with explicit route.final = "proxy"
-        let temp_dir = std::env::temp_dir();
-        let temp_file_path =
-            temp_dir.join(format!("singbox_test_{}_{}.json", port, std::process::id()));
+        let temp_file_path = crate::paths::AppPaths::get().temp_file_path(&format!("singbox_test_{}", port), ".json");
 
         let config = serde_json::json!({
             "log": {
@@ -494,7 +492,10 @@ pub async fn test_node_web_latency(
         std::fs::write(&temp_file_path, config_str).ok()?;
 
         // 4. Start sing-box process for local node testing
-        let mut child = tokio::process::Command::new("sing-box")
+        let singbox_bin = crate::kernel::get_singbox_executable()
+            .unwrap_or_else(|| std::path::PathBuf::from("sing-box"));
+
+        let mut child = tokio::process::Command::new(&singbox_bin)
             .args(["run", "-c", temp_file_path.to_str()?])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

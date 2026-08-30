@@ -17,8 +17,11 @@ use crate::db;
 pub mod auth;
 pub mod config;
 pub mod groups;
+pub mod kernel_api;
 pub mod nodes;
+pub mod service_api;
 pub mod settings;
+pub mod simple_api;
 pub mod subscriptions;
 pub mod system;
 
@@ -26,64 +29,15 @@ pub mod system;
 pub struct AppState {
     pub db_path: String,
     pub session_token: Arc<RwLock<Option<String>>>,
+    pub kernel_download_status: Arc<RwLock<crate::kernel::KernelDownloadStatus>>,
+    pub kernel_download_cancel: Arc<std::sync::atomic::AtomicBool>,
+    pub service_manager: Arc<crate::service::SingBoxServiceManager>,
 }
 
 pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error::Error>> {
-    // Determine database path and port
-    let mut db_path = "subout.db".to_string();
-    if let Some(mut config_dir) = dirs::config_dir() {
-        config_dir.push("subout");
-        if let Err(e) = std::fs::create_dir_all(&config_dir) {
-            eprintln!(
-                "[Warning] Failed to create config directory {:?}: {}",
-                config_dir, e
-            );
-        } else {
-            let target_path = config_dir.join("subout.db");
-            if !target_path.exists() {
-                if std::path::Path::new("subout.db").exists() {
-                    if let Err(e) = std::fs::rename("subout.db", &target_path) {
-                        eprintln!(
-                            "[Warning] Failed to migrate local database to {:?}: {}",
-                            target_path, e
-                        );
-                    } else {
-                        println!(
-                            "[Info] Migrated local subout.db to user config directory: {:?}",
-                            target_path
-                        );
-                    }
-                } else if std::path::Path::new("singbox_auto.db").exists() {
-                    if let Err(e) = std::fs::rename("singbox_auto.db", &target_path) {
-                        eprintln!(
-                            "[Warning] Failed to migrate old singbox_auto.db to {:?}: {}",
-                            target_path, e
-                        );
-                    } else {
-                        println!(
-                            "[Info] Migrated old singbox_auto.db to user config directory: {:?}",
-                            target_path
-                        );
-                    }
-                }
-            }
-            db_path = target_path.to_string_lossy().to_string();
-        }
-    } else {
-        // Fallback to local program directory if dirs::config_dir() is None
-        if !std::path::Path::new(&db_path).exists()
-            && std::path::Path::new("singbox_auto.db").exists()
-        {
-            if let Err(e) = std::fs::rename("singbox_auto.db", &db_path) {
-                eprintln!(
-                    "[Warning] Failed to rename old database from singbox_auto.db to subout.db: {}",
-                    e
-                );
-            } else {
-                println!("[Info] Migrated database file from singbox_auto.db to subout.db");
-            }
-        }
-    }
+    // Determine database path and ensure directories
+    let db_path_buf = crate::paths::AppPaths::get().initialize_db_path()?;
+    let db_path = db_path_buf.to_string_lossy().to_string();
 
     // Initialize database
     let _conn = db::init_db(&db_path)?;
@@ -105,27 +59,43 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         }
     }
 
+    let service_manager = Arc::new(crate::service::SingBoxServiceManager::new());
+    service_manager.set_db_path(&db_path).await;
+    service_manager.load_saved_sudo_pass().await;
+
+    let state = AppState {
+        db_path: db_path.clone(),
+        session_token: Arc::new(RwLock::new(None)),
+        kernel_download_status: Arc::new(RwLock::new(crate::kernel::KernelDownloadStatus::default())),
+        kernel_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        service_manager,
+    };
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
     let db_path_clone = db_path.clone();
+    let service_mgr_clone = state.service_manager.clone();
+    let service_mgr_for_shutdown = state.service_manager.clone();
+    let mut auto_update_rx = shutdown_rx.clone();
     tokio::spawn(async move {
         println!("[AutoUpdate] Background checker task started.");
         // Check immediately on startup to catch up any missed tasks (e.g. due to system crash/shutdown)
-        if let Err(e) = crate::auto_update::check_and_run_auto_update(&db_path_clone).await {
+        if let Err(e) = crate::auto_update::check_and_run_auto_update(&db_path_clone, Some(service_mgr_clone.clone())).await {
             eprintln!("[AutoUpdate] Background check error on startup: {}", e);
         }
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-            if let Err(e) = crate::auto_update::check_and_run_auto_update(&db_path_clone).await {
-                eprintln!("[AutoUpdate] Background check error: {}", e);
+            tokio::select! {
+                _ = auto_update_rx.changed() => {
+                    break;
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {
+                    if let Err(e) = crate::auto_update::check_and_run_auto_update(&db_path_clone, Some(service_mgr_clone.clone())).await {
+                        eprintln!("[AutoUpdate] Background check error: {}", e);
+                    }
+                }
             }
         }
     });
-
-    // Port will be determined during server binding
-
-    let state = AppState {
-        db_path,
-        session_token: Arc::new(RwLock::new(None)),
-    };
 
     let app = Router::new()
         // Front-end UI
@@ -223,10 +193,38 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route("/api/config/history/clear", post(config::clear_history))
         .route("/api/config/schemas", get(config::get_config_schemas))
         .route("/api/config/schemas/ui", get(config::get_schema_ui_meta))
-        // System path autocomplete
+        // System path & mode
         .route("/api/system/info", get(system::get_system_info))
+        .route(
+            "/api/system/mode",
+            get(system::get_system_mode).post(system::set_system_mode),
+        )
         .route("/api/system/dirs", get(system::get_system_dirs))
         .route("/api/system/initialize", post(system::initialize_db))
+        // Kernel Management APIs
+        .route("/api/kernel/info", get(kernel_api::get_kernel_info))
+        .route("/api/kernel/status", get(kernel_api::get_kernel_status))
+        .route("/api/kernel/download", post(kernel_api::download_kernel))
+        .route("/api/kernel/cancel", post(kernel_api::cancel_download))
+        // Integrated Service Management APIs
+        .route("/api/service/status", get(service_api::get_service_status))
+        .route("/api/service/start", post(service_api::start_service))
+        .route("/api/service/stop", post(service_api::stop_service))
+        .route("/api/service/restart", post(service_api::restart_service))
+        .route("/api/service/kill-external", post(service_api::kill_external_service))
+        .route(
+            "/api/service/logs",
+            get(service_api::get_service_logs).delete(service_api::clear_service_logs),
+        )
+        .route(
+            "/api/service/logs/clear",
+            post(service_api::clear_service_logs),
+        )
+        // Simple Mode Configuration APIs
+        .route(
+            "/api/simple-config",
+            get(simple_api::get_simple_config).post(simple_api::save_simple_config),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -271,15 +269,8 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
                     bind_result = Some(l);
                     break;
                 }
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::AddrInUse {
-                        println!("[Warning] Port {} is in use, trying next port...", try_port);
-                    } else {
-                        println!(
-                            "[Warning] Failed to bind to port {}: {}, trying next port...",
-                            try_port, e
-                        );
-                    }
+                Err(_) => {
+                    // Port is occupied, continue probing next port
                 }
             }
         }
@@ -293,7 +284,63 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         }
     };
 
-    axum::serve(listener, app).await?;
+    let shutdown_signal_rx = shutdown_rx.clone();
+    let shutdown_signal = async move {
+        let ctrl_c = async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to install Ctrl+C handler");
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            if let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                sig.recv().await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
+
+        println!("\n[Server] 正在停止服务并安全退出... (再次按 Ctrl+C 强制退出)");
+        let _ = shutdown_tx.send(true);
+
+        // Spawn listener for secondary Ctrl+C to force immediate quit
+        tokio::spawn(async {
+            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+            if tokio::signal::ctrl_c().await.is_ok() {
+                eprintln!("\n[Server] 收到强制中断信号，立即终止进程。");
+                std::process::exit(130);
+            }
+        });
+
+        let _ = service_mgr_for_shutdown.stop().await;
+    };
+
+    let mut shutdown_exit_rx = shutdown_signal_rx.clone();
+    let serve_future = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal);
+
+    tokio::select! {
+        res = serve_future => {
+            if let Err(e) = res {
+                eprintln!("[Server] Web server error: {}", e);
+            }
+        }
+        _ = async {
+            let _ = shutdown_exit_rx.changed().await;
+            // Allow up to 300ms for active HTTP connections to flush before exiting
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        } => {}
+    }
+
+    println!("[Server] 服务已安全关闭。");
     Ok(())
 }
 

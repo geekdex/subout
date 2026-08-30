@@ -61,41 +61,6 @@
         </form>
       </div>
 
-      <!-- 全局 Sudo 密码设置 -->
-      <div class="panel">
-        <div class="panel-title">全局 Sudo 密码设置</div>
-        <form @submit.prevent="saveSudoPassword">
-          <div class="input-group">
-            <label for="sudo-pass">Sudo 密码</label>
-            <input
-              id="sudo-pass"
-              v-model="sudoPassForm.value"
-              type="password"
-              class="input-control"
-              :placeholder="
-                hasSudoPass
-                  ? '•••••• (已保存密码，留空不修改)'
-                  : '请输入全局 Sudo 密码'
-              "
-            />
-            <small
-              style="
-                color: var(--text-muted);
-                font-size: 0.8rem;
-                margin-top: 0.25rem;
-                display: block;
-              "
-            >
-              用于执行需要管理员权限的命令，如写入配置文件、执行前置/重启 Shell
-              命令等。
-            </small>
-          </div>
-          <button type="submit" class="btn" :disabled="savingSudo">
-            保存 Sudo 密码
-          </button>
-        </form>
-      </div>
-
       <!-- System Initialization -->
       <div class="panel">
         <div class="panel-title" style="color: var(--danger)">
@@ -124,8 +89,8 @@
       </div>
     </div>
 
-    <!-- Automatic Configuration Update Panel -->
-    <div class="panel" style="margin-top: 1.5rem">
+    <!-- Automatic Configuration Update Panel (Expert Mode Only) -->
+    <div v-if="appMode === 'expert'" class="panel" style="margin-top: 1.5rem">
       <div
         class="panel-title"
         style="
@@ -314,28 +279,6 @@
           </div>
 
           <div class="input-group" style="margin-top: 1rem">
-            <label>自动化前置执行命令 (在更新 and 测速前执行)</label>
-            <input
-              v-model="autoUpdateForm.pre_command"
-              type="text"
-              class="input-control"
-              placeholder="例如: sudo systemctl stop sing-box"
-              :disabled="!autoUpdateForm.enabled"
-            />
-            <small
-              style="
-                color: var(--text-muted);
-                font-size: 0.8rem;
-                margin-top: 0.25rem;
-                display: block;
-              "
-            >
-              可选。在开始更新拉取订阅及执行测速前，系统会首先执行此命令。如果命令以
-              sudo 开头，将自动使用全局 Sudo 密码。
-            </small>
-          </div>
-
-          <div class="input-group" style="margin-top: 1rem">
             <label>选择测速目的地址 (URL)</label>
             <select
               v-model="presetUrlSelectSettings"
@@ -517,7 +460,14 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, nextTick } from "vue";
-import { token, API_BASE, showToast, logout, confirmDialog } from "../store.js";
+import {
+  token,
+  API_BASE,
+  showToast,
+  logout,
+  confirmDialog,
+  appMode,
+} from "../store.js";
 
 const passwords = reactive({
   old: "",
@@ -527,39 +477,6 @@ const passwords = reactive({
 const isPasswordEnvSet = ref(false);
 const initializing = ref(false);
 
-const hasSudoPass = ref(false);
-const sudoPassForm = reactive({
-  value: "",
-});
-const savingSudo = ref(false);
-
-const saveSudoPassword = async () => {
-  savingSudo.value = true;
-  try {
-    const res = await fetch(`${API_BASE}/api/settings/sudo`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token.value}`,
-      },
-      body: JSON.stringify({
-        sudo_pass: sudoPassForm.value,
-      }),
-    });
-    if (res.ok) {
-      showToast("Sudo 密码保存成功");
-      sudoPassForm.value = "";
-      loadSettings();
-    } else {
-      showToast("保存 Sudo 密码失败", "danger");
-    }
-  } catch {
-    showToast("保存 Sudo 密码请求出错", "danger");
-  } finally {
-    savingSudo.value = false;
-  }
-};
-
 const loadSettings = async () => {
   try {
     const res = await fetch(`${API_BASE}/api/settings`, {
@@ -568,7 +485,6 @@ const loadSettings = async () => {
     if (res.ok) {
       const data = await res.json();
       isPasswordEnvSet.value = data.is_password_env_set;
-      hasSudoPass.value = data.has_sudo_pass;
     }
   } catch {
     showToast("载入系统设置失败", "danger");
@@ -640,7 +556,6 @@ const autoUpdateForm = reactive({
   interval: "12h",
   test_url: "http://www.gstatic.com/generate_204",
   daily_time: "04:00",
-  pre_command: "",
 });
 
 const autoUpdateStatus = reactive({
@@ -701,7 +616,6 @@ const loadAutoUpdateSettings = async (isPoll = false) => {
         autoUpdateForm.interval = data.interval;
         autoUpdateForm.test_url = data.test_url;
         autoUpdateForm.daily_time = data.daily_time || "04:00";
-        autoUpdateForm.pre_command = data.pre_command || "";
 
         const presets = [
           "http://cp.cloudflare.com/generate_204",
@@ -753,7 +667,6 @@ const saveAutoUpdateSettings = async () => {
         interval: autoUpdateForm.interval,
         test_url: autoUpdateForm.test_url,
         daily_time: autoUpdateForm.daily_time,
-        pre_command: autoUpdateForm.pre_command,
       }),
     });
     if (res.ok) {

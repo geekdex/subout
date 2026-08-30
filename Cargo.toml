@@ -10,7 +10,7 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["macros"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "socks", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "socks", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 anyhow = "1.0"
@@ -20,3 +20,7 @@ percent-encoding = "2.3"
 url = "2.5"
 chrono = "0.4"
 dirs = "5.0"
+flate2 = "1.0"
+tar = "0.4"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+futures-util = "0.3"

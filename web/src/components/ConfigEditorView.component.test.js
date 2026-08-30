@@ -178,9 +178,9 @@ const mockConfigDetail = {
 // 运行设置
 const mockRunningConfig = {
   config_id: null,
-  config_path: "",
-  restart_cmd: "",
-  has_sudo_pass: false,
+  is_service_running: false,
+  kernel_installed: true,
+  kernel_version: "1.10.0",
 };
 
 /**
@@ -850,9 +850,9 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
             ok: true,
             json: async () => ({
               config_id: 1,
-              config_path: "/etc/sing-box/config.json",
-              restart_cmd: "systemctl restart sing-box",
-              has_sudo_pass: false,
+              is_service_running: true,
+              kernel_installed: true,
+              kernel_version: "1.10.0",
             }),
           });
         }
@@ -1043,11 +1043,11 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(warningBadge.text()).toContain("⚠️ 缺少节点");
     });
 
-    it("路由规则编辑模态框：支持浏览器进程快捷预设点选与 Linux 最佳实践", async () => {
+    it("路由规则编辑模态框：支持跨平台 (Linux/Windows/macOS) 浏览器进程快捷预设与最佳实践", async () => {
       const wrapper = await mountConfigEditor();
       await enterEditMode(wrapper);
 
-      // Linux 模式下检查预设仅包含主流浏览器且无 .exe 后缀
+      // 1. Linux 模式下检查预设仅包含主流浏览器且无 .exe 后缀
       wrapper.vm.systemOs = "linux";
       expect(wrapper.vm.browserPresets).toEqual([
         {
@@ -1106,11 +1106,58 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(createdRule.process_name).toEqual(["msedge", "chrome"]);
       expect(createdRule.outbound).toBe("proxy");
 
-      // Windows 模式下校验预设带有 .exe
+      // 2. Windows 模式下校验预设带有 .exe
       wrapper.vm.systemOs = "windows";
       expect(wrapper.vm.browserPresets[0].name).toBe("chrome.exe");
+      expect(wrapper.vm.browserPresets[2].name).toBe("msedge.exe");
       expect(wrapper.vm.processNamePlaceholder).toBe(
         "chrome.exe\nfirefox.exe\nmsedge.exe",
+      );
+
+      // 3. macOS 模式下校验预设与进程名（支持 Helper 与 Safari）
+      wrapper.vm.systemOs = "macos";
+      expect(wrapper.vm.browserPresets).toEqual([
+        {
+          label: "🌐 Chrome",
+          name: ["Google Chrome", "Google Chrome Helper"],
+          title: "添加 Chrome 浏览器进程 (Google Chrome / Helper)",
+        },
+        {
+          label: "🦊 Firefox",
+          name: "firefox",
+          title: "添加 Firefox 浏览器进程 (firefox)",
+        },
+        {
+          label: "🌐 Edge",
+          name: ["Microsoft Edge", "Microsoft Edge Helper"],
+          title: "添加 Edge 浏览器进程 (Microsoft Edge / Helper)",
+        },
+        {
+          label: "🧭 Safari",
+          name: ["Safari", "com.apple.WebKit.Networking"],
+          title: "添加 Safari 浏览器进程 (Safari / WebKit)",
+        },
+        {
+          label: "🦁 Brave",
+          name: ["Brave Browser", "Brave Browser Helper"],
+          title: "添加 Brave 浏览器进程 (Brave Browser / Helper)",
+        },
+        {
+          label: "🌐 Chromium",
+          name: ["Chromium", "Chromium Helper"],
+          title: "添加 Chromium 浏览器进程 (Chromium / Helper)",
+        },
+      ]);
+      expect(wrapper.vm.processNamePlaceholder).toBe(
+        "Google Chrome\nMicrosoft Edge\nfirefox\nSafari",
+      );
+
+      // 测试 macOS 下点击 Edge 预设追加包含 Helper 的多进程名
+      wrapper.vm.itemModal.tempFields.process_name = "";
+      const edgePreset = wrapper.vm.browserPresets.find((b) => b.label.includes("Edge"));
+      wrapper.vm.appendPresetProcess(edgePreset.name);
+      expect(wrapper.vm.itemModal.tempFields.process_name).toBe(
+        "Microsoft Edge\nMicrosoft Edge Helper",
       );
     });
   });

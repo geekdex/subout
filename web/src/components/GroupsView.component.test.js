@@ -277,6 +277,92 @@ describe("GroupsView - 分流出站组管理", () => {
       expect(body.group_type).toBe("selector");
       expect(mockShowToast).toHaveBeenCalledWith("分组添加成功");
     });
+
+    it("阻止提交重复 Tag、保留 Tag 或空 Tag，并展示准确提示", async () => {
+      const wrapper = await mountGroupsView();
+      const addBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("添加出站组"));
+      await addBtn.trigger("click");
+      await flushPromises();
+
+      const tagInput = wrapper.find(
+        'input[placeholder="例如：proxy 或 AUTO-Test"]',
+      );
+      const form = wrapper.find("form");
+
+      // 1. 提交空 Tag
+      await tagInput.setValue("");
+      await form.trigger("submit.prevent");
+      await flushPromises();
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "保存分组失败，出站 Tag 名字不能为空",
+        "danger",
+      );
+
+      // 2. 提交保留 Tag (direct)
+      await tagInput.setValue("direct");
+      await flushPromises();
+      expect(wrapper.text()).toContain("出站 Tag 不能使用系统保留名称 'direct'");
+      await form.trigger("submit.prevent");
+      await flushPromises();
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "保存分组失败，出站 Tag 不能使用系统保留名称 'direct'",
+        "danger",
+      );
+
+      // 3. 提交与已有分组重复的 Tag (proxy)
+      await tagInput.setValue("proxy");
+      await flushPromises();
+      expect(wrapper.text()).toContain(
+        "出站 Tag 名字必须唯一，'proxy' 已存在于出站分组",
+      );
+      await form.trigger("submit.prevent");
+      await flushPromises();
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "保存分组失败，出站 Tag 名字必须唯一，'proxy' 已存在于出站分组",
+        "danger",
+      );
+    });
+
+    it("后端返回错误 JSON 时，解析并展示具体的 error 消息", async () => {
+      const customFetch = vi.fn((url, options = {}) => {
+        const urlStr = String(url);
+        const method = options.method || "GET";
+        if (urlStr === "/api/groups" && method === "POST") {
+          return Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () =>
+              Promise.resolve({
+                error: "保存分组失败，出站 Tag 名字必须唯一 ('custom-dup' 已存在)",
+              }),
+          });
+        }
+        return createSmartFetch()(url, options);
+      });
+
+      const wrapper = await mountGroupsView(customFetch);
+      const addBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("添加出站组"));
+      await addBtn.trigger("click");
+      await flushPromises();
+
+      const tagInput = wrapper.find(
+        'input[placeholder="例如：proxy 或 AUTO-Test"]',
+      );
+      await tagInput.setValue("custom-dup");
+
+      const form = wrapper.find("form");
+      await form.trigger("submit.prevent");
+      await flushPromises();
+
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "保存分组失败，出站 Tag 名字必须唯一 ('custom-dup' 已存在)",
+        "danger",
+      );
+    });
   });
 
   describe("删除分组", () => {
