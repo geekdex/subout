@@ -1194,6 +1194,22 @@
           </div>
 
           <div
+            v-if="!systemModeInfo.kernel_installed && ['web', 'both'].includes(pingModal.testType)"
+            style="
+              margin-bottom: 1.25rem;
+              padding: 0.75rem 1rem;
+              border-radius: 6px;
+              background: rgba(234, 179, 8, 0.12);
+              border: 1px solid rgba(234, 179, 8, 0.35);
+              color: #eab308;
+              font-size: 0.85rem;
+              line-height: 1.5;
+            "
+          >
+            ⚠️ <strong>提示：</strong>当前系统未检测到 <code>sing-box</code> 内核。无法启动本地代理测试通道（网页测速将被跳过，仅执行传输层 TCP/UDP 连通性测试）。如需测试真实网页访问速度，请先前往【内核管理】一键下载安装内核。
+          </div>
+
+          <div
             v-if="['web', 'both'].includes(pingModal.testType)"
             class="form-group"
             style="margin-bottom: 1.25rem"
@@ -1369,7 +1385,13 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, nextTick } from "vue";
-import { token, API_BASE, showToast, confirmDialog } from "../store.js";
+import {
+  token,
+  API_BASE,
+  showToast,
+  confirmDialog,
+  systemModeInfo,
+} from "../store.js";
 import { validateData } from "../validator.js";
 
 const nodes = ref([]);
@@ -2158,12 +2180,12 @@ const loadAllNodesForSelect = async () => {
     });
     if (res.ok) {
       const data = await res.json();
-      allNodesListForSelect.value = data.nodes || [];
+    allNodesListForSelect.value = data.nodes || [];
     }
   } catch {}
 };
 
-const openPingModal = () => {
+const openPingModal = async () => {
   pingModal.testRange = selectedNodeIds.value.length > 0 ? "selected" : "all";
   pingModal.singleNodeId = "";
   pingModal.testType = "both";
@@ -2176,6 +2198,16 @@ const openPingModal = () => {
   pingModal.statusMap = {};
   pingModal.show = true;
   loadAllNodesForSelect();
+
+  try {
+    const res = await fetch(`${API_BASE}/api/system/mode`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      systemModeInfo.value = { ...systemModeInfo.value, ...data };
+    }
+  } catch {}
 };
 
 const closePingModal = () => {
@@ -2230,7 +2262,11 @@ const pingSingleNode = async (id) => {
     };
 
   const targetUrl = getEffectiveTargetUrl();
-  showToast(`开始测试节点 [${node.tag}] ...`);
+  if (!systemModeInfo.value.kernel_installed) {
+    showToast(`开始测试节点 [${node.tag}] (未安装内核，仅测试传输层连通性)...`);
+  } else {
+    showToast(`开始测试节点 [${node.tag}] ...`);
+  }
 
   latencyMap.value[id] = {
     tcp: "testing",
@@ -2265,6 +2301,8 @@ const pingSingleNode = async (id) => {
         if (tcp !== undefined && tcp !== null) {
           if (web !== undefined && web !== null) {
             showToast(`[${node.tag}] 传输延迟: ${tcp}ms, 网页延迟: ${web}ms`);
+          } else if (!systemModeInfo.value.kernel_installed) {
+            showToast(`[${node.tag}] 传输延迟: ${tcp}ms (未安装 sing-box 内核，已跳过网页测速)`);
           } else {
             showToast(
               `[${node.tag}] 传输延迟: ${tcp}ms, 网页测试失败`,
@@ -2274,7 +2312,11 @@ const pingSingleNode = async (id) => {
         } else if (web !== undefined && web !== null) {
           showToast(`[${node.tag}] 传输层探测超时, 网页延迟: ${web}ms`);
         } else {
-          showToast(`[${node.tag}] 传输层与网页测试均超时`, "danger");
+          if (!systemModeInfo.value.kernel_installed) {
+            showToast(`[${node.tag}] 传输层连接超时 (未安装内核)`, "danger");
+          } else {
+            showToast(`[${node.tag}] 传输层与网页测试均超时`, "danger");
+          }
         }
       } else {
         setFailedStatus(id);
@@ -2282,7 +2324,8 @@ const pingSingleNode = async (id) => {
       }
     } else {
       setFailedStatus(id);
-      showToast(`[${node.tag}] 接口错误 (状态码: ${res.status})`, "danger");
+      const errMsg = await res.text();
+      showToast(`[${node.tag}] 测试失败: ${errMsg || res.statusText}`, "danger");
     }
   } catch (e) {
     setFailedStatus(id);
@@ -2315,12 +2358,22 @@ const startPingTests = async () => {
     return;
   }
 
+  if (!systemModeInfo.value.kernel_installed && pingModal.testType === "web") {
+    showToast("当前系统未安装 sing-box 内核，无法执行网页测速。请先前往【内核管理】下载内核。", "warning");
+    pingModal.logs = ["[提示] 未检测到 sing-box 内核，无法建立网页测速管道。请先在管理面板中下载内核后再测试。"];
+    return;
+  }
+
   const targetUrl = getEffectiveTargetUrl();
 
   pingModal.isTesting = true;
   pingModal.progress = 0;
   pingModal.total = targetNodeIds.length;
-  pingModal.logs = ["开始测试..."];
+  if (!systemModeInfo.value.kernel_installed) {
+    pingModal.logs = ["开始测试 (未检测到 sing-box 内核，已跳过真实网页测速，仅测试传输层连通性)..."];
+  } else {
+    pingModal.logs = ["开始测试..."];
+  }
 
   targetNodeIds.forEach((id) => {
     pingModal.statusMap[id] = "testing";
@@ -2400,6 +2453,11 @@ const startPingTests = async () => {
                 pingModal.logs.push(
                   `[${node.tag}] 传输延迟: ${tcp}ms, 网页延迟: ${web}ms`,
                 );
+              } else if (!systemModeInfo.value.kernel_installed) {
+                pingModal.statusMap[id] = tcp;
+                pingModal.logs.push(
+                  `[${node.tag}] 传输延迟: ${tcp}ms (未安装内核，已跳过网页测速)`,
+                );
               } else {
                 pingModal.statusMap[id] = "failed";
                 pingModal.logs.push(
@@ -2414,7 +2472,7 @@ const startPingTests = async () => {
             } else {
               pingModal.statusMap[id] = "failed";
               pingModal.logs.push(
-                `[${node.tag}] 传输层探测与网页测试均失败/超时`,
+                `[${node.tag}] 传输层探测超时`,
               );
             }
           } else if (pingModal.testType === "web") {
@@ -2461,7 +2519,8 @@ const startPingTests = async () => {
       } else {
         pingModal.statusMap[id] = "failed";
         setFailedStatus(id);
-        pingModal.logs.push(`[${node.tag}] 接口错误 (状态码: ${res.status})`);
+        const errText = await res.text();
+        pingModal.logs.push(`[${node.tag}] ${errText || `接口错误 (${res.status})`}`);
       }
     } catch (e) {
       if (!pingModal.isTesting) {
@@ -2470,31 +2529,23 @@ const startPingTests = async () => {
       }
       pingModal.statusMap[id] = "failed";
       setFailedStatus(id);
-      pingModal.logs.push(`[${node.tag}] 请求出错: ${e.message || e}`);
+      pingModal.logs.push(`[${node.tag}] 网络错误: ${e.message || e}`);
     } finally {
-      pingModal.progress++;
       activeCount--;
-      if (pingModal.isTesting) {
-        await runNext();
+      pingModal.progress++;
+      if (queue.length > 0 && pingModal.isTesting) {
+        runNext();
+      } else if (activeCount === 0) {
+        pingModal.isTesting = false;
+        pingModal.logs.push("测试完成。");
+        loadNodes();
       }
     }
   };
 
-  const promises = [];
   const initialCount = Math.min(concurrency, queue.length);
   for (let i = 0; i < initialCount; i++) {
-    promises.push(runNext());
-  }
-
-  while (pingModal.isTesting && (queue.length > 0 || activeCount > 0)) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  if (pingModal.isTesting) {
-    pingModal.isTesting = false;
-    pingModal.logs.push("测试完成。");
-    showToast("节点测速完成");
-    loadNodes();
+    runNext();
   }
 };
 

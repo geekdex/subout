@@ -268,7 +268,8 @@ mod tests {
         });
         crate::platform::windows_platform().sanitize_inbound(&mut win_inbound);
         assert_eq!(win_inbound.get("auto_redirect"), None);
-        assert_eq!(win_inbound.get("interface_name"), None);
+        assert_eq!(win_inbound.get("interface_name"), Some(&json!("subout-tun")));
+        assert_eq!(win_inbound.get("stack"), Some(&json!("mixed")));
         assert_eq!(win_inbound.get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
         assert_eq!(win_inbound.get("strict_route"), Some(&json!(true)));
     }

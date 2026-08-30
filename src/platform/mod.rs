@@ -215,9 +215,9 @@ mod tests {
         assert!(!windows.is_linux());
         assert!(!windows.is_macos());
         assert!(windows.is_windows());
-        assert_eq!(windows.default_tun_interface_name(), "");
+        assert_eq!(windows.default_tun_interface_name(), "subout-tun");
         assert!(windows.default_tun_strict_route());
-        assert_eq!(windows.effective_tun_stack("system"), "system");
+        assert_eq!(windows.effective_tun_stack("system"), "mixed");
         assert_eq!(windows.kernel_binary_name(), "sing-box.exe");
 
         let mut inbound = json!({
@@ -226,9 +226,10 @@ mod tests {
             "auto_redirect": true
         });
         windows.sanitize_inbound(&mut inbound);
-        assert_eq!(inbound.get("interface_name"), None);
+        assert_eq!(inbound.get("interface_name"), Some(&json!("subout-tun")));
         assert_eq!(inbound.get("auto_redirect"), None);
         assert_eq!(inbound.get("strict_route"), Some(&json!(true)));
+        assert_eq!(inbound.get("stack"), Some(&json!("mixed")));
     }
 
     #[test]

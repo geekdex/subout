@@ -43,10 +43,14 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn tun_permission_error_guide(&self, err: &str, _singbox_bin: &Path) -> String {
-        format!(
-            "TUN 模式启动失败 ({}): 创建 Wintun 虚拟网卡需要 Windows 系统管理员权限。请关闭 Subout，右键选择【以管理员身份运行】后重试。",
-            err
-        )
+        if err.contains("Cannot create a file when that file already exists") || err.contains("open existing adapter") {
+            "TUN 虚拟网卡设备冲突：检测到系统中存在残留的 Wintun 虚拟网卡（通常是上次异常关闭或其它代理软件残留）。已自动执行清理，请点击重新启动。若仍报错，请在设备管理器中卸载残存的 Wintun 网卡或重启电脑。".to_string()
+        } else {
+            format!(
+                "TUN 模式启动失败 ({}): 创建 Wintun 虚拟网卡需要 Windows 系统管理员权限。请以管理员身份运行 Subout 后重试。",
+                err
+            )
+        }
     }
 
     fn is_pid_alive(&self, pid: u32) -> bool {
@@ -169,9 +173,25 @@ impl PlatformStrategy for WindowsPlatform {
         _sig: i32,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
-            let _ = std::process::Command::new("taskkill")
+            // First attempt graceful termination without /F so sing-box can close Wintun adapter cleanly
+            let _ = tokio::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string()])
+                .output()
+                .await;
+
+            // Wait briefly for process to exit
+            for _ in 0..6 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                if !self.is_pid_alive(pid) {
+                    return;
+                }
+            }
+
+            // Force kill if process hasn't exited
+            let _ = tokio::process::Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
-                .output();
+                .output()
+                .await;
         })
     }
 
@@ -299,8 +319,19 @@ impl PlatformStrategy for WindowsPlatform {
             if is_tun {
                 if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str()) {
                     if iface == "tun0" || iface.is_empty() {
-                        obj.remove("interface_name");
+                        obj.insert("interface_name".to_string(), json!("subout-tun"));
                     }
+                } else {
+                    obj.insert("interface_name".to_string(), json!("subout-tun"));
+                }
+
+                // If stack is system on Windows, switch to mixed (wintun standard)
+                if let Some(stack) = obj.get("stack").and_then(|s| s.as_str()) {
+                    if stack == "system" {
+                        obj.insert("stack".to_string(), json!("mixed"));
+                    }
+                } else {
+                    obj.insert("stack".to_string(), json!("mixed"));
                 }
 
                 // Ensure IPv6 dual-stack address is present on Windows to prevent leakage
@@ -320,7 +351,7 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn default_tun_interface_name(&self) -> &'static str {
-        ""
+        "subout-tun"
     }
 
     fn default_tun_strict_route(&self) -> bool {
@@ -328,7 +359,11 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn effective_tun_stack<'a>(&self, configured_stack: &'a str) -> &'a str {
-        configured_stack
+        if configured_stack == "system" {
+            "mixed"
+        } else {
+            configured_stack
+        }
     }
 
     fn default_data_dir(&self) -> PathBuf {
