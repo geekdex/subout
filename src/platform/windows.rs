@@ -102,6 +102,7 @@ impl PlatformStrategy for WindowsPlatform {
         let mut results: Vec<ConflictingProcessInfo> = Vec::new();
         let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
 
+        let mut ps_succeeded = false;
         // 1. Primary: Use PowerShell + CIM with JSON serialization to safely inspect sing-box processes
         if let Ok(output) = std::process::Command::new("powershell")
             .args([
@@ -113,6 +114,7 @@ impl PlatformStrategy for WindowsPlatform {
             .output()
         {
             if output.status.success() {
+                ps_succeeded = true;
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let items = parse_cim_process_json(&stdout);
                 let filtered = filter_conflicting_processes(items, current_pid, managed_pid, running_config_path);
@@ -124,8 +126,8 @@ impl PlatformStrategy for WindowsPlatform {
             }
         }
 
-        // 2. Secondary fallback: tasklist if PowerShell returned nothing or failed
-        if results.is_empty() {
+        // 2. Secondary fallback: tasklist ONLY if PowerShell execution itself failed
+        if !ps_succeeded {
             for img_name in &["sing-box.exe", "singbox.exe"] {
                 if let Ok(output) = std::process::Command::new("tasklist")
                     .args(["/FI", &format!("IMAGENAME eq {}", img_name), "/FO", "CSV", "/NH"])

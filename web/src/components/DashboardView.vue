@@ -1110,6 +1110,7 @@ const handleRestartService = async (customSudoPass = null) => {
 };
 
 const loadDashboardData = async () => {
+  if (!token.value) return;
   try {
     const res = await fetch(`${API_BASE}/api/dashboard/stats`, {
       headers: { Authorization: `Bearer ${token.value}` },
@@ -1117,10 +1118,8 @@ const loadDashboardData = async () => {
     if (res.ok) {
       stats.value = await res.json();
     }
-    await fetchKernelInfo();
-    await fetchServiceStatus();
-  } catch {
-    showToast("加载控制台统计失败", "danger");
+  } catch (e) {
+    console.error("Failed to load dashboard stats", e);
   }
 };
 
