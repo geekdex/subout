@@ -39,8 +39,8 @@ function Show-Help {
     Write-Host "  irm https://raw.githubusercontent.com/geekdex/subout/main/install.ps1 | iex"
     Write-Host ""
     Write-Host "命令:"
-    Write-Host "  install            安装 subout 并注册 Windows 服务 (默认命令)"
-    Write-Host "  uninstall          卸载 subout 并停止/注销 Windows 服务"
+    Write-Host "  install            安装 subout 并注册 Windows 开机自启后台任务 (默认命令)"
+    Write-Host "  uninstall          卸载 subout 并停止/注销 Windows 后台任务"
     Write-Host ""
     Write-Host "参数:"
     Write-Host "  -Port <int>        指定 Web 面板监听端口 (默认: 1234)"
@@ -49,7 +49,7 @@ function Show-Help {
     Write-Host "  -DataDir <string>  自定义数据目录 (默认: C:\ProgramData\Subout)"
     Write-Host "  -Tag <string>      指定安装的 GitHub Release 版本标签 (如 v0.1.0)"
     Write-Host "  -FromRelease       强制从 GitHub Releases 下载预编译文件 (即使在源码目录中)"
-    Write-Host "  -NoService         仅安装二进制文件，不注册 Windows 服务"
+    Write-Host "  -NoService         仅安装二进制文件，不注册 Windows 后台任务"
     Write-Host "  -Uninstall         卸载模式 (等同于 uninstall 命令)"
     Write-Host "  -Purge             卸载时彻底删除数据、日志与配置"
     Write-Host "  -Help              显示帮助信息"
@@ -227,6 +227,7 @@ if (-not (Test-IsAdmin)) {
 # ------------------------------------------------------------------------------
 
 $AppName = "subout"
+$TaskName = "Subout"
 $ServiceName = "subout"
 $TargetExe = Join-Path $BinDir "$AppName.exe"
 $LogDir = Join-Path $DataDir "logs"
@@ -256,13 +257,24 @@ if ($Uninstall) {
     Write-Host "======================================================" -ForegroundColor Cyan
     Write-Host ""
 
-    # 1. Stop and remove Windows Service
+    # 1. Stop and remove Windows Scheduled Task
+    Write-Host "[1/3] 正在停止与注销 Windows 后台任务 ($TaskName)..." -ForegroundColor Blue
+    try {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    catch {
+        & schtasks.exe /End /TN $TaskName 2>$null | Out-Null
+        & schtasks.exe /Delete /TN $TaskName /F 2>$null | Out-Null
+    }
+
+    # Clean up legacy Windows Service if present
     $service = Get-Service `
         -Name $ServiceName `
         -ErrorAction SilentlyContinue
 
     if ($service) {
-        Write-Host "[1/3] 正在停止 Windows 服务 ($ServiceName)..." -ForegroundColor Blue
+        Write-Host "[2/3] 正在停止与注销旧版 Windows 服务 ($ServiceName)..." -ForegroundColor Blue
 
         Stop-Service `
             -Name $ServiceName `
@@ -271,15 +283,11 @@ if ($Uninstall) {
 
         Start-Sleep -Seconds 1
 
-        Write-Host "[2/3] 正在注销 Windows 服务 ($ServiceName)..." -ForegroundColor Blue
-
-        & sc.exe delete $ServiceName | Out-Null
-
+        & sc.exe delete $ServiceName 2>$null | Out-Null
         Start-Sleep -Seconds 1
     }
     else {
-        Write-Host "[1/3] 未检测到已注册的 $ServiceName 服务。" -ForegroundColor Yellow
-        Write-Host "[2/3] 跳过服务注销。" -ForegroundColor Gray
+        Write-Host "[2/3] 旧版 Windows 服务已不存在，跳过。" -ForegroundColor Gray
     }
 
     # Stop any lingering processes
@@ -619,6 +627,13 @@ if (
 
 Write-Host "[2/4] 正在安装二进制文件到 $TargetExe..." -ForegroundColor Blue
 
+# Stop running background task and processes before copying to avoid file lock
+try {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+} catch {}
+Stop-Process -Name $AppName -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+
 if (-not (Test-Path -LiteralPath $BinDir)) {
     New-Item `
         -ItemType Directory `
@@ -665,60 +680,93 @@ else {
 }
 
 # ------------------------------------------------------------------------------
-# 11. Configure & Start Windows Service
+# 11. Configure & Start Windows Background Task
 # ------------------------------------------------------------------------------
 
 if ($NoService) {
-    Write-Host "[4/4] 已跳过 Windows 服务配置 (-NoService)。" -ForegroundColor Yellow
+    Write-Host "[4/4] 已跳过 Windows 后台任务配置 (-NoService)。" -ForegroundColor Yellow
 }
 else {
-    Write-Host "[4/4] 正在配置 Windows 后台服务 ($ServiceName)..." -ForegroundColor Blue
+    Write-Host "[4/4] 正在配置 Windows 开机自启后台任务 ($TaskName)..." -ForegroundColor Blue
 
-    # Stop existing service
-    $existingService = Get-Service `
-        -Name $ServiceName `
-        -ErrorAction SilentlyContinue
+    # 1. Stop and remove existing task & legacy service
+    try {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    catch {
+        & schtasks.exe /End /TN $TaskName 2>$null | Out-Null
+        & schtasks.exe /Delete /TN $TaskName /F 2>$null | Out-Null
+    }
 
+    $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($existingService) {
-        if ($existingService.Status -ne "Stopped") {
-            Stop-Service `
-                -Name $ServiceName `
-                -Force `
-                -ErrorAction SilentlyContinue
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        & sc.exe delete $ServiceName 2>$null | Out-Null
+    }
 
-            Start-Sleep -Seconds 1
+    # Stop lingering processes
+    Stop-Process -Name $AppName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+
+    # 2. Register Windows Scheduled Task
+    $taskRegistered = $false
+    try {
+        $action = New-ScheduledTaskAction `
+            -Execute $TargetExe `
+            -Argument "web -p $Port" `
+            -WorkingDirectory $DataDir
+
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+
+        $principal = New-ScheduledTaskPrincipal `
+            -UserId "NT AUTHORITY\SYSTEM" `
+            -LogonType ServiceAccount `
+            -RunLevel Highest
+
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -RestartCount 3 `
+            -RestartInterval (New-TimeSpan -Minutes 1) `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -Priority 4
+
+        Register-ScheduledTask `
+            -TaskName $TaskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Principal $principal `
+            -Settings $settings `
+            -Force | Out-Null
+
+        $taskRegistered = $true
+    }
+    catch {
+        Write-Host "  提示: PowerShell 计划任务模块注册异常，正在使用 schtasks.exe 回退注册..." -ForegroundColor Yellow
+        $schCmd = "`"$TargetExe`" web -p $Port"
+        & schtasks.exe /Create /TN $TaskName /TR $schCmd /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $taskRegistered = $true
         }
-
-        & sc.exe delete $ServiceName | Out-Null
-
-        Start-Sleep -Seconds 1
+        else {
+            throw "创建 Windows 后台计划任务失败，退出码: $LASTEXITCODE"
+        }
     }
 
-    # Create service
-    $binPathCommand = "`"$TargetExe`" web -p $Port"
-
-    & sc.exe create $ServiceName `
-        "binPath= $binPathCommand" `
-        "start= auto" `
-        "DisplayName= subout Proxy Manager" | Out-Null
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "创建 Windows 服务失败，退出码: $LASTEXITCODE"
+    # 3. Start task
+    try {
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null
+    }
+    catch {
+        & schtasks.exe /Run /TN $TaskName | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "启动 Windows 后台任务失败，退出码: $LASTEXITCODE"
+        }
     }
 
-    # Configure service recovery
-    & sc.exe failure $ServiceName `
-        "reset= 86400" `
-        "actions= restart/3000/restart/5000/restart/10000" | Out-Null
-
-    # Start service
-    & sc.exe start $ServiceName | Out-Null
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "启动 Windows 服务失败，退出码: $LASTEXITCODE"
-    }
-
-    Write-Host "✓ Windows 服务已注册并启动 ($ServiceName)" -ForegroundColor Green
+    Start-Sleep -Seconds 1
+    Write-Host "✓ Windows 后台守护任务已注册并启动 ($TaskName)" -ForegroundColor Green
 }
 
 # ------------------------------------------------------------------------------
@@ -748,11 +796,11 @@ Write-Host "📝 系统日志目录     : $LogDir" -ForegroundColor White
 Write-Host ""
 
 if (-not $NoService) {
-    Write-Host "常用服务管理命令 (PowerShell 管理员):" -ForegroundColor White
-    Write-Host "  • 查看服务状态 : Get-Service subout" -ForegroundColor Gray
-    Write-Host "  • 启动服务     : Start-Service subout" -ForegroundColor Gray
-    Write-Host "  • 停止服务     : Stop-Service subout" -ForegroundColor Gray
-    Write-Host "  • 重启服务     : Restart-Service subout" -ForegroundColor Gray
+    Write-Host "常用后台管理命令 (PowerShell 管理员):" -ForegroundColor White
+    Write-Host "  • 查看运行状态 : Get-ScheduledTask -TaskName Subout" -ForegroundColor Gray
+    Write-Host "  • 启动后台任务 : Start-ScheduledTask -TaskName Subout" -ForegroundColor Gray
+    Write-Host "  • 停止后台任务 : Stop-ScheduledTask -TaskName Subout" -ForegroundColor Gray
+    Write-Host "  • 重启后台任务 : Stop-ScheduledTask -TaskName Subout; Start-ScheduledTask -TaskName Subout" -ForegroundColor Gray
     Write-Host ""
 }
 
