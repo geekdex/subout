@@ -31,6 +31,7 @@ pub struct ServiceStatusInfo {
     pub binary_path: Option<String>,
     pub config_path: String,
     pub inbounds_summary: Option<String>,
+    pub is_tun: bool,
     pub conflicting_processes: Vec<ConflictingProcessInfo>,
 }
 
@@ -255,6 +256,12 @@ impl SingBoxServiceManager {
         let running_config_path_buf = Self::get_running_config_path();
         let config_path = running_config_path_buf.to_string_lossy().to_string();
         let inbounds_summary = get_inbounds_summary_from_config(&running_config_path_buf);
+        let is_tun = is_run
+            && std::fs::read_to_string(&running_config_path_buf)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .map(|json| is_tun_mode(&json))
+                .unwrap_or(false);
         let conflicting_processes = detect_conflicting_singbox_processes(pid);
 
         ServiceStatusInfo {
@@ -267,6 +274,7 @@ impl SingBoxServiceManager {
             binary_path,
             config_path,
             inbounds_summary,
+            is_tun,
             conflicting_processes,
         }
     }
@@ -1221,6 +1229,7 @@ mod tests {
             binary_path: Some("/usr/bin/sing-box".to_string()),
             config_path: "/root/.config/subout/sing-box-running.json".to_string(),
             inbounds_summary: Some("127.0.0.1:2080 (混合代理)".to_string()),
+            is_tun: false,
             conflicting_processes: vec![ConflictingProcessInfo {
                 pid: 12345,
                 name: "sing-box".to_string(),

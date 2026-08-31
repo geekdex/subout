@@ -12,6 +12,9 @@ const {
   mockConfirmDialog,
   mockValidateData,
   mockSystemModeInfo,
+  mockServiceStatus,
+  mockFetchServiceStatus,
+  mockStopService,
 } = vi.hoisted(() => {
   const { ref } = require("vue");
   return {
@@ -24,6 +27,14 @@ const {
       is_initialized: true,
       kernel_installed: true,
     }),
+    mockServiceStatus: ref({
+      running: false,
+      ready: false,
+      is_tun: false,
+      inbounds_summary: null,
+    }),
+    mockFetchServiceStatus: vi.fn(() => Promise.resolve()),
+    mockStopService: vi.fn(() => Promise.resolve(true)),
   };
 });
 
@@ -33,6 +44,9 @@ vi.mock("../store.js", () => ({
   showToast: mockShowToast,
   confirmDialog: mockConfirmDialog,
   systemModeInfo: mockSystemModeInfo,
+  serviceStatus: mockServiceStatus,
+  fetchServiceStatus: mockFetchServiceStatus,
+  stopService: mockStopService,
 }));
 
 vi.mock("../validator.js", () => ({
@@ -561,6 +575,184 @@ describe("NodesView - 节点池管理", () => {
       expect(pingCall).toBeDefined();
       const body = JSON.parse(pingCall[1].body);
       expect(body.target_url).toBe("http://my-custom-server.org/ping");
+    });
+  });
+
+  describe("TUN 模式下测速拦截与提示弹窗", () => {
+    it("非 TUN 模式下测速直接发送请求，不弹出 TUN 提示弹窗", async () => {
+      mockServiceStatus.value = {
+        running: true,
+        ready: true,
+        is_tun: false,
+        inbounds_summary: "127.0.0.1:2080 (混合代理)",
+      };
+      const wrapper = await mountNodesView();
+      global.fetch.mockClear();
+
+      // 点击首行节点的测速按钮
+      const pingBtn = wrapper
+        .findAll("tbody tr")
+        .at(0)
+        .findAll("button")
+        .find((b) => b.text().trim() === "测速");
+      expect(pingBtn).toBeDefined();
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      // TUN 弹窗不应出现
+      expect(wrapper.vm.tunPromptModal.show).toBe(false);
+      // 应直接发起 /api/nodes/ping 请求
+      const pingCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/nodes/ping" && o?.method === "POST",
+      );
+      expect(pingCall).toBeDefined();
+    });
+
+    it("开启 TUN 模式时点击单节点测速，弹出 TUN 提示弹窗并展示提示信息", async () => {
+      mockServiceStatus.value = {
+        running: true,
+        ready: true,
+        is_tun: true,
+        inbounds_summary: "TUN (tun0)",
+      };
+      const wrapper = await mountNodesView();
+      global.fetch.mockClear();
+
+      const pingBtn = wrapper
+        .findAll("tbody tr")
+        .at(0)
+        .findAll("button")
+        .find((b) => b.text().trim() === "测速");
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      // TUN 弹窗应被激活
+      expect(wrapper.vm.tunPromptModal.show).toBe(true);
+      expect(wrapper.text()).toContain("TUN 代理模式测速提示");
+      expect(wrapper.text()).toContain("存在节点叠加");
+      // 未确认前不应发起测速请求
+      const pingCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/nodes/ping" && o?.method === "POST",
+      );
+      expect(pingCall).toBeUndefined();
+    });
+
+    it("TUN 弹窗点击'取消'，关闭弹窗且不发起测速", async () => {
+      mockServiceStatus.value = {
+        running: true,
+        ready: true,
+        is_tun: true,
+        inbounds_summary: "TUN",
+      };
+      const wrapper = await mountNodesView();
+      global.fetch.mockClear();
+
+      const pingBtn = wrapper
+        .findAll("tbody tr")
+        .at(0)
+        .findAll("button")
+        .find((b) => b.text().trim() === "测速");
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.vm.tunPromptModal.show).toBe(true);
+
+      // 点击取消按钮
+      const tunModal = wrapper
+        .findAll(".modal")
+        .find((m) => m.text().includes("TUN 代理模式测速提示"));
+      const cancelBtn = tunModal
+        .findAll("button")
+        .find((b) => b.text().trim() === "取消");
+      await cancelBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.vm.tunPromptModal.show).toBe(false);
+      const pingCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/nodes/ping" && o?.method === "POST",
+      );
+      expect(pingCall).toBeUndefined();
+    });
+
+    it("TUN 弹窗点击'直接测速'，保留代理并执行测速", async () => {
+      mockServiceStatus.value = {
+        running: true,
+        ready: true,
+        is_tun: true,
+        inbounds_summary: "TUN",
+      };
+      const wrapper = await mountNodesView();
+      global.fetch.mockClear();
+
+      const pingBtn = wrapper
+        .findAll("tbody tr")
+        .at(0)
+        .findAll("button")
+        .find((b) => b.text().trim() === "测速");
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.vm.tunPromptModal.show).toBe(true);
+
+      // 点击直接测速按钮
+      const tunModal = wrapper
+        .findAll(".modal")
+        .find((m) => m.text().includes("TUN 代理模式测速提示"));
+      const directTestBtn = tunModal
+        .findAll("button")
+        .find((b) => b.text().trim() === "直接测速");
+      await directTestBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.vm.tunPromptModal.show).toBe(false);
+      // 不应调用 stopService
+      expect(mockStopService).not.toHaveBeenCalled();
+      // 发起测速请求
+      const pingCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/nodes/ping" && o?.method === "POST",
+      );
+      expect(pingCall).toBeDefined();
+    });
+
+    it("TUN 弹窗点击'关闭代理并测速'，先停止服务再执行测速", async () => {
+      mockServiceStatus.value = {
+        running: true,
+        ready: true,
+        is_tun: true,
+        inbounds_summary: "TUN",
+      };
+      mockStopService.mockClear();
+      const wrapper = await mountNodesView();
+      global.fetch.mockClear();
+
+      const pingBtn = wrapper
+        .findAll("tbody tr")
+        .at(0)
+        .findAll("button")
+        .find((b) => b.text().trim() === "测速");
+      await pingBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.vm.tunPromptModal.show).toBe(true);
+
+      // 点击关闭代理并测速按钮
+      const tunModal = wrapper
+        .findAll(".modal")
+        .find((m) => m.text().includes("TUN 代理模式测速提示"));
+      const stopAndTestBtn = tunModal
+        .findAll("button")
+        .find((b) => b.text().includes("关闭代理并测速"));
+      await stopAndTestBtn.trigger("click");
+      await flushPromises();
+
+      // 应调用 stopService
+      expect(mockStopService).toHaveBeenCalled();
+      expect(wrapper.vm.tunPromptModal.show).toBe(false);
+      // 成功发起测速请求
+      const pingCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/nodes/ping" && o?.method === "POST",
+      );
+      expect(pingCall).toBeDefined();
     });
   });
 });

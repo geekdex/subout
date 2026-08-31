@@ -1194,6 +1194,45 @@
           </div>
 
           <div
+            v-if="isTunActive()"
+            style="
+              margin-bottom: 1.25rem;
+              padding: 0.75rem 1rem;
+              border-radius: 6px;
+              background: rgba(234, 179, 8, 0.12);
+              border: 1px solid rgba(234, 179, 8, 0.35);
+              color: #eab308;
+              font-size: 0.85rem;
+              line-height: 1.5;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              gap: 0.75rem;
+              flex-wrap: wrap;
+            "
+          >
+            <div>
+              ⚠️
+              <strong>TUN 代理运行中：</strong
+              >全局流量正被接管，测速可能存在节点叠加。建议关闭代理后再测速。
+            </div>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              style="
+                padding: 0.25rem 0.65rem;
+                font-size: 0.8rem;
+                white-space: nowrap;
+                border-color: rgba(234, 179, 8, 0.5);
+                color: #eab308;
+              "
+              @click="quickStopServiceInPingModal"
+            >
+              一键关闭代理
+            </button>
+          </div>
+
+          <div
             v-if="
               !systemModeInfo.kernel_installed &&
               ['web', 'both'].includes(pingModal.testType)
@@ -1387,6 +1426,113 @@
         </div>
       </div>
     </div>
+
+    <!-- TUN Mode Speed Test Prompt Modal -->
+    <div class="modal" :class="{ active: tunPromptModal.show }">
+      <div class="modal-card" style="max-width: 480px; width: 90%">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#eab308"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"
+              />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <span style="font-weight: 600">TUN 代理模式测速提示</span>
+          </div>
+          <svg
+            style="cursor: pointer"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            @click="handleTunCancel"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </div>
+        <div class="modal-body">
+          <p
+            style="
+              margin-bottom: 0.75rem;
+              color: var(--text-color);
+              font-size: 0.95rem;
+              line-height: 1.6;
+            "
+          >
+            检测到当前系统已开启 <strong>TUN 虚拟网卡代理</strong>。
+          </p>
+          <div
+            style="
+              margin-bottom: 1rem;
+              padding: 0.75rem 1rem;
+              border-radius: 6px;
+              background: rgba(234, 179, 8, 0.1);
+              border: 1px solid rgba(234, 179, 8, 0.25);
+              color: var(--text-color);
+              font-size: 0.875rem;
+              line-height: 1.5;
+            "
+          >
+            在此状态下测速，测试流量会被当前运行的主代理节点中转（<strong>存在节点叠加</strong>），可能导致测速延迟偏高或测试超时。
+            <div style="margin-top: 0.4rem; font-weight: 500">
+              💡 建议关闭代理后再测速，以获取真实物理网络延迟。
+            </div>
+          </div>
+        </div>
+        <div
+          class="modal-footer"
+          style="
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+          "
+        >
+          <button
+            type="button"
+            class="btn btn-secondary"
+            @click="handleTunCancel"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            style="border-color: var(--border-color)"
+            @click="handleTunContinueTest"
+          >
+            直接测速
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="stoppingTunForTest"
+            @click="handleTunStopAndTest"
+          >
+            <span
+              v-if="stoppingTunForTest"
+              class="spinner"
+              style="width: 14px; height: 14px; margin-right: 0.35rem"
+            ></span>
+            {{ stoppingTunForTest ? "正在关闭代理..." : "关闭代理并测速" }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1398,6 +1544,9 @@ import {
   showToast,
   confirmDialog,
   systemModeInfo,
+  serviceStatus,
+  fetchServiceStatus,
+  stopService,
 } from "../store.js";
 import { validateData } from "../validator.js";
 
@@ -2143,6 +2292,61 @@ const getLatencyClass = (latency) => {
   return "latency-high";
 };
 
+const tunPromptModal = reactive({
+  show: false,
+  pendingAction: null,
+});
+const stoppingTunForTest = ref(false);
+
+const isTunActive = () => {
+  return (
+    !!serviceStatus.value?.running &&
+    (!!serviceStatus.value?.is_tun ||
+      !!serviceStatus.value?.inbounds_summary?.toLowerCase().includes("tun"))
+  );
+};
+
+const handleTunCancel = () => {
+  tunPromptModal.show = false;
+  tunPromptModal.pendingAction = null;
+};
+
+const handleTunContinueTest = async () => {
+  tunPromptModal.show = false;
+  if (tunPromptModal.pendingAction) {
+    const action = tunPromptModal.pendingAction;
+    tunPromptModal.pendingAction = null;
+    await action();
+  }
+};
+
+const handleTunStopAndTest = async () => {
+  stoppingTunForTest.value = true;
+  try {
+    const stopped = await stopService();
+    if (stopped) {
+      showToast("已成功关闭代理服务，开始测速...");
+    }
+    tunPromptModal.show = false;
+    if (tunPromptModal.pendingAction) {
+      const action = tunPromptModal.pendingAction;
+      tunPromptModal.pendingAction = null;
+      await action();
+    }
+  } catch (e) {
+    showToast(`关闭代理服务出错: ${e.message || e}`, "danger");
+  } finally {
+    stoppingTunForTest.value = false;
+  }
+};
+
+const quickStopServiceInPingModal = async () => {
+  const ok = await stopService();
+  if (ok) {
+    showToast("已关闭代理服务，现在测速将直连节点");
+  }
+};
+
 const pingModal = reactive({
   show: false,
   testRange: "all",
@@ -2205,6 +2409,7 @@ const openPingModal = async () => {
   pingModal.statusMap = {};
   pingModal.show = true;
   loadAllNodesForSelect();
+  fetchServiceStatus();
 
   try {
     const res = await fetch(`${API_BASE}/api/system/mode`, {
@@ -2257,10 +2462,19 @@ const setFailedStatus = (id) => {
   }
 };
 
-const pingSingleNode = async (id) => {
+const pingSingleNode = async (id, bypassTunCheck = false) => {
   if (pingModal.isTesting) {
     showToast("当前正在进行批量测试，请稍后再试", "warning");
     return;
+  }
+
+  if (!bypassTunCheck) {
+    await fetchServiceStatus();
+    if (isTunActive()) {
+      tunPromptModal.pendingAction = () => pingSingleNode(id, true);
+      tunPromptModal.show = true;
+      return;
+    }
   }
 
   const node = nodes.value.find((n) => n.id === id) ||
@@ -2347,7 +2561,7 @@ const pingSingleNode = async (id) => {
   }
 };
 
-const startPingTests = async () => {
+const startPingTests = async (bypassTunCheck = false) => {
   let targetNodeIds = [];
   if (pingModal.testRange === "selected") {
     targetNodeIds = [...selectedNodeIds.value];
@@ -2379,6 +2593,15 @@ const startPingTests = async () => {
       "[提示] 未检测到 sing-box 内核，无法建立网页测速管道。请先在管理面板中下载内核后再测试。",
     ];
     return;
+  }
+
+  if (!bypassTunCheck) {
+    await fetchServiceStatus();
+    if (isTunActive()) {
+      tunPromptModal.pendingAction = () => startPingTests(true);
+      tunPromptModal.show = true;
+      return;
+    }
   }
 
   const targetUrl = getEffectiveTargetUrl();
