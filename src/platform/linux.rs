@@ -580,8 +580,18 @@ impl PlatformStrategy for LinuxPlatform {
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
             let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun && !obj.contains_key("strict_route") {
-                obj.insert("strict_route".to_string(), serde_json::json!(false));
+            if is_tun {
+                if !obj.contains_key("strict_route") {
+                    obj.insert("strict_route".to_string(), serde_json::json!(false));
+                }
+                if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
+                    let has_ipv6 = addr_arr.iter().any(|a| a.as_str().map_or(false, |s| s.contains(':')));
+                    if !has_ipv6 {
+                        addr_arr.push(serde_json::json!("fd00::1/126"));
+                    }
+                } else if !obj.contains_key("address") {
+                    obj.insert("address".to_string(), serde_json::json!(["172.19.0.1/30", "fd00::1/126"]));
+                }
             }
         }
     }

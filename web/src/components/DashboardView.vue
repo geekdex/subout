@@ -426,6 +426,30 @@
           </template>
 
           <button
+            v-if="serviceStatus.running"
+            class="btn btn-secondary"
+            title="一键测试常用国外网站连通性与网络延迟"
+            @click="$emit('switch-view', 'siteTest')"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 4px"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <path
+                d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+              />
+            </svg>
+            网站测速
+          </button>
+
+          <button
             class="btn btn-secondary"
             title="查看实时运行日志"
             @click="showLogsDrawer = true"

@@ -20,7 +20,7 @@
           type="button"
           class="btn btn-secondary"
           title="弹窗预览由当前设置生成的完整 sing-box JSON 配置"
-          @click="showPreviewModal = true"
+          @click="openPreviewModal"
         >
           <svg
             width="18"
@@ -234,6 +234,12 @@
         >
           💡
           系统将定期自动对所有已启用的订阅节点进行测速（URLTest），并将流量实时路由至最低延迟节点。
+          <span
+            v-if="bestNodeInfo"
+            style="color: var(--success); font-weight: 500; margin-left: 4px"
+          >
+            (当前探测最优: {{ bestNodeInfo.tag }} - {{ bestNodeInfo.latency }}ms)
+          </span>
         </div>
 
         <div
@@ -266,14 +272,46 @@
               <label style="font-size: 0.85rem; margin-bottom: 0"
                 >指定出口代理节点</label
               >
-              <input
-                v-if="enabledNodes.length > 6"
-                v-model="nodeSearchKeyword"
-                type="text"
-                class="input-control"
-                style="padding: 0.2rem 0.5rem; font-size: 0.75rem; width: 160px"
-                placeholder="🔍 快速过滤节点..."
-              />
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="btn-text"
+                  :disabled="loadingNodes || isTestingNodes"
+                  title="对可用节点进行并发延迟测速并刷新显示"
+                  style="
+                    font-size: 0.75rem;
+                    padding: 2px 7px;
+                    border-radius: 4px;
+                    background: rgba(99, 102, 241, 0.1);
+                    color: var(--primary);
+                    border: 1px solid rgba(99, 102, 241, 0.25);
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                  "
+                  @click="testAllNodesLatency"
+                >
+                  <span
+                    v-if="isTestingNodes"
+                    class="spinner-small"
+                    style="margin-right: 3px"
+                  ></span>
+                  <span v-else style="margin-right: 3px">⚡</span>
+                  {{
+                    isTestingNodes
+                      ? `测速中 (${testedNodeCount}/${enabledNodes.length})...`
+                      : "节点测速"
+                  }}
+                </button>
+                <input
+                  v-if="enabledNodes.length > 6"
+                  v-model="nodeSearchKeyword"
+                  type="text"
+                  class="input-control"
+                  style="padding: 0.2rem 0.5rem; font-size: 0.75rem; width: 150px"
+                  placeholder="🔍 快速过滤节点..."
+                />
+              </div>
             </div>
 
             <select
@@ -641,6 +679,7 @@
 
         <div style="flex: 1; min-height: 0; padding: 0.75rem 0">
           <pre
+            v-if="!isGeneratingPreview"
             class="log-console"
             style="
               height: 100%;
@@ -651,6 +690,21 @@
               border-radius: 6px;
             "
             >{{ JSON.stringify(generatedPreview, null, 2) }}</pre>
+          <div
+            v-else
+            style="
+              padding: 2.5rem;
+              text-align: center;
+              color: var(--text-muted);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 0.5rem;
+            "
+          >
+            <span class="spinner-small"></span>
+            <span>正在基于当前设置实时生成配置预览...</span>
+          </div>
         </div>
 
         <div
@@ -750,9 +804,68 @@ const filteredNodes = computed(() => {
 const formatLatency = (node) => {
   const lat = node.last_web_latency || node.last_tcp_latency;
   if (lat && lat > 0) {
-    return ` (${lat}ms)`;
+    return ` (⚡ ${lat}ms)`;
   }
   return "";
+};
+
+const bestNodeInfo = computed(() => {
+  const tested = enabledNodes.value
+    .map((n) => ({
+      tag: n.tag,
+      latency: n.last_web_latency || n.last_tcp_latency || null,
+    }))
+    .filter((n) => n.latency !== null && n.latency > 0)
+    .sort((a, b) => a.latency - b.latency);
+  return tested.length > 0 ? tested[0] : null;
+});
+
+const isTestingNodes = ref(false);
+const testedNodeCount = ref(0);
+
+const testAllNodesLatency = async () => {
+  if (enabledNodes.value.length === 0) return;
+  isTestingNodes.value = true;
+  testedNodeCount.value = 0;
+
+  try {
+    const nodeIds = enabledNodes.value.map((n) => n.id);
+    const res = await fetch(`${API_BASE}/api/nodes/ping`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({
+        ids: nodeIds,
+        test_type: "both",
+      }),
+    });
+
+    if (res.ok) {
+      const results = await res.json();
+      const resultMap = new Map(results.map((r) => [r.id, r]));
+      nodesList.value.forEach((node) => {
+        const item = resultMap.get(node.id);
+        if (item) {
+          if (item.web_latency !== undefined && item.web_latency !== null) {
+            node.last_web_latency = item.web_latency;
+          }
+          if (item.tcp_latency !== undefined && item.tcp_latency !== null) {
+            node.last_tcp_latency = item.tcp_latency;
+          }
+        }
+      });
+      testedNodeCount.value = results.length;
+      showToast(`已完成 ${results.length} 个节点的延迟测速！`);
+    } else {
+      showToast("节点测速请求失败", "danger");
+    }
+  } catch (e) {
+    showToast(`节点测速异常: ${e.message || e}`, "danger");
+  } finally {
+    isTestingNodes.value = false;
+  }
 };
 
 const isDirect = computed(() => form.route.default_outbound === "direct");
@@ -1004,6 +1117,30 @@ const saveConfig = async (apply = false, customSudoPass = null) => {
   }
 };
 
+const isGeneratingPreview = ref(false);
+
+const openPreviewModal = async () => {
+  showPreviewModal.value = true;
+  isGeneratingPreview.value = true;
+  try {
+    const res = await fetch(`${API_BASE}/api/simple-config/preview`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify(form),
+    });
+    if (res.ok) {
+      generatedPreview.value = await res.json();
+    }
+  } catch (e) {
+    console.error("生成预览失败", e);
+  } finally {
+    isGeneratingPreview.value = false;
+  }
+};
+
 const copyPreview = () => {
   const jsonStr = JSON.stringify(generatedPreview.value, null, 2);
   navigator.clipboard.writeText(jsonStr);
@@ -1117,5 +1254,21 @@ onMounted(() => {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border-color);
+}
+
+.spinner-small {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  border-radius: 50%;
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

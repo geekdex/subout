@@ -225,6 +225,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/simple-config",
             get(simple_api::get_simple_config).post(simple_api::save_simple_config),
         )
+        .route(
+            "/api/simple-config/preview",
+            post(simple_api::preview_simple_config),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state);
 

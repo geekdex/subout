@@ -85,6 +85,14 @@ pub fn sanitize_outbounds_value(outbounds: &mut Value) {
 
 pub fn sanitize_dns_value(dns: &mut Value) {
     if let Some(obj) = dns.as_object_mut() {
+        if !obj.contains_key("strategy")
+            || obj
+                .get("strategy")
+                .and_then(|s| s.as_str())
+                .map_or(true, |s| s.trim().is_empty())
+        {
+            obj.insert("strategy".to_string(), json!("prefer_ipv4"));
+        }
         if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for server in servers {
                 if let Some(srv_obj) = server.as_object_mut() {
@@ -175,7 +183,7 @@ mod tests {
         let conn = db::init_db(":memory:").unwrap();
 
         let log = json!({ "level": "warn" });
-        let dns = json!({ "final": "local-dns" });
+        let dns = json!({ "final": "local-dns", "strategy": "prefer_ipv4" });
         let inbounds = json!([{ "type": "mixed", "tag": "mixed-in" }]);
         let outbounds = json!([
             {

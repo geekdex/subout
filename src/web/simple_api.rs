@@ -81,3 +81,20 @@ pub async fn save_simple_config(
         "generated": generated
     })))
 }
+
+pub async fn preview_simple_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<SimpleConfig>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+    let conn = get_db_conn(&state.db_path)
+        .map_err(|s| (s, "数据库连接失败".to_string()))?;
+
+    let generated = simple_config::generate_simple_singbox_config(&conn, &payload)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成预览失败: {}", e)))?;
+
+    Ok(Json(generated))
+}

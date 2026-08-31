@@ -457,4 +457,100 @@ describe("DashboardView - Mode Switch Confirmation", () => {
     expect(startBtn.attributes("disabled")).toBeUndefined();
     expect(startBtn.element.disabled).toBe(false);
   });
+
+  it("shows 网站测速 shortcut button when proxy service is running", async () => {
+    const { default: DashboardView } = await import("./DashboardView.vue");
+    const { kernelInfo, serviceStatus } = await import("../store.js");
+
+    kernelInfo.value.is_installed = true;
+    kernelInfo.value.version = "sing-box version 1.13.19";
+    serviceStatus.value.running = true;
+    serviceStatus.value.ready = true;
+    serviceStatus.value.pid = 12345;
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/dashboard/stats")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ subs: 1, nodes: 5, groups: 2 }),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ running: true, ready: true, pid: 12345 }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(DashboardView);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const siteTestBtn = wrapper.findAll(".service-power-actions button").find((b) => b.text().includes("网站测速"));
+    expect(siteTestBtn).toBeDefined();
+    expect(siteTestBtn.exists()).toBe(true);
+
+    await siteTestBtn.trigger("click");
+    expect(wrapper.emitted("switch-view")).toBeTruthy();
+    expect(wrapper.emitted("switch-view")[0]).toEqual(["siteTest"]);
+  });
+});
+
+describe("SimpleConfigView Speed Test & Best Node Indicator", () => {
+  it("triggers node speed test and updates node latency displays", async () => {
+    const { default: SimpleConfigView } = await import("./SimpleConfigView.vue");
+
+    let pingCalled = false;
+    global.fetch = vi.fn().mockImplementation((url, options) => {
+      if (url.includes("/api/nodes/ping")) {
+        pingCalled = true;
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: 1, tcp_latency: 45, web_latency: 68 },
+              { id: 2, tcp_latency: 110, web_latency: 135 },
+            ]),
+        });
+      }
+      if (url.includes("/api/nodes")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: 1, tag: "HK-01", node_type: "vless", enabled: true },
+              { id: 2, tag: "JP-01", node_type: "shadowsocks", enabled: true },
+            ]),
+        });
+      }
+      if (url.includes("/api/simple-config")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              config: {
+                dns: { mode: "preset_fakeip" },
+                inbound: { inbound_type: "tun" },
+                route: { mode: "smart", default_outbound: "HK-01" },
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(SimpleConfigView);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const pingBtn = wrapper.find("button[title*='对可用节点进行并发延迟测速']");
+    expect(pingBtn.exists()).toBe(true);
+    expect(pingBtn.text()).toContain("节点测速");
+
+    await pingBtn.trigger("click");
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(pingCalled).toBe(true);
+    expect(wrapper.text()).toContain("68ms");
+  });
 });
