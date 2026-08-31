@@ -19,8 +19,16 @@ fn main() {
     if web_dir.join("package.json").exists() {
         let should_build = !index_path.exists() || is_web_src_newer(&index_path);
         if should_build {
-            let pnpm_cmd = if cfg!(target_os = "windows") { "pnpm.cmd" } else { "pnpm" };
-            let npm_cmd = if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" };
+            let pnpm_cmd = if cfg!(target_os = "windows") {
+                "pnpm.cmd"
+            } else {
+                "pnpm"
+            };
+            let npm_cmd = if cfg!(target_os = "windows") {
+                "npm.cmd"
+            } else {
+                "npm"
+            };
 
             // Install dependencies if node_modules is missing
             if !web_dir.join("node_modules").exists() {

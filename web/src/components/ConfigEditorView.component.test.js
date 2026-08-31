@@ -1154,7 +1154,9 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
 
       // 测试 macOS 下点击 Edge 预设追加包含 Helper 的多进程名
       wrapper.vm.itemModal.tempFields.process_name = "";
-      const edgePreset = wrapper.vm.browserPresets.find((b) => b.label.includes("Edge"));
+      const edgePreset = wrapper.vm.browserPresets.find((b) =>
+        b.label.includes("Edge"),
+      );
       wrapper.vm.appendPresetProcess(edgePreset.name);
       expect(wrapper.vm.itemModal.tempFields.process_name).toBe(
         "Microsoft Edge\nMicrosoft Edge Helper",

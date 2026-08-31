@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
 
 use crate::platform::{BoxFuture, PlatformStrategy};
 use crate::service::ConflictingProcessInfo;
@@ -43,7 +43,9 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn tun_permission_error_guide(&self, err: &str, _singbox_bin: &Path) -> String {
-        if err.contains("Cannot create a file when that file already exists") || err.contains("open existing adapter") {
+        if err.contains("Cannot create a file when that file already exists")
+            || err.contains("open existing adapter")
+        {
             "TUN 虚拟网卡设备冲突：检测到系统中存在残留的 Wintun 虚拟网卡（通常是上次异常关闭或其它代理软件残留）。已自动执行清理，请点击重新启动。若仍报错，请在设备管理器中卸载残存的 Wintun 网卡或重启电脑。".to_string()
         } else {
             format!(
@@ -71,13 +73,18 @@ impl PlatformStrategy for WindowsPlatform {
             const ERROR_ACCESS_DENIED: DWORD = 5;
 
             unsafe extern "system" {
-                fn OpenProcess(dwDesiredAccess: DWORD, bInheritHandle: BOOL, dwProcessId: DWORD) -> HANDLE;
+                fn OpenProcess(
+                    dwDesiredAccess: DWORD,
+                    bInheritHandle: BOOL,
+                    dwProcessId: DWORD,
+                ) -> HANDLE;
                 fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
                 fn GetExitCodeProcess(hProcess: HANDLE, lpExitCode: *mut DWORD) -> BOOL;
                 fn CloseHandle(hObject: HANDLE) -> BOOL;
             }
 
-            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid) };
+            let handle =
+                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid) };
             if !handle.is_null() {
                 let wait_res = unsafe { WaitForSingleObject(handle, 0) };
                 let mut exit_code: DWORD = 0;
@@ -132,7 +139,13 @@ impl PlatformStrategy for WindowsPlatform {
         if results.is_empty() {
             for img_name in &["sing-box.exe", "singbox.exe"] {
                 if let Ok(output) = std::process::Command::new("tasklist")
-                    .args(["/FI", &format!("IMAGENAME eq {}", img_name), "/FO", "CSV", "/NH"])
+                    .args([
+                        "/FI",
+                        &format!("IMAGENAME eq {}", img_name),
+                        "/FO",
+                        "CSV",
+                        "/NH",
+                    ])
                     .output()
                 {
                     if output.status.success() {
@@ -286,15 +299,45 @@ impl PlatformStrategy for WindowsPlatform {
         let override_hosts = "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*";
 
         let _ = std::process::Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f"])
+            .args([
+                "add",
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                "/v",
+                "ProxyEnable",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "1",
+                "/f",
+            ])
             .output();
 
         let _ = std::process::Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyServer", "/t", "REG_SZ", "/d", &proxy_addr, "/f"])
+            .args([
+                "add",
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                "/v",
+                "ProxyServer",
+                "/t",
+                "REG_SZ",
+                "/d",
+                &proxy_addr,
+                "/f",
+            ])
             .output();
 
         let _ = std::process::Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyOverride", "/t", "REG_SZ", "/d", override_hosts, "/f"])
+            .args([
+                "add",
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                "/v",
+                "ProxyOverride",
+                "/t",
+                "REG_SZ",
+                "/d",
+                override_hosts,
+                "/f",
+            ])
             .output();
 
         refresh_wininet_proxy();
@@ -302,7 +345,17 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {
         let _ = std::process::Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f"])
+            .args([
+                "add",
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                "/v",
+                "ProxyEnable",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "0",
+                "/f",
+            ])
             .output();
 
         refresh_wininet_proxy();
@@ -336,12 +389,17 @@ impl PlatformStrategy for WindowsPlatform {
 
                 // Ensure IPv6 dual-stack address is present on Windows to prevent leakage
                 if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr.iter().any(|a| a.as_str().map_or(false, |s| s.contains(':')));
+                    let has_ipv6 = addr_arr
+                        .iter()
+                        .any(|a| a.as_str().map_or(false, |s| s.contains(':')));
                     if !has_ipv6 {
                         addr_arr.push(json!("fd00::1/126"));
                     }
                 } else {
-                    obj.insert("address".to_string(), json!(["172.19.0.1/30", "fd00::1/126"]));
+                    obj.insert(
+                        "address".to_string(),
+                        json!(["172.19.0.1/30", "fd00::1/126"]),
+                    );
                 }
 
                 // Windows strict_route MUST be true
@@ -398,13 +456,30 @@ impl PlatformStrategy for WindowsPlatform {
         ];
 
         if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            candidates.push(PathBuf::from(local_app_data).join("Programs").join("sing-box").join(binary_name));
+            candidates.push(
+                PathBuf::from(local_app_data)
+                    .join("Programs")
+                    .join("sing-box")
+                    .join(binary_name),
+            );
         }
         if let Ok(user_profile) = std::env::var("USERPROFILE") {
-            candidates.push(PathBuf::from(user_profile).join("scoop").join("apps").join("sing-box").join("current").join(binary_name));
+            candidates.push(
+                PathBuf::from(user_profile)
+                    .join("scoop")
+                    .join("apps")
+                    .join("sing-box")
+                    .join("current")
+                    .join(binary_name),
+            );
         }
         if let Ok(program_data) = std::env::var("ProgramData") {
-            candidates.push(PathBuf::from(program_data).join("chocolatey").join("bin").join(binary_name));
+            candidates.push(
+                PathBuf::from(program_data)
+                    .join("chocolatey")
+                    .join("bin")
+                    .join(binary_name),
+            );
         }
 
         candidates
@@ -415,10 +490,7 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
-        if let Ok(output) = std::process::Command::new("where")
-            .arg(cmd_name)
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("where").arg(cmd_name).output() {
             if output.status.success() {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 for line in out_str.lines() {
@@ -504,14 +576,17 @@ pub fn filter_conflicting_processes(
         let cmdline = item.command_line.clone();
         let exe_path = item.executable_path.clone();
 
-        let is_subout_instance = cmdline.as_deref().map(|c| {
-            let c_lower = c.to_lowercase();
-            c_lower.contains("subout")
-                || c.contains(&config_path_str)
-                || c.contains(&config_path_norm)
-                || c_lower.contains("sing-box.json")
-                || c_lower.contains("sing-box-running.json")
-        }).unwrap_or(false);
+        let is_subout_instance = cmdline
+            .as_deref()
+            .map(|c| {
+                let c_lower = c.to_lowercase();
+                c_lower.contains("subout")
+                    || c.contains(&config_path_str)
+                    || c.contains(&config_path_norm)
+                    || c_lower.contains("sing-box.json")
+                    || c_lower.contains("sing-box-running.json")
+            })
+            .unwrap_or(false);
 
         if is_subout_instance {
             continue;
@@ -544,8 +619,18 @@ pub fn refresh_wininet_proxy() {
         const INTERNET_OPTION_SETTINGS_CHANGED: u32 = 39;
         const INTERNET_OPTION_REFRESH: u32 = 37;
         unsafe {
-            InternetSetOptionW(std::ptr::null_mut(), INTERNET_OPTION_SETTINGS_CHANGED, std::ptr::null_mut(), 0);
-            InternetSetOptionW(std::ptr::null_mut(), INTERNET_OPTION_REFRESH, std::ptr::null_mut(), 0);
+            InternetSetOptionW(
+                std::ptr::null_mut(),
+                INTERNET_OPTION_SETTINGS_CHANGED,
+                std::ptr::null_mut(),
+                0,
+            );
+            InternetSetOptionW(
+                std::ptr::null_mut(),
+                INTERNET_OPTION_REFRESH,
+                std::ptr::null_mut(),
+                0,
+            );
         }
     }
     #[cfg(not(windows))]
@@ -578,8 +663,14 @@ mod tests {
         assert_eq!(parsed[0].process_id, Some(2096));
         assert_eq!(parsed[0].parent_process_id, Some(1000));
         assert_eq!(parsed[0].name.as_deref(), Some("sing-box.exe"));
-        assert_eq!(parsed[0].command_line.as_deref(), Some("sing-box.exe run -c C:\\conf.json"));
-        assert_eq!(parsed[0].executable_path.as_deref(), Some("C:\\Program Files\\sing-box\\sing-box.exe"));
+        assert_eq!(
+            parsed[0].command_line.as_deref(),
+            Some("sing-box.exe run -c C:\\conf.json")
+        );
+        assert_eq!(
+            parsed[0].executable_path.as_deref(),
+            Some("C:\\Program Files\\sing-box\\sing-box.exe")
+        );
     }
 
     #[test]
@@ -634,8 +725,16 @@ mod tests {
             },
         ];
 
-        let filtered = filter_conflicting_processes(items, 100, None, Path::new(r"C:\ProgramData\Subout\generated\sing-box.json"));
-        assert!(filtered.is_empty(), "All wrappers, powershell, cargo and subout processes must be filtered out");
+        let filtered = filter_conflicting_processes(
+            items,
+            100,
+            None,
+            Path::new(r"C:\ProgramData\Subout\generated\sing-box.json"),
+        );
+        assert!(
+            filtered.is_empty(),
+            "All wrappers, powershell, cargo and subout processes must be filtered out"
+        );
     }
 
     #[test]
@@ -658,7 +757,10 @@ mod tests {
                 process_id: Some(managed_pid),
                 parent_process_id: Some(current_pid),
                 name: Some("sing-box.exe".to_string()),
-                command_line: Some(r#"sing-box.exe -D C:\Subout run -c C:\Subout\generated\sing-box.json"#.to_string()),
+                command_line: Some(
+                    r#"sing-box.exe -D C:\Subout run -c C:\Subout\generated\sing-box.json"#
+                        .to_string(),
+                ),
                 executable_path: Some(r#"C:\Subout\bin\sing-box.exe"#.to_string()),
             },
             // Another child of current_pid
@@ -674,16 +776,25 @@ mod tests {
                 process_id: Some(8888),
                 parent_process_id: Some(1),
                 name: Some("sing-box.exe".to_string()),
-                command_line: Some(r#"sing-box.exe run -c C:\etc\sing-box\config.json"#.to_string()),
+                command_line: Some(
+                    r#"sing-box.exe run -c C:\etc\sing-box\config.json"#.to_string(),
+                ),
                 executable_path: Some(r#"C:\Program Files\sing-box\sing-box.exe"#.to_string()),
             },
         ];
 
-        let filtered = filter_conflicting_processes(items, current_pid, Some(managed_pid), config_path);
+        let filtered =
+            filter_conflicting_processes(items, current_pid, Some(managed_pid), config_path);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].pid, 8888);
         assert_eq!(filtered[0].name, "sing-box.exe");
-        assert_eq!(filtered[0].cmdline.as_deref(), Some(r#"sing-box.exe run -c C:\etc\sing-box\config.json"#));
-        assert_eq!(filtered[0].exe_path.as_deref(), Some(r#"C:\Program Files\sing-box\sing-box.exe"#));
+        assert_eq!(
+            filtered[0].cmdline.as_deref(),
+            Some(r#"sing-box.exe run -c C:\etc\sing-box\config.json"#)
+        );
+        assert_eq!(
+            filtered[0].exe_path.as_deref(),
+            Some(r#"C:\Program Files\sing-box\sing-box.exe"#)
+        );
     }
 }

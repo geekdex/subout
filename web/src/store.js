@@ -217,7 +217,7 @@ export async function killExternalProcess(pid, sudoPass = "") {
       try {
         const json = JSON.parse(err);
         if (json.message) err = json.message;
-      } catch (_) {}
+      } catch {}
       if (
         err.includes("密码不正确") ||
         err.toLowerCase().includes("incorrect password")
@@ -254,7 +254,7 @@ export async function saveSudoPassword(sudoPass) {
     try {
       const json = JSON.parse(text);
       if (json.message) msg = json.message;
-    } catch (_) {}
+    } catch {}
     if (res.ok) {
       setSessionSudoPassword(passStr);
       if (systemModeInfo.value) {

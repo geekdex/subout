@@ -3,11 +3,11 @@ pub mod linux;
 pub mod macos;
 pub mod windows;
 
+use anyhow::Result;
+use serde_json::Value;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use anyhow::Result;
-use serde_json::Value;
 
 use crate::service::ConflictingProcessInfo;
 
@@ -167,9 +167,18 @@ mod tests {
         assert_eq!(linux.effective_tun_stack("system"), "system");
         assert_eq!(linux.kernel_binary_name(), "sing-box");
         assert_eq!(linux.default_data_dir(), PathBuf::from("/var/lib/subout"));
-        assert_eq!(linux.default_config_dir(&PathBuf::from("/var/lib/subout")), PathBuf::from("/etc/subout"));
-        assert_eq!(linux.default_log_dir(&PathBuf::from("/var/lib/subout")), PathBuf::from("/var/log/subout"));
-        assert_eq!(linux.default_runtime_dir(&PathBuf::from("/var/lib/subout")), PathBuf::from("/run/subout"));
+        assert_eq!(
+            linux.default_config_dir(&PathBuf::from("/var/lib/subout")),
+            PathBuf::from("/etc/subout")
+        );
+        assert_eq!(
+            linux.default_log_dir(&PathBuf::from("/var/lib/subout")),
+            PathBuf::from("/var/log/subout")
+        );
+        assert_eq!(
+            linux.default_runtime_dir(&PathBuf::from("/var/lib/subout")),
+            PathBuf::from("/run/subout")
+        );
 
         let mut inbound = json!({
             "type": "tun",
@@ -193,8 +202,14 @@ mod tests {
         assert_eq!(macos.effective_tun_stack("system"), "mixed");
         assert_eq!(macos.effective_tun_stack("gvisor"), "gvisor");
         assert_eq!(macos.kernel_binary_name(), "sing-box");
-        assert_eq!(macos.default_data_dir(), PathBuf::from("/Library/Application Support/Subout"));
-        assert_eq!(macos.default_log_dir(&PathBuf::from("/Library/Application Support/Subout")), PathBuf::from("/Library/Logs/Subout"));
+        assert_eq!(
+            macos.default_data_dir(),
+            PathBuf::from("/Library/Application Support/Subout")
+        );
+        assert_eq!(
+            macos.default_log_dir(&PathBuf::from("/Library/Application Support/Subout")),
+            PathBuf::from("/Library/Logs/Subout")
+        );
 
         let mut inbound = json!({
             "type": "tun",

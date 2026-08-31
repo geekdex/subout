@@ -85,6 +85,14 @@ pub fn sanitize_outbounds_value(outbounds: &mut Value) {
 
 pub fn sanitize_dns_value(dns: &mut Value) {
     if let Some(obj) = dns.as_object_mut() {
+        if !obj.contains_key("strategy")
+            || obj
+                .get("strategy")
+                .and_then(|s| s.as_str())
+                .map_or(true, |s| s.trim().is_empty())
+        {
+            obj.insert("strategy".to_string(), json!("prefer_ipv4"));
+        }
         if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for server in servers {
                 if let Some(srv_obj) = server.as_object_mut() {
@@ -123,7 +131,8 @@ pub fn sanitize_route_value(route: &mut Value) {
                     || rule.get("protocol").and_then(|p| p.as_str()) == Some("dns")
                     || (rule.get("port").map_or(false, |p| {
                         p.as_u64() == Some(53)
-                            || p.as_array().map_or(false, |arr| arr.iter().any(|v| v.as_u64() == Some(53)))
+                            || p.as_array()
+                                .map_or(false, |arr| arr.iter().any(|v| v.as_u64() == Some(53)))
                     }) && action == "hijack-dns");
 
                 if action == "sniff" {
@@ -175,7 +184,7 @@ mod tests {
         let conn = db::init_db(":memory:").unwrap();
 
         let log = json!({ "level": "warn" });
-        let dns = json!({ "final": "local-dns" });
+        let dns = json!({ "final": "local-dns", "strategy": "prefer_ipv4" });
         let inbounds = json!([{ "type": "mixed", "tag": "mixed-in" }]);
         let outbounds = json!([
             {
@@ -255,7 +264,10 @@ mod tests {
         crate::platform::macos_platform().sanitize_inbound(&mut macos_inbound);
         assert_eq!(macos_inbound.get("auto_redirect"), None);
         assert_eq!(macos_inbound.get("interface_name"), None);
-        assert_eq!(macos_inbound.get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
+        assert_eq!(
+            macos_inbound.get("address"),
+            Some(&json!(["172.19.0.1/30", "fd00::1/126"]))
+        );
         assert_eq!(macos_inbound.get("strict_route"), Some(&json!(true)));
         assert_eq!(macos_inbound.get("stack"), Some(&json!("mixed")));
 
@@ -268,9 +280,15 @@ mod tests {
         });
         crate::platform::windows_platform().sanitize_inbound(&mut win_inbound);
         assert_eq!(win_inbound.get("auto_redirect"), None);
-        assert_eq!(win_inbound.get("interface_name"), Some(&json!("subout-tun")));
+        assert_eq!(
+            win_inbound.get("interface_name"),
+            Some(&json!("subout-tun"))
+        );
         assert_eq!(win_inbound.get("stack"), Some(&json!("mixed")));
-        assert_eq!(win_inbound.get("address"), Some(&json!(["172.19.0.1/30", "fd00::1/126"])));
+        assert_eq!(
+            win_inbound.get("address"),
+            Some(&json!(["172.19.0.1/30", "fd00::1/126"]))
+        );
         assert_eq!(win_inbound.get("strict_route"), Some(&json!(true)));
     }
 

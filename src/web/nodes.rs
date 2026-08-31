@@ -567,7 +567,12 @@ pub async fn ping_nodes(
         ));
     }
 
-    let conn = get_db_conn(&state.db_path).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "数据库连接失败".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "数据库连接失败".to_string(),
+        )
+    })?;
 
     let mut nodes_to_ping = Vec::new();
     for id in payload.ids {

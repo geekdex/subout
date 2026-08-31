@@ -249,13 +249,21 @@ impl SingBoxServiceManager {
         self.start_with_sudo(config_json, None).await
     }
 
-    pub async fn start_with_sudo(&self, config_json: &Value, sudo_pass: Option<&str>) -> Result<()> {
+    pub async fn start_with_sudo(
+        &self,
+        config_json: &Value,
+        sudo_pass: Option<&str>,
+    ) -> Result<()> {
         let singbox_bin = kernel::get_singbox_executable()
             .ok_or_else(|| anyhow!("未找到 sing-box 可执行文件，请先在面板下载集成内核"))?;
 
         let explicit_pass = sudo_pass.and_then(|p| {
             let trimmed = p.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         });
 
         if let Some(ref p) = explicit_pass {
@@ -305,7 +313,11 @@ impl SingBoxServiceManager {
 
         let explicit_pass = sudo_pass.and_then(|p| {
             let trimmed = p.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         });
 
         if let Some(ref p) = explicit_pass {
@@ -322,13 +334,18 @@ impl SingBoxServiceManager {
         if use_sudo {
             self.append_log(&format!(
                 "正在使用 Sudo 提权启动 sing-box 服务 (TUN 模式: {}, 内核: {})...",
-                tun_mode, singbox_bin.display()
-            )).await;
+                tun_mode,
+                singbox_bin.display()
+            ))
+            .await;
         } else {
             self.append_log(&format!(
                 "正在启动 sing-box 服务 (TUN 模式: {}, root: {}, 内核: {})...",
-                tun_mode, as_root, singbox_bin.display()
-            )).await;
+                tun_mode,
+                as_root,
+                singbox_bin.display()
+            ))
+            .await;
         }
 
         let paths = crate::paths::AppPaths::get();
@@ -515,7 +532,11 @@ impl SingBoxServiceManager {
         }
 
         if !self.is_running().await {
-            let err = self.last_error.read().await.clone()
+            let err = self
+                .last_error
+                .read()
+                .await
+                .clone()
                 .unwrap_or_else(|| "sing-box 启动后立即退出，请检查配置或核心日志".to_string());
             let err_upper = err.to_uppercase();
             if err_upper.contains("INCORRECT PASSWORD")
@@ -525,7 +546,8 @@ impl SingBoxServiceManager {
                 || err_upper.contains("A PASSWORD IS REQUIRED")
             {
                 self.clear_saved_sudo_pass().await;
-                let guide = "Sudo 密码不正确或已失效，请重新输入系统管理员密码进行授权。".to_string();
+                let guide =
+                    "Sudo 密码不正确或已失效，请重新输入系统管理员密码进行授权。".to_string();
                 self.append_log(&format!("❌ {}", guide)).await;
                 *self.last_error.write().await = Some(guide.clone());
                 return Err(anyhow!(guide));
@@ -546,7 +568,8 @@ impl SingBoxServiceManager {
                 *self.last_error.write().await = Some(guide.clone());
                 return Err(anyhow!(guide));
             }
-            self.append_log(&format!("❌ sing-box 启动失败: {}", err)).await;
+            self.append_log(&format!("❌ sing-box 启动失败: {}", err))
+                .await;
             *self.last_error.write().await = Some(err.clone());
             return Err(anyhow!("sing-box 启动异常: {}", err));
         }
@@ -559,24 +582,39 @@ impl SingBoxServiceManager {
         if let Some(port) = get_mixed_port_from_config(config_json) {
             platform.enable_system_proxy(port, cached_pass.as_deref());
             if platform.is_macos() || platform.is_windows() {
-                self.append_log(&format!("🌐 已自动设置系统网络代理 (127.0.0.1:{})", port)).await;
+                self.append_log(&format!("🌐 已自动设置系统网络代理 (127.0.0.1:{})", port))
+                    .await;
             }
         }
         if tun_mode {
-            let tun_ip = get_tun_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.1".to_string());
+            let tun_ip =
+                get_tun_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.1".to_string());
             platform.enable_tun_dns(&tun_ip, cached_pass.as_deref());
             if platform.is_macos() {
-                self.append_log(&format!("🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({})", tun_ip)).await;
+                self.append_log(&format!(
+                    "🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({})",
+                    tun_ip
+                ))
+                .await;
             }
         }
 
         let summary = get_inbounds_summary_from_config(&config_path);
         if let Some(s) = summary {
-            self.append_log(&format!("🟢 sing-box 服务已就绪并开始运行 (PID: {:?}, 入站: {})", pid, s)).await;
+            self.append_log(&format!(
+                "🟢 sing-box 服务已就绪并开始运行 (PID: {:?}, 入站: {})",
+                pid, s
+            ))
+            .await;
         } else if started_ready {
-            self.append_log(&format!("🟢 sing-box 服务已就绪并开始运行 (PID: {:?})", pid)).await;
+            self.append_log(&format!(
+                "🟢 sing-box 服务已就绪并开始运行 (PID: {:?})",
+                pid
+            ))
+            .await;
         } else {
-            self.append_log(&format!("🟢 sing-box 进程已拉起 (PID: {:?})", pid)).await;
+            self.append_log(&format!("🟢 sing-box 进程已拉起 (PID: {:?})", pid))
+                .await;
         }
 
         Ok(())
@@ -602,17 +640,26 @@ impl SingBoxServiceManager {
             }
 
             // Wait up to 500ms for graceful stop, otherwise force SIGKILL
-            if (tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await).is_err() {
+            if (tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await)
+                .is_err()
+            {
                 if let Some(pid) = pid_opt {
                     platform.kill_process(pid, cached_pass.as_deref(), 9).await;
                 }
-                let _ = tokio::time::timeout(std::time::Duration::from_millis(200), child.wait()).await;
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_millis(200), child.wait()).await;
             }
         }
 
         let cached_pass = self.cached_sudo_pass.read().await.clone();
         // Clean up any lingering Subout sing-box / sudo child processes
-        platform.kill_all_subout_processes(cached_pass.as_deref(), pid_opt, &Self::get_running_config_path()).await;
+        platform
+            .kill_all_subout_processes(
+                cached_pass.as_deref(),
+                pid_opt,
+                &Self::get_running_config_path(),
+            )
+            .await;
 
         platform.disable_system_proxy(cached_pass.as_deref());
         platform.disable_tun_dns(cached_pass.as_deref());
@@ -639,11 +686,13 @@ impl SingBoxServiceManager {
         let platform = crate::platform::current_platform();
 
         if !platform.is_pid_alive(pid) {
-            self.append_log(&format!("外部进程 (PID: {}) 已不再运行", pid)).await;
+            self.append_log(&format!("外部进程 (PID: {}) 已不再运行", pid))
+                .await;
             return Ok(());
         }
 
-        self.append_log(&format!("正在请求终止外部 sing-box 进程 (PID: {})...", pid)).await;
+        self.append_log(&format!("正在请求终止外部 sing-box 进程 (PID: {})...", pid))
+            .await;
 
         let cached_pass = self.cached_sudo_pass.read().await.clone();
         let pass_clean = sudo_pass
@@ -652,10 +701,14 @@ impl SingBoxServiceManager {
             .map(|p| p.to_string())
             .or(cached_pass);
 
-        if let Err(e) = platform.stop_external_service_or_process(pid, pass_clean.as_deref()).await {
+        if let Err(e) = platform
+            .stop_external_service_or_process(pid, pass_clean.as_deref())
+            .await
+        {
             if e.to_string().contains("Sudo 密码不正确") {
                 self.clear_saved_sudo_pass().await;
-                self.append_log(&format!("❌ 终止外部进程失败: {}", e)).await;
+                self.append_log(&format!("❌ 终止外部进程失败: {}", e))
+                    .await;
                 return Err(e);
             }
         }
@@ -680,7 +733,8 @@ impl SingBoxServiceManager {
             self.save_sudo_pass(pass).await;
         }
 
-        self.append_log(&format!("🟢 已成功终止外部 sing-box 进程 (PID: {})", pid)).await;
+        self.append_log(&format!("🟢 已成功终止外部 sing-box 进程 (PID: {})", pid))
+            .await;
         Ok(())
     }
 
@@ -688,7 +742,11 @@ impl SingBoxServiceManager {
         self.restart_with_sudo(config_json, None).await
     }
 
-    pub async fn restart_with_sudo(&self, config_json: &Value, sudo_pass: Option<&str>) -> Result<()> {
+    pub async fn restart_with_sudo(
+        &self,
+        config_json: &Value,
+        sudo_pass: Option<&str>,
+    ) -> Result<()> {
         self.stop().await?;
         self.start_with_sudo(config_json, sudo_pass).await
     }
@@ -709,7 +767,10 @@ pub fn is_tun_mode(config_json: &Value) -> bool {
     false
 }
 
-pub async fn kill_all_subout_singbox_processes(cached_sudo_pass: Option<&str>, exclude_pid: Option<u32>) {
+pub async fn kill_all_subout_singbox_processes(
+    cached_sudo_pass: Option<&str>,
+    exclude_pid: Option<u32>,
+) {
     crate::platform::current_platform()
         .kill_all_subout_processes(
             cached_sudo_pass,
@@ -719,9 +780,13 @@ pub async fn kill_all_subout_singbox_processes(cached_sudo_pass: Option<&str>, e
         .await;
 }
 
-pub fn detect_conflicting_singbox_processes(managed_pid: Option<u32>) -> Vec<ConflictingProcessInfo> {
-    crate::platform::current_platform()
-        .detect_conflicting_processes(managed_pid, &SingBoxServiceManager::get_running_config_path())
+pub fn detect_conflicting_singbox_processes(
+    managed_pid: Option<u32>,
+) -> Vec<ConflictingProcessInfo> {
+    crate::platform::current_platform().detect_conflicting_processes(
+        managed_pid,
+        &SingBoxServiceManager::get_running_config_path(),
+    )
 }
 
 pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option<String> {
@@ -733,7 +798,10 @@ pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option
                     let inb_type = inb.get("type").and_then(|t| t.as_str()).unwrap_or("mixed");
                     match inb_type {
                         "tun" => {
-                            let iface = inb.get("interface_name").and_then(|i| i.as_str()).unwrap_or("");
+                            let iface = inb
+                                .get("interface_name")
+                                .and_then(|i| i.as_str())
+                                .unwrap_or("");
                             if iface.is_empty() {
                                 summaries.push("TUN".to_string());
                             } else {
@@ -741,16 +809,28 @@ pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option
                             }
                         }
                         "mixed" => {
-                            let listen = inb.get("listen").and_then(|l| l.as_str()).unwrap_or("127.0.0.1");
-                            let port = inb.get("listen_port").and_then(|p| p.as_u64()).unwrap_or(2080);
+                            let listen = inb
+                                .get("listen")
+                                .and_then(|l| l.as_str())
+                                .unwrap_or("127.0.0.1");
+                            let port = inb
+                                .get("listen_port")
+                                .and_then(|p| p.as_u64())
+                                .unwrap_or(2080);
                             summaries.push(format!("{}:{} (混合代理)", listen, port));
                         }
                         "http" => {
-                            let port = inb.get("listen_port").and_then(|p| p.as_u64()).unwrap_or(8080);
+                            let port = inb
+                                .get("listen_port")
+                                .and_then(|p| p.as_u64())
+                                .unwrap_or(8080);
                             summaries.push(format!("HTTP :{}", port));
                         }
                         "socks" => {
-                            let port = inb.get("listen_port").and_then(|p| p.as_u64()).unwrap_or(1080);
+                            let port = inb
+                                .get("listen_port")
+                                .and_then(|p| p.as_u64())
+                                .unwrap_or(1080);
                             summaries.push(format!("SOCKS5 :{}", port));
                         }
                         other => {
@@ -771,8 +851,14 @@ pub fn is_pid_alive(pid: u32) -> bool {
     crate::platform::current_platform().is_pid_alive(pid)
 }
 
-pub async fn run_sudo_command(cmd_name: &str, args: &[&str], sudo_pass: Option<&str>) -> Result<()> {
-    crate::platform::current_platform().run_sudo_command(cmd_name, args, sudo_pass).await
+pub async fn run_sudo_command(
+    cmd_name: &str,
+    args: &[&str],
+    sudo_pass: Option<&str>,
+) -> Result<()> {
+    crate::platform::current_platform()
+        .run_sudo_command(cmd_name, args, sudo_pass)
+        .await
 }
 
 pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
@@ -849,10 +935,18 @@ pub fn is_actual_singbox_error(line: &str) -> bool {
         return true;
     }
     if upper.contains("ERROR") {
-        if upper.contains("NOERROR") && !upper.contains(" ERROR") && !upper.contains("ERROR:") && !upper.contains("[ERROR]") {
+        if upper.contains("NOERROR")
+            && !upper.contains(" ERROR")
+            && !upper.contains("ERROR:")
+            && !upper.contains("[ERROR]")
+        {
             return false;
         }
-        if upper.contains(" ERROR ") || upper.contains("ERROR:") || upper.contains("[ERROR]") || upper.contains("LEVEL=ERROR") {
+        if upper.contains(" ERROR ")
+            || upper.contains("ERROR:")
+            || upper.contains("[ERROR]")
+            || upper.contains("LEVEL=ERROR")
+        {
             return true;
         }
     }
@@ -867,30 +961,56 @@ mod tests {
     fn test_strip_ansi_codes() {
         let raw = "\x1b[36mINFO\x1b[0m network: updated default interface wlo1, index 3";
         let clean = strip_ansi_codes(raw);
-        assert_eq!(clean, "INFO network: updated default interface wlo1, index 3");
+        assert_eq!(
+            clean,
+            "INFO network: updated default interface wlo1, index 3"
+        );
 
         let colored_warn = "\x1b[33mWARN\x1b[0m outbound/direct[direct]: failed";
-        assert_eq!(strip_ansi_codes(colored_warn), "WARN outbound/direct[direct]: failed");
+        assert_eq!(
+            strip_ansi_codes(colored_warn),
+            "WARN outbound/direct[direct]: failed"
+        );
     }
 
     #[test]
     fn test_is_actual_singbox_error() {
         // Normal INFO lines should NOT be treated as error
-        assert!(!is_actual_singbox_error("INFO network: updated default interface"));
-        assert!(!is_actual_singbox_error("INFO router: dns rule action predefined rcode NOERROR"));
+        assert!(!is_actual_singbox_error(
+            "INFO network: updated default interface"
+        ));
+        assert!(!is_actual_singbox_error(
+            "INFO router: dns rule action predefined rcode NOERROR"
+        ));
         assert!(!is_actual_singbox_error("INFO sing-box started (1.10s)"));
-        assert!(!is_actual_singbox_error("INFO[0000] inbound/tun[tun-in]: started"));
+        assert!(!is_actual_singbox_error(
+            "INFO[0000] inbound/tun[tun-in]: started"
+        ));
 
         // Genuine fatal or errors
-        assert!(is_actual_singbox_error("FATAL[0000] create service: rule-set error"));
-        assert!(is_actual_singbox_error("FATAL[0002] start service: start logger: open /var/log/sing-box.log: The network path was not found."));
-        assert!(is_actual_singbox_error("FATAL[0001] start service: start inbound/tun[tun-in]: configure tun interface: Access is denied."));
-        assert!(is_actual_singbox_error("ERROR inbound/mixed[mixed-in]: tcp server failed to bind: address already in use"));
+        assert!(is_actual_singbox_error(
+            "FATAL[0000] create service: rule-set error"
+        ));
+        assert!(is_actual_singbox_error(
+            "FATAL[0002] start service: start logger: open /var/log/sing-box.log: The network path was not found."
+        ));
+        assert!(is_actual_singbox_error(
+            "FATAL[0001] start service: start inbound/tun[tun-in]: configure tun interface: Access is denied."
+        ));
+        assert!(is_actual_singbox_error(
+            "ERROR inbound/mixed[mixed-in]: tcp server failed to bind: address already in use"
+        ));
         assert!(is_actual_singbox_error("panic: runtime error"));
         assert!(is_actual_singbox_error("operation not permitted"));
-        assert!(is_actual_singbox_error("FATAL[0000] start service: start inbound/tun[tun-in]: configure tun interface: open tun: TUNSETIFF: operation not permitted"));
-        assert!(is_actual_singbox_error("sudo: 1 incorrect password attempt"));
-        assert!(is_actual_singbox_error("sudo: pam_authenticate: Authentication failure"));
+        assert!(is_actual_singbox_error(
+            "FATAL[0000] start service: start inbound/tun[tun-in]: configure tun interface: open tun: TUNSETIFF: operation not permitted"
+        ));
+        assert!(is_actual_singbox_error(
+            "sudo: 1 incorrect password attempt"
+        ));
+        assert!(is_actual_singbox_error(
+            "sudo: pam_authenticate: Authentication failure"
+        ));
     }
 
     #[test]
@@ -956,7 +1076,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_sudo_password_persistence_lifecycle() {
-        let unique_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let db_file = std::env::temp_dir().join(format!("test_sudo_{}.db", unique_id));
         let db_path = db_file.to_string_lossy().to_string();
 

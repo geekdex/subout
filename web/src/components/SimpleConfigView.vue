@@ -20,7 +20,7 @@
           type="button"
           class="btn btn-secondary"
           title="弹窗预览由当前设置生成的完整 sing-box JSON 配置"
-          @click="showPreviewModal = true"
+          @click="openPreviewModal"
         >
           <svg
             width="18"
@@ -234,6 +234,13 @@
         >
           💡
           系统将定期自动对所有已启用的订阅节点进行测速（URLTest），并将流量实时路由至最低延迟节点。
+          <span
+            v-if="bestNodeInfo"
+            style="color: var(--success); font-weight: 500; margin-left: 4px"
+          >
+            (当前探测最优: {{ bestNodeInfo.tag }} -
+            {{ bestNodeInfo.latency }}ms)
+          </span>
         </div>
 
         <div
@@ -266,14 +273,50 @@
               <label style="font-size: 0.85rem; margin-bottom: 0"
                 >指定出口代理节点</label
               >
-              <input
-                v-if="enabledNodes.length > 6"
-                v-model="nodeSearchKeyword"
-                type="text"
-                class="input-control"
-                style="padding: 0.2rem 0.5rem; font-size: 0.75rem; width: 160px"
-                placeholder="🔍 快速过滤节点..."
-              />
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="btn-text"
+                  :disabled="loadingNodes || isTestingNodes"
+                  title="对可用节点进行并发延迟测速并刷新显示"
+                  style="
+                    font-size: 0.75rem;
+                    padding: 2px 7px;
+                    border-radius: 4px;
+                    background: rgba(99, 102, 241, 0.1);
+                    color: var(--primary);
+                    border: 1px solid rgba(99, 102, 241, 0.25);
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                  "
+                  @click="testAllNodesLatency"
+                >
+                  <span
+                    v-if="isTestingNodes"
+                    class="spinner-small"
+                    style="margin-right: 3px"
+                  ></span>
+                  <span v-else style="margin-right: 3px">⚡</span>
+                  {{
+                    isTestingNodes
+                      ? `测速中 (${testedNodeCount}/${enabledNodes.length})...`
+                      : "节点测速"
+                  }}
+                </button>
+                <input
+                  v-if="enabledNodes.length > 6"
+                  v-model="nodeSearchKeyword"
+                  type="text"
+                  class="input-control"
+                  style="
+                    padding: 0.2rem 0.5rem;
+                    font-size: 0.75rem;
+                    width: 150px;
+                  "
+                  placeholder="🔍 快速过滤节点..."
+                />
+              </div>
             </div>
 
             <select
@@ -392,6 +435,24 @@
       <div class="option-grid">
         <div
           class="option-card"
+          :class="{ active: form.dns.mode === 'preset_fakeip' }"
+          @click="selectDnsPreset('preset_fakeip')"
+        >
+          <div class="option-card-header">
+            <div class="flex items-center gap-2">
+              <span class="option-icon">⚡</span>
+              <span class="option-title">LocalDNS + FakeIP</span>
+            </div>
+            <span class="badge badge-success">推荐</span>
+          </div>
+          <p class="option-desc">
+            国内域名直连 LocalDNS (223.5.5.5) 高速解析，代理流量全走 FakeIP
+            极速响应并防 DNS 污染与泄漏。
+          </p>
+        </div>
+
+        <div
+          class="option-card"
           :class="{ active: form.dns.mode === 'preset_domestic_foreign' }"
           @click="selectDnsPreset('preset_domestic_foreign')"
         >
@@ -400,7 +461,6 @@
               <span class="option-icon">🚀</span>
               <span class="option-title">阿里 + Cloudflare DoH</span>
             </div>
-            <span class="badge badge-success">推荐</span>
           </div>
           <p class="option-desc">
             国内使用 223.5.5.5，国外走 Cloudflare DoH 加密防污染解析。
@@ -414,7 +474,7 @@
         >
           <div class="option-card-header">
             <div class="flex items-center gap-2">
-              <span class="option-icon">⚡</span>
+              <span class="option-icon">🌐</span>
               <span class="option-title">腾讯 + Google DoH</span>
             </div>
           </div>
@@ -554,10 +614,7 @@
         </div>
       </div>
 
-      <div
-        v-else
-        class="inbound-config-row"
-      >
+      <div v-else class="inbound-config-row">
         <div class="input-group" style="margin-bottom: 0; min-width: 160px">
           <label>混合监听端口</label>
           <input
@@ -580,19 +637,25 @@
       </div>
     </div>
 
-    <!-- Preview Modal matching global modal standard -->
+    <!-- Preview Modal matching global modal standard with Foldable Tree View and Raw View -->
     <div class="modal" :class="{ active: showPreviewModal }">
       <div
         class="modal-card"
         style="
-          max-width: 780px;
-          width: 92%;
-          max-height: 85vh;
+          max-width: 860px;
+          width: 94%;
+          max-height: 88vh;
           display: flex;
           flex-direction: column;
         "
       >
-        <div class="modal-header">
+        <div
+          class="modal-header"
+          style="
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+          "
+        >
           <div class="flex items-center gap-2">
             <span>📜 sing-box 配置预览</span>
             <span class="badge badge-secondary" style="font-size: 0.75rem"
@@ -623,16 +686,205 @@
           </button>
         </div>
 
-        <div style="flex: 1; min-height: 0; padding: 0.75rem 0">
+        <!-- Preview Controls & Mode Toolbar -->
+        <div
+          class="flex items-center justify-between flex-wrap gap-2"
+          style="
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.82rem;
+          "
+        >
+          <!-- Left: View Mode Toggle -->
+          <div class="flex items-center gap-2">
+            <span style="color: var(--text-muted)">展示形式:</span>
+            <div class="btn-group" style="display: inline-flex">
+              <button
+                type="button"
+                class="btn"
+                :class="
+                  previewViewMode === 'tree' ? 'btn-primary' : 'btn-secondary'
+                "
+                style="
+                  padding: 0.25rem 0.65rem;
+                  font-size: 0.8rem;
+                  border-top-right-radius: 0;
+                  border-bottom-right-radius: 0;
+                "
+                @click="previewViewMode = 'tree'"
+              >
+                🌲 树状折叠
+              </button>
+              <button
+                type="button"
+                class="btn"
+                :class="
+                  previewViewMode === 'raw' ? 'btn-primary' : 'btn-secondary'
+                "
+                style="
+                  padding: 0.25rem 0.65rem;
+                  font-size: 0.8rem;
+                  border-top-left-radius: 0;
+                  border-bottom-left-radius: 0;
+                "
+                @click="previewViewMode = 'raw'"
+              >
+                📄 原始 JSON
+              </button>
+            </div>
+
+            <!-- Quick Tree Folding Shortcuts (Only visible in tree mode) -->
+            <template v-if="previewViewMode === 'tree'">
+              <span style="color: var(--border-color); margin: 0 4px">|</span>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                style="padding: 0.25rem 0.55rem; font-size: 0.78rem"
+                title="展开全部 JSON 配置节点"
+                @click="expandAllPreview"
+              >
+                ➕ 全部展开
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                style="padding: 0.25rem 0.55rem; font-size: 0.78rem"
+                title="折叠为仅顶层"
+                @click="collapseAllPreview"
+              >
+                ➖ 全部折叠
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                style="padding: 0.25rem 0.55rem; font-size: 0.78rem"
+                title="展开至二级常用节点"
+                @click="expandDepthPreview(2)"
+              >
+                🔍 展开常用 (2级)
+              </button>
+            </template>
+          </div>
+
+          <!-- Right: Search Filter Input in Tree Mode -->
+          <div
+            v-if="previewViewMode === 'tree'"
+            class="flex items-center gap-2"
+          >
+            <div
+              style="
+                position: relative;
+                display: inline-flex;
+                align-items: center;
+              "
+            >
+              <input
+                v-model="previewSearch"
+                type="text"
+                class="input-control"
+                style="
+                  padding: 0.22rem 1.6rem 0.22rem 0.55rem;
+                  font-size: 0.78rem;
+                  width: 170px;
+                "
+                placeholder="🔍 搜索节点 / 规则..."
+              />
+              <button
+                v-if="previewSearch"
+                type="button"
+                style="
+                  position: absolute;
+                  right: 4px;
+                  background: none;
+                  border: none;
+                  color: var(--text-muted);
+                  cursor: pointer;
+                  font-size: 0.75rem;
+                  padding: 2px 4px;
+                "
+                @click="previewSearch = ''"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section Overview Quick Tags -->
+        <div
+          v-if="previewSections.length > 0"
+          class="flex items-center gap-2 flex-wrap"
+          style="
+            padding: 0.4rem 0;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+          "
+        >
+          <span>包含模块:</span>
+          <span
+            v-for="sec in previewSections"
+            :key="sec.name"
+            class="badge badge-info"
+            style="font-size: 0.72rem; padding: 1px 6px"
+          >
+            {{ sec.name }}{{ sec.count ? ` (${sec.count})` : "" }}
+          </span>
+        </div>
+
+        <div style="flex: 1; min-height: 0; padding: 0.5rem 0">
+          <div
+            v-if="isGeneratingPreview"
+            style="
+              padding: 3rem;
+              text-align: center;
+              color: var(--text-muted);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 0.5rem;
+            "
+          >
+            <span class="spinner-small"></span>
+            <span>正在基于当前设置实时生成配置预览...</span>
+          </div>
+
+          <!-- Tree View with Folding and Expansion -->
+          <div
+            v-else-if="previewViewMode === 'tree'"
+            class="tree-view-wrapper"
+            style="
+              height: 100%;
+              max-height: 52vh;
+              overflow-y: auto;
+              background: #1e1e2e;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              border-radius: 6px;
+              padding: 0.75rem 0.5rem;
+              box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
+            "
+          >
+            <json-tree-view
+              :data="generatedPreview"
+              :expand-depth="previewExpandDepth"
+              :expand-signal="expandSignal"
+              :collapse-signal="collapseSignal"
+              :search-query="previewSearch"
+            />
+          </div>
+
+          <!-- Raw JSON View -->
           <pre
+            v-else
             class="log-console"
             style="
               height: 100%;
-              max-height: 55vh;
+              max-height: 52vh;
               overflow-y: auto;
               font-size: 0.85rem;
               margin: 0;
               border-radius: 6px;
+              background: #1e1e2e;
+              box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
             "
             >{{ JSON.stringify(generatedPreview, null, 2) }}</pre>
         </div>
@@ -643,6 +895,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border-color);
           "
         >
           <div class="flex gap-2">
@@ -661,7 +915,7 @@
                   d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
                 />
               </svg>
-              复制 JSON
+              复制完整 JSON
             </button>
             <button class="btn btn-secondary" @click="downloadPreview">
               <svg
@@ -691,6 +945,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue";
+import JsonTreeView from "./JsonTreeView.vue";
 import {
   API_BASE,
   token,
@@ -713,6 +968,58 @@ const loadingNodes = ref(false);
 const isSyncingSubs = ref(false);
 const nodeSearchKeyword = ref("");
 
+// Preview modal view mode and tree controls
+const previewViewMode = ref("tree"); // "tree" | "raw"
+const previewExpandDepth = ref(2);
+const expandSignal = ref(0);
+const collapseSignal = ref(0);
+const previewSearch = ref("");
+
+const expandAllPreview = () => {
+  expandSignal.value++;
+};
+
+const collapseAllPreview = () => {
+  previewExpandDepth.value = 1;
+  collapseSignal.value++;
+};
+
+const expandDepthPreview = (depth) => {
+  previewExpandDepth.value = depth;
+  collapseSignal.value++;
+};
+
+const previewSections = computed(() => {
+  if (!generatedPreview.value || typeof generatedPreview.value !== "object")
+    return [];
+  const secs = [];
+  if (generatedPreview.value.dns) {
+    const srvCount = Array.isArray(generatedPreview.value.dns.servers)
+      ? generatedPreview.value.dns.servers.length
+      : 0;
+    secs.push({ name: "dns", count: `${srvCount} 服务器` });
+  }
+  if (generatedPreview.value.inbounds) {
+    const inCount = Array.isArray(generatedPreview.value.inbounds)
+      ? generatedPreview.value.inbounds.length
+      : 0;
+    secs.push({ name: "inbounds", count: `${inCount} 入站` });
+  }
+  if (generatedPreview.value.outbounds) {
+    const outCount = Array.isArray(generatedPreview.value.outbounds)
+      ? generatedPreview.value.outbounds.length
+      : 0;
+    secs.push({ name: "outbounds", count: `${outCount} 出站/节点` });
+  }
+  if (generatedPreview.value.route) {
+    const ruleCount = Array.isArray(generatedPreview.value.route.rules)
+      ? generatedPreview.value.route.rules.length
+      : 0;
+    secs.push({ name: "route", count: `${ruleCount} 路由规则` });
+  }
+  return secs;
+});
+
 const enabledNodes = computed(() => {
   const list = Array.isArray(nodesList.value) ? nodesList.value : [];
   return list.filter((n) => n && n.enabled);
@@ -734,16 +1041,74 @@ const filteredNodes = computed(() => {
 const formatLatency = (node) => {
   const lat = node.last_web_latency || node.last_tcp_latency;
   if (lat && lat > 0) {
-    return ` (${lat}ms)`;
+    return ` (⚡ ${lat}ms)`;
   }
   return "";
+};
+
+const bestNodeInfo = computed(() => {
+  const tested = enabledNodes.value
+    .map((n) => ({
+      tag: n.tag,
+      latency: n.last_web_latency || n.last_tcp_latency || null,
+    }))
+    .filter((n) => n.latency !== null && n.latency > 0)
+    .sort((a, b) => a.latency - b.latency);
+  return tested.length > 0 ? tested[0] : null;
+});
+
+const isTestingNodes = ref(false);
+const testedNodeCount = ref(0);
+
+const testAllNodesLatency = async () => {
+  if (enabledNodes.value.length === 0) return;
+  isTestingNodes.value = true;
+  testedNodeCount.value = 0;
+
+  try {
+    const nodeIds = enabledNodes.value.map((n) => n.id);
+    const res = await fetch(`${API_BASE}/api/nodes/ping`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({
+        ids: nodeIds,
+        test_type: "both",
+      }),
+    });
+
+    if (res.ok) {
+      const results = await res.json();
+      const resultMap = new Map(results.map((r) => [r.id, r]));
+      nodesList.value.forEach((node) => {
+        const item = resultMap.get(node.id);
+        if (item) {
+          if (item.web_latency !== undefined && item.web_latency !== null) {
+            node.last_web_latency = item.web_latency;
+          }
+          if (item.tcp_latency !== undefined && item.tcp_latency !== null) {
+            node.last_tcp_latency = item.tcp_latency;
+          }
+        }
+      });
+      testedNodeCount.value = results.length;
+      showToast(`已完成 ${results.length} 个节点的延迟测速！`);
+    } else {
+      showToast("节点测速请求失败", "danger");
+    }
+  } catch (e) {
+    showToast(`节点测速异常: ${e.message || e}`, "danger");
+  } finally {
+    isTestingNodes.value = false;
+  }
 };
 
 const isDirect = computed(() => form.route.default_outbound === "direct");
 const isAutoTest = computed(
   () =>
-    form.route.default_outbound === "AUTO-Test" ||
-    !form.route.default_outbound,
+    form.route.default_outbound === "AUTO-Test" || !form.route.default_outbound,
 );
 
 const setOutboundMode = (mode) => {
@@ -764,9 +1129,9 @@ const setOutboundMode = (mode) => {
 
 const form = reactive({
   dns: {
-    mode: "preset_domestic_foreign",
+    mode: "preset_fakeip",
     domestic_dns: "223.5.5.5",
-    foreign_dns: "https://1.1.1.1/dns-query",
+    foreign_dns: "fakeip",
   },
   inbound: {
     inbound_type: "tun",
@@ -785,7 +1150,10 @@ const form = reactive({
 
 const selectDnsPreset = (preset) => {
   form.dns.mode = preset;
-  if (preset === "preset_domestic_foreign") {
+  if (preset === "preset_fakeip") {
+    form.dns.domestic_dns = "223.5.5.5";
+    form.dns.foreign_dns = "fakeip";
+  } else if (preset === "preset_domestic_foreign") {
     form.dns.domestic_dns = "223.5.5.5";
     form.dns.foreign_dns = "https://1.1.1.1/dns-query";
   } else if (preset === "fast_public") {
@@ -824,7 +1192,7 @@ const syncSubscriptions = async () => {
     } else {
       showToast("订阅同步请求失败", "danger");
     }
-  } catch (e) {
+  } catch {
     showToast("同步订阅网络请求出错", "danger");
   } finally {
     isSyncingSubs.value = false;
@@ -848,7 +1216,7 @@ const loadSimpleConfig = async () => {
       }
       generatedPreview.value = data.generated || {};
     }
-  } catch (e) {
+  } catch {
     showToast("载入极简配置失败", "danger");
   }
 };
@@ -985,6 +1353,30 @@ const saveConfig = async (apply = false, customSudoPass = null) => {
   }
 };
 
+const isGeneratingPreview = ref(false);
+
+const openPreviewModal = async () => {
+  showPreviewModal.value = true;
+  isGeneratingPreview.value = true;
+  try {
+    const res = await fetch(`${API_BASE}/api/simple-config/preview`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify(form),
+    });
+    if (res.ok) {
+      generatedPreview.value = await res.json();
+    }
+  } catch (e) {
+    console.error("生成预览失败", e);
+  } finally {
+    isGeneratingPreview.value = false;
+  }
+};
+
 const copyPreview = () => {
   const jsonStr = JSON.stringify(generatedPreview.value, null, 2);
   navigator.clipboard.writeText(jsonStr);
@@ -1098,5 +1490,21 @@ onMounted(() => {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border-color);
+}
+
+.spinner-small {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  border-radius: 50%;
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

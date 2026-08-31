@@ -34,12 +34,19 @@
       </div>
       <div class="grid-2">
         <div class="input-group">
-          <label>域名解析策略 (Strategy)</label>
+          <label>
+            域名解析策略 (Strategy)
+            <span
+              title="在纯 IPv4（如办公室）或代理节点为 IPv4 环境下强烈建议设为 prefer_ipv4，避免 IPv6 超时；在双栈网络下也能防止 IPv6 泄露"
+              style="margin-left: 4px; cursor: help; color: var(--text-muted)"
+              >ℹ️</span
+            >
+          </label>
           <select
             v-model="configData.dns.strategy"
             class="input-control w-full"
           >
-            <option value="prefer_ipv4">优先 IPv4 (prefer_ipv4)</option>
+            <option value="prefer_ipv4">优先 IPv4 (prefer_ipv4 - 推荐)</option>
             <option value="prefer_ipv6">优先 IPv6 (prefer_ipv6)</option>
             <option value="ipv4_only">仅 IPv4 (ipv4_only)</option>
             <option value="ipv6_only">仅 IPv6 (ipv6_only)</option>

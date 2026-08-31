@@ -35,7 +35,9 @@ impl AppPaths {
         );
         let _ = paths.ensure_dirs();
         let _ = GLOBAL_PATHS.set(paths);
-        GLOBAL_PATHS.get().expect("Global paths must be initialized")
+        GLOBAL_PATHS
+            .get()
+            .expect("Global paths must be initialized")
     }
 
     /// Get the global AppPaths instance (or initialize with defaults if not already initialized).
@@ -163,7 +165,8 @@ impl AppPaths {
         }
 
         // Running within source workspace directory containing Cargo.toml and src/main.rs
-        let in_workspace = Path::new("./Cargo.toml").is_file() && Path::new("./src/main.rs").is_file();
+        let in_workspace =
+            Path::new("./Cargo.toml").is_file() && Path::new("./src/main.rs").is_file();
         if in_workspace {
             return true;
         }
@@ -242,11 +245,12 @@ impl AppPaths {
             .unwrap_or(0);
         let filename = format!("{}_{}_{}_{}{}", prefix, pid, timestamp, count, suffix);
 
-        let target_dir = if self.runtime_dir.is_dir() || std::fs::create_dir_all(&self.runtime_dir).is_ok() {
-            &self.runtime_dir
-        } else {
-            &self.data_dir
-        };
+        let target_dir =
+            if self.runtime_dir.is_dir() || std::fs::create_dir_all(&self.runtime_dir).is_ok() {
+                &self.runtime_dir
+            } else {
+                &self.data_dir
+            };
         target_dir.join(filename)
     }
 
@@ -280,16 +284,23 @@ impl AppPaths {
             }
 
             // Legacy system locations per platform
-            candidates.extend(crate::platform::current_platform().legacy_db_candidates(&self.config_dir));
+            candidates
+                .extend(crate::platform::current_platform().legacy_db_candidates(&self.config_dir));
 
             for src in candidates {
                 if src.exists() && src != target_db {
                     if std::fs::rename(&src, &target_db).is_ok() {
-                        println!("[Info] Migrated database file from {:?} to {:?}", src, target_db);
+                        println!(
+                            "[Info] Migrated database file from {:?} to {:?}",
+                            src, target_db
+                        );
                         break;
                     } else if std::fs::copy(&src, &target_db).is_ok() {
                         let _ = std::fs::remove_file(&src);
-                        println!("[Info] Migrated database file from {:?} to {:?}", src, target_db);
+                        println!(
+                            "[Info] Migrated database file from {:?} to {:?}",
+                            src, target_db
+                        );
                         break;
                     } else {
                         eprintln!(
@@ -332,8 +343,8 @@ impl AppPaths {
     ///
     /// Prioritizes candidates whose version is >= `min_version` (default 1.12.0).
     pub fn find_singbox_executable(&self) -> Option<PathBuf> {
-        let min_version = std::env::var("SUBOUT_MIN_SINGBOX_VERSION")
-            .unwrap_or_else(|_| "1.12.0".to_string());
+        let min_version =
+            std::env::var("SUBOUT_MIN_SINGBOX_VERSION").unwrap_or_else(|_| "1.12.0".to_string());
 
         let binary_name = crate::platform::current_platform().kernel_binary_name();
 
@@ -354,7 +365,8 @@ impl AppPaths {
         candidates.push(self.data_dir.join("sing-box").join(binary_name));
 
         // 4. Common standard system paths from platform strategy
-        candidates.extend(crate::platform::current_platform().standard_singbox_candidates(binary_name));
+        candidates
+            .extend(crate::platform::current_platform().standard_singbox_candidates(binary_name));
 
         // 5. Dev / local directories
         candidates.push(PathBuf::from(format!("./runtime/data/bin/{}", binary_name)));
@@ -393,12 +405,16 @@ impl AppPaths {
 /// - "1.12.0"
 pub fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
     for token in s.split_whitespace() {
-        let clean_token = token.trim_start_matches(|c: char| c.is_alphabetic() || c == 'v' || c == 'V');
+        let clean_token =
+            token.trim_start_matches(|c: char| c.is_alphabetic() || c == 'v' || c == 'V');
         let semver_part = clean_token.split('-').next().unwrap_or(clean_token);
         let parts: Vec<&str> = semver_part.split('.').collect();
         if parts.len() >= 2 {
             if let (Ok(major), Ok(minor)) = (parts[0].parse::<u64>(), parts[1].parse::<u64>()) {
-                let patch = parts.get(2).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+                let patch = parts
+                    .get(2)
+                    .and_then(|p| p.parse::<u64>().ok())
+                    .unwrap_or(0);
                 return Some((major, minor, patch));
             }
         }
@@ -481,13 +497,19 @@ mod tests {
         assert_eq!(paths.data_dir, PathBuf::from("/tmp/custom_data"));
         assert_eq!(paths.log_dir, PathBuf::from("/tmp/custom_logs"));
         assert_eq!(paths.runtime_dir, PathBuf::from("/tmp/custom_run"));
-        assert_eq!(paths.database_path(), PathBuf::from("/tmp/custom_data/subout.db"));
+        assert_eq!(
+            paths.database_path(),
+            PathBuf::from("/tmp/custom_data/subout.db")
+        );
         assert_eq!(
             paths.generated_config_path(),
             PathBuf::from("/tmp/custom_data/generated/sing-box.json")
         );
         assert_eq!(paths.kernel_dir(), PathBuf::from("/tmp/custom_data/bin"));
-        assert_eq!(paths.subscriptions_dir(), PathBuf::from("/tmp/custom_data/subscriptions"));
+        assert_eq!(
+            paths.subscriptions_dir(),
+            PathBuf::from("/tmp/custom_data/subscriptions")
+        );
         assert_eq!(paths.nodes_dir(), PathBuf::from("/tmp/custom_data/nodes"));
     }
 
@@ -517,7 +539,10 @@ mod tests {
         assert_eq!(paths.config_dir, PathBuf::from("./runtime/config"));
         assert_eq!(paths.log_dir, PathBuf::from("./runtime/logs"));
         assert_eq!(paths.runtime_dir, PathBuf::from("./runtime/run"));
-        assert_eq!(paths.database_path(), PathBuf::from("./runtime/data/subout.db"));
+        assert_eq!(
+            paths.database_path(),
+            PathBuf::from("./runtime/data/subout.db")
+        );
         assert_eq!(
             paths.generated_config_path(),
             PathBuf::from("./runtime/data/generated/sing-box.json")
@@ -555,7 +580,8 @@ mod tests {
 
     #[test]
     fn test_temp_file_path_generation() {
-        let temp_dir = std::env::temp_dir().join(format!("subout_test_temp_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("subout_test_temp_{}", std::process::id()));
         let paths = AppPaths {
             config_dir: temp_dir.join("config"),
             data_dir: temp_dir.join("data"),
@@ -580,7 +606,10 @@ mod tests {
     #[test]
     fn test_semver_parsing_and_comparison() {
         assert_eq!(parse_semver("sing-box version 1.13.19"), Some((1, 13, 19)));
-        assert_eq!(parse_semver("sing-box version 1.14.0-beta.2"), Some((1, 14, 0)));
+        assert_eq!(
+            parse_semver("sing-box version 1.14.0-beta.2"),
+            Some((1, 14, 0))
+        );
         assert_eq!(parse_semver("v1.12.5"), Some((1, 12, 5)));
         assert_eq!(parse_semver("1.12.0"), Some((1, 12, 0)));
 

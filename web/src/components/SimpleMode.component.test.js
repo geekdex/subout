@@ -92,7 +92,7 @@ describe("KernelDownloadCard", () => {
 });
 
 describe("SimpleConfigView", () => {
-  it("renders compact simplified DNS and Route cards with AUTO-Test and TUN first", () => {
+  it("renders compact simplified DNS and Route cards with AUTO-Test, TUN, and LocalDNS + FakeIP first", () => {
     global.fetch = vi.fn().mockImplementation((url) => {
       if (url.includes("/api/nodes")) {
         return Promise.resolve({
@@ -115,9 +115,9 @@ describe("SimpleConfigView", () => {
           Promise.resolve({
             config: {
               dns: {
-                mode: "preset_domestic_foreign",
+                mode: "preset_fakeip",
                 domestic_dns: "223.5.5.5",
-                foreign_dns: "https://1.1.1.1/dns-query",
+                foreign_dns: "fakeip",
               },
               inbound: {
                 inbound_type: "tun",
@@ -141,7 +141,10 @@ describe("SimpleConfigView", () => {
     const wrapper = mount(SimpleConfigView);
     expect(wrapper.text()).toContain("极简配置管理");
     expect(wrapper.text()).toContain("智能分流");
+    expect(wrapper.text()).toContain("LocalDNS + FakeIP");
     expect(wrapper.text()).toContain("阿里 + Cloudflare DoH");
+    expect(wrapper.text()).toContain("腾讯 + Google DoH");
+    expect(wrapper.text()).toContain("自定义 DNS");
     expect(wrapper.text()).toContain("TUN 虚拟网卡 (整机透明代理)");
     expect(wrapper.text()).toContain("混合端口 (Mixed HTTP + SOCKS5)");
     expect(wrapper.text()).toContain("查看配置预览");
@@ -149,8 +152,18 @@ describe("SimpleConfigView", () => {
     expect(wrapper.text()).toContain("自动测速优选");
     expect(wrapper.text()).toContain("手动指定节点");
 
+    // Verify DNS cards order: LocalDNS + FakeIP first and recommended
+    const dnsCards = wrapper.findAll(".option-grid")[1].findAll(".option-card");
+    expect(dnsCards[0].text()).toContain("LocalDNS + FakeIP");
+    expect(dnsCards[0].text()).toContain("推荐");
+    expect(dnsCards[1].text()).toContain("阿里 + Cloudflare DoH");
+    expect(dnsCards[2].text()).toContain("腾讯 + Google DoH");
+    expect(dnsCards[3].text()).toContain("自定义 DNS");
+
     // Verify inbound cards order: TUN first, Mixed second
-    const inboundCards = wrapper.findAll(".option-grid")[2].findAll(".option-card");
+    const inboundCards = wrapper
+      .findAll(".option-grid")[2]
+      .findAll(".option-card");
     expect(inboundCards[0].text()).toContain("TUN 虚拟网卡");
     expect(inboundCards[1].text()).toContain("混合端口");
 
@@ -384,7 +397,8 @@ describe("DashboardView - Mode Switch Confirmation", () => {
       if (url.includes("/api/service/status")) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ running: false, conflicting_processes: [] }),
+          json: () =>
+            Promise.resolve({ running: false, conflicting_processes: [] }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -431,7 +445,8 @@ describe("DashboardView - Mode Switch Confirmation", () => {
       if (url.includes("/api/service/status")) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ running: false, conflicting_processes: [] }),
+          json: () =>
+            Promise.resolve({ running: false, conflicting_processes: [] }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -445,5 +460,235 @@ describe("DashboardView - Mode Switch Confirmation", () => {
     expect(startBtn.text()).toContain("启动代理服务");
     expect(startBtn.attributes("disabled")).toBeUndefined();
     expect(startBtn.element.disabled).toBe(false);
+  });
+
+  it("shows 网站测速 shortcut button when proxy service is running", async () => {
+    const { default: DashboardView } = await import("./DashboardView.vue");
+    const { kernelInfo, serviceStatus } = await import("../store.js");
+
+    kernelInfo.value.is_installed = true;
+    kernelInfo.value.version = "sing-box version 1.13.19";
+    serviceStatus.value.running = true;
+    serviceStatus.value.ready = true;
+    serviceStatus.value.pid = 12345;
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/dashboard/stats")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ subs: 1, nodes: 5, groups: 2 }),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({ running: true, ready: true, pid: 12345 }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(DashboardView);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const siteTestBtn = wrapper
+      .findAll(".service-power-actions button")
+      .find((b) => b.text().includes("网站测速"));
+    expect(siteTestBtn).toBeDefined();
+    expect(siteTestBtn.exists()).toBe(true);
+
+    await siteTestBtn.trigger("click");
+    expect(wrapper.emitted("switch-view")).toBeTruthy();
+    expect(wrapper.emitted("switch-view")[0]).toEqual(["siteTest"]);
+  });
+});
+
+describe("SimpleConfigView Speed Test & Best Node Indicator", () => {
+  it("triggers node speed test and updates node latency displays", async () => {
+    const { default: SimpleConfigView } =
+      await import("./SimpleConfigView.vue");
+
+    let pingCalled = false;
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/nodes/ping")) {
+        pingCalled = true;
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: 1, tcp_latency: 45, web_latency: 68 },
+              { id: 2, tcp_latency: 110, web_latency: 135 },
+            ]),
+        });
+      }
+      if (url.includes("/api/nodes")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              { id: 1, tag: "HK-01", node_type: "vless", enabled: true },
+              { id: 2, tag: "JP-01", node_type: "shadowsocks", enabled: true },
+            ]),
+        });
+      }
+      if (url.includes("/api/simple-config")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              config: {
+                dns: { mode: "preset_fakeip", enable_ipv6: false },
+                inbound: { inbound_type: "tun", enable_ipv6: false },
+                route: { mode: "smart", default_outbound: "HK-01" },
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(SimpleConfigView);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const pingBtn = wrapper.find("button[title*='对可用节点进行并发延迟测速']");
+    expect(pingBtn.exists()).toBe(true);
+    expect(pingBtn.text()).toContain("节点测速");
+
+    await pingBtn.trigger("click");
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(pingCalled).toBe(true);
+    expect(wrapper.text()).toContain("68ms");
+  });
+});
+
+describe("SimpleConfigView Preview Modal with Foldable JSON Tree", () => {
+  it("renders feature switches and loads pure IPv4 configuration", async () => {
+    const { default: SimpleConfigView } =
+      await import("./SimpleConfigView.vue");
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/nodes")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
+      if (url.includes("/api/simple-config")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              config: {
+                dns: { mode: "preset_fakeip" },
+                inbound: { inbound_type: "tun" },
+                route: { mode: "smart", default_outbound: "AUTO-Test" },
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(SimpleConfigView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(wrapper.text()).toContain("广告与恶意追踪拦截");
+    expect(wrapper.text()).toContain("局域网私有地址直连");
+    const checkboxes = wrapper.findAll(".switches-row input[type='checkbox']");
+    expect(checkboxes.length).toBe(2);
+  });
+
+  it("opens preview modal with foldable JSON tree view and supports view switching", async () => {
+    const { default: SimpleConfigView } =
+      await import("./SimpleConfigView.vue");
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/nodes")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
+      if (url.includes("/api/simple-config/preview")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              log: { level: "info" },
+              dns: {
+                strategy: "ipv4_only",
+                servers: [
+                  { tag: "dns_local", type: "udp", server: "223.5.5.5" },
+                  {
+                    tag: "dns_fakeip",
+                    type: "fakeip",
+                    inet4_range: "198.18.0.0/15",
+                  },
+                ],
+              },
+              inbounds: [
+                { type: "tun", tag: "tun-in", address: ["172.19.0.1/30"] },
+              ],
+              outbounds: [
+                { type: "direct", tag: "direct" },
+                { type: "block", tag: "block" },
+              ],
+              route: { rules: [{ action: "sniff" }] },
+            }),
+        });
+      }
+      if (url.includes("/api/simple-config")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              config: {
+                dns: { mode: "preset_fakeip" },
+                inbound: { inbound_type: "tun" },
+                route: { mode: "smart", default_outbound: "AUTO-Test" },
+              },
+              generated: {
+                dns: { strategy: "ipv4_only" },
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(SimpleConfigView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Click "查看配置预览"
+    const previewBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("查看配置预览"));
+    expect(previewBtn).toBeDefined();
+    await previewBtn.trigger("click");
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Verify modal is visible
+    expect(wrapper.find(".modal.active").exists()).toBe(true);
+    expect(wrapper.text()).toContain("sing-box 配置预览");
+    expect(wrapper.text()).toContain("树状折叠");
+    expect(wrapper.text()).toContain("原始 JSON");
+    expect(wrapper.text()).toContain("全部展开");
+    expect(wrapper.text()).toContain("全部折叠");
+    expect(wrapper.text()).toContain("展开常用 (2级)");
+
+    // Verify JsonTreeView renders
+    expect(wrapper.findComponent({ name: "JsonTreeView" }).exists()).toBe(true);
+
+    // Switch to Raw JSON view
+    const rawBtn = wrapper
+      .findAll(".modal-card button")
+      .find((b) => b.text().includes("原始 JSON"));
+    expect(rawBtn).toBeDefined();
+    await rawBtn.trigger("click");
+    expect(wrapper.find("pre.log-console").exists()).toBe(true);
+
+    // Switch back to Tree View
+    const treeBtn = wrapper
+      .findAll(".modal-card button")
+      .find((b) => b.text().includes("树状折叠"));
+    expect(treeBtn).toBeDefined();
+    await treeBtn.trigger("click");
+    expect(wrapper.findComponent({ name: "JsonTreeView" }).exists()).toBe(true);
   });
 });

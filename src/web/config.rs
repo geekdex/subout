@@ -158,6 +158,10 @@ pub async fn save_base_config(
         generator::sanitize_outbounds_value(&mut content_to_save);
     } else if payload.section == "inbounds" {
         generator::sanitize_inbounds_value(&mut content_to_save);
+    } else if payload.section == "dns" {
+        generator::sanitize_dns_value(&mut content_to_save);
+    } else if payload.section == "route" {
+        generator::sanitize_route_value(&mut content_to_save);
     }
     let content_str = serde_json::to_string(&content_to_save)
         .map_err(|_| (StatusCode::BAD_REQUEST, "序列化失败".to_string()))?;
@@ -179,17 +183,21 @@ pub async fn save_full_config(
     let conn =
         get_db_conn(&state.db_path).map_err(|status| (status, "数据库连接失败".to_string()))?;
 
+    let mut sanitized_dns = payload.dns.clone();
+    generator::sanitize_dns_value(&mut sanitized_dns);
     let mut sanitized_inbounds = payload.inbounds.clone();
     generator::sanitize_inbounds_value(&mut sanitized_inbounds);
     let mut sanitized_outbounds = payload.outbounds.clone();
     generator::sanitize_outbounds_value(&mut sanitized_outbounds);
+    let mut sanitized_route = payload.route.clone();
+    generator::sanitize_route_value(&mut sanitized_route);
 
     if let Err(err_msg) = validate_config_with_singbox(
         &payload.log,
-        &payload.dns,
+        &sanitized_dns,
         &sanitized_inbounds,
         &sanitized_outbounds,
-        &payload.route,
+        &sanitized_route,
         &payload.experimental,
     ) {
         return Err((StatusCode::BAD_REQUEST, err_msg));
@@ -197,13 +205,13 @@ pub async fn save_full_config(
 
     let log_str = serde_json::to_string(&payload.log)
         .map_err(|_| (StatusCode::BAD_REQUEST, "log序列化失败".to_string()))?;
-    let dns_str = serde_json::to_string(&payload.dns)
+    let dns_str = serde_json::to_string(&sanitized_dns)
         .map_err(|_| (StatusCode::BAD_REQUEST, "dns序列化失败".to_string()))?;
     let inbounds_str = serde_json::to_string(&sanitized_inbounds)
         .map_err(|_| (StatusCode::BAD_REQUEST, "inbounds序列化失败".to_string()))?;
     let outbounds_str = serde_json::to_string(&sanitized_outbounds)
         .map_err(|_| (StatusCode::BAD_REQUEST, "outbounds序列化失败".to_string()))?;
-    let route_str = serde_json::to_string(&payload.route)
+    let route_str = serde_json::to_string(&sanitized_route)
         .map_err(|_| (StatusCode::BAD_REQUEST, "route序列化失败".to_string()))?;
     let experimental_str = serde_json::to_string(&payload.experimental).map_err(|_| {
         (
@@ -244,10 +252,10 @@ pub async fn save_full_config(
     if payload.save_history.unwrap_or(false) {
         let full_config = json!({
             "log": payload.log,
-            "dns": payload.dns,
-            "inbounds": payload.inbounds,
-            "outbounds": payload.outbounds,
-            "route": payload.route,
+            "dns": sanitized_dns,
+            "inbounds": sanitized_inbounds,
+            "outbounds": sanitized_outbounds,
+            "route": sanitized_route,
             "experimental": payload.experimental,
         });
         let full_config_str = serde_json::to_string(&full_config).unwrap_or_default();
@@ -977,10 +985,7 @@ pub async fn save_running_config(
     logs.push(ExecutionStepLog {
         step: "保存参数".to_string(),
         status: "info".to_string(),
-        message: format!(
-            "正在保存运行配置参数 (配置ID: {:?})...",
-            payload.config_id
-        ),
+        message: format!("正在保存运行配置参数 (配置ID: {:?})...", payload.config_id),
         timestamp: get_execution_timestamp(),
     });
 
@@ -1257,13 +1262,20 @@ pub async fn save_running_config(
         logs.push(ExecutionStepLog {
             step: "核心运行".to_string(),
             status: "info".to_string(),
-            message: format!("正在使用 sing-box 核心内核 ({}) 启动服务...", singbox_bin.display()),
+            message: format!(
+                "正在使用 sing-box 核心内核 ({}) 启动服务...",
+                singbox_bin.display()
+            ),
             timestamp: get_execution_timestamp(),
         });
 
         let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
 
-        match state.service_manager.restart_with_sudo(&generated, sudo_pass.as_deref()).await {
+        match state
+            .service_manager
+            .restart_with_sudo(&generated, sudo_pass.as_deref())
+            .await
+        {
             Ok(_) => {
                 logs.push(ExecutionStepLog {
                     step: "核心运行".to_string(),

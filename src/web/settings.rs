@@ -29,7 +29,8 @@ pub async fn get_settings(
     let os = platform.os_name().to_string();
     let is_linux = platform.is_linux();
     let is_macos = platform.is_macos();
-    let binary_path = crate::kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
+    let binary_path =
+        crate::kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
     let has_saved_sudo_pass = state.service_manager.has_saved_sudo_pass().await;
     Ok(Json(SettingsResponse {
         is_password_env_set,
@@ -340,7 +341,9 @@ pub async fn trigger_auto_update(
     let db_path_clone = state.db_path.clone();
     let service_mgr = state.service_manager.clone();
     tokio::spawn(async move {
-        if let Err(e) = auto_update::run_auto_update_process(&db_path_clone, Some(service_mgr)).await {
+        if let Err(e) =
+            auto_update::run_auto_update_process(&db_path_clone, Some(service_mgr)).await
+        {
             eprintln!("[AutoUpdate] Manually triggered update failed: {}", e);
         }
     });

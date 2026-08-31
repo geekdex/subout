@@ -85,7 +85,7 @@
 import { ref } from "vue";
 import { switchAppMode } from "../store.js";
 
-const props = defineProps({
+defineProps({
   show: {
     type: Boolean,
     default: false,
