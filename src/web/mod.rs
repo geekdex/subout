@@ -66,7 +66,9 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
     let state = AppState {
         db_path: db_path.clone(),
         session_token: Arc::new(RwLock::new(None)),
-        kernel_download_status: Arc::new(RwLock::new(crate::kernel::KernelDownloadStatus::default())),
+        kernel_download_status: Arc::new(RwLock::new(
+            crate::kernel::KernelDownloadStatus::default(),
+        )),
         kernel_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         service_manager,
     };
@@ -80,7 +82,12 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
     tokio::spawn(async move {
         println!("[AutoUpdate] Background checker task started.");
         // Check immediately on startup to catch up any missed tasks (e.g. due to system crash/shutdown)
-        if let Err(e) = crate::auto_update::check_and_run_auto_update(&db_path_clone, Some(service_mgr_clone.clone())).await {
+        if let Err(e) = crate::auto_update::check_and_run_auto_update(
+            &db_path_clone,
+            Some(service_mgr_clone.clone()),
+        )
+        .await
+        {
             eprintln!("[AutoUpdate] Background check error on startup: {}", e);
         }
         loop {
@@ -211,7 +218,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route("/api/service/start", post(service_api::start_service))
         .route("/api/service/stop", post(service_api::stop_service))
         .route("/api/service/restart", post(service_api::restart_service))
-        .route("/api/service/kill-external", post(service_api::kill_external_service))
+        .route(
+            "/api/service/kill-external",
+            post(service_api::kill_external_service),
+        )
         .route(
             "/api/service/logs",
             get(service_api::get_service_logs).delete(service_api::clear_service_logs),
@@ -298,7 +308,9 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
 
         #[cfg(unix)]
         let terminate = async {
-            if let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            if let Ok(mut sig) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            {
                 sig.recv().await;
             } else {
                 std::future::pending::<()>().await;

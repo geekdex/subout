@@ -217,7 +217,6 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import {
   kernelInfo,
   fetchKernelInfo,
-  serviceStatus,
   API_BASE,
   token,
   showToast,

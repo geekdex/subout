@@ -138,7 +138,8 @@ pub async fn get_system_mode(
 
     let is_initialized = crate::db::get_setting(&conn, "app_mode_initialized")
         .unwrap_or(None)
-        .unwrap_or_default() == "true";
+        .unwrap_or_default()
+        == "true";
 
     let platform = crate::platform::current_platform();
     let os = platform.os_name().to_string();
@@ -177,8 +178,7 @@ pub async fn set_system_mode(
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
-    let conn = get_db_conn(&state.db_path)
-        .map_err(|s| (s, "数据库连接失败".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
     let target_mode = if payload.app_mode == "expert" {
         "expert"
@@ -200,7 +200,10 @@ pub async fn set_system_mode(
     let inbounds = target_config.get("inbounds").cloned().unwrap_or_default();
     let outbounds = target_config.get("outbounds").cloned().unwrap_or_default();
     let route = target_config.get("route").cloned().unwrap_or_default();
-    let experimental = target_config.get("experimental").cloned().unwrap_or_default();
+    let experimental = target_config
+        .get("experimental")
+        .cloned()
+        .unwrap_or_default();
 
     if let Err(err_msg) = crate::web::config::validate_config_with_singbox(
         &log,
@@ -217,10 +220,18 @@ pub async fn set_system_mode(
     }
 
     // 3. Update database settings
-    crate::db::update_setting(&conn, "app_mode", target_mode)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("更新模式失败: {}", e)))?;
-    crate::db::update_setting(&conn, "app_mode_initialized", "true")
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("更新初始化状态失败: {}", e)))?;
+    crate::db::update_setting(&conn, "app_mode", target_mode).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("更新模式失败: {}", e),
+        )
+    })?;
+    crate::db::update_setting(&conn, "app_mode_initialized", "true").map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("更新初始化状态失败: {}", e),
+        )
+    })?;
 
     // 4. Handle service restart if requested or if service is currently running
     let is_running = state.service_manager.is_running().await;

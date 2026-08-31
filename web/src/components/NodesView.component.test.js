@@ -6,21 +6,26 @@ import { mount, flushPromises } from "@vue/test-utils";
 // Mock 依赖（vi.hoisted 保证 vi.mock 工厂可访问）
 // ============================================================
 
-const { mockToken, mockShowToast, mockConfirmDialog, mockValidateData, mockSystemModeInfo } =
-  vi.hoisted(() => {
-    const { ref } = require("vue");
-    return {
-      mockToken: ref("test-token"),
-      mockShowToast: vi.fn(),
-      mockConfirmDialog: vi.fn(() => Promise.resolve(true)),
-      mockValidateData: vi.fn(() => ({ valid: true, errors: null })),
-      mockSystemModeInfo: ref({
-        app_mode: "simple",
-        is_initialized: true,
-        kernel_installed: true,
-      }),
-    };
-  });
+const {
+  mockToken,
+  mockShowToast,
+  mockConfirmDialog,
+  mockValidateData,
+  mockSystemModeInfo,
+} = vi.hoisted(() => {
+  const { ref } = require("vue");
+  return {
+    mockToken: ref("test-token"),
+    mockShowToast: vi.fn(),
+    mockConfirmDialog: vi.fn(() => Promise.resolve(true)),
+    mockValidateData: vi.fn(() => ({ valid: true, errors: null })),
+    mockSystemModeInfo: ref({
+      app_mode: "simple",
+      is_initialized: true,
+      kernel_installed: true,
+    }),
+  };
+});
 
 vi.mock("../store.js", () => ({
   API_BASE: "",

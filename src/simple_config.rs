@@ -110,8 +110,7 @@ pub fn build_dns_server(tag: &str, address_str: &str, detour: Option<&str>) -> V
         return json!({
             "tag": tag,
             "type": "fakeip",
-            "inet4_range": "198.18.0.0/15",
-            "inet6_range": "fc00::/18"
+            "inet4_range": "198.18.0.0/15"
         });
     }
     if s == "local" {
@@ -361,11 +360,12 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         _ => {}
     }
 
+    // Simple Mode is strictly IPv4-only to avoid any dual-stack IPv6 DNS/routing leaks or blackholes
     let dns_val = json!({
         "servers": dns_servers,
         "rules": dns_rules,
         "final": "dns_local",
-        "strategy": "prefer_ipv4",
+        "strategy": "ipv4_only",
         "independent_cache": true
     });
 
@@ -379,7 +379,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             let mut tun_obj = json!({
                 "type": "tun",
                 "tag": "tun-in",
-                "address": ["172.19.0.1/30", "fd00::1/126"],
+                "address": ["172.19.0.1/30"],
                 "auto_route": cfg.inbound.tun_auto_route,
                 "strict_route": strict_route,
                 "stack": effective_stack
@@ -520,6 +520,12 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }
     }
 
+    let download_detour_remote = if has_nodes && target_proxy != "direct" {
+        "proxy"
+    } else {
+        "direct"
+    };
+
     let mut rule_sets = vec![
         json!({
             "tag": "geosite-cn",
@@ -534,7 +540,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "type": "remote",
             "format": "binary",
             "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-geolocation-!cn.srs",
-            "download_detour": "direct",
+            "download_detour": download_detour_remote,
             "update_interval": "1d"
         }),
         json!({
@@ -553,7 +559,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "type": "remote",
             "format": "binary",
             "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
-            "download_detour": "direct",
+            "download_detour": download_detour_remote,
             "update_interval": "1d"
         }));
     }
@@ -590,10 +596,11 @@ mod tests {
         // "direct" detour should be omitted to avoid sing-box "detour to empty direct outbound" error
         assert!(local_udp.get("detour").is_none());
 
+        // FakeIP produces pure IPv4 range
         let fakeip = build_dns_server("dns_fakeip", "fakeip", None);
         assert_eq!(fakeip["type"], "fakeip");
         assert_eq!(fakeip["inet4_range"], "198.18.0.0/15");
-        assert_eq!(fakeip["inet6_range"], "fc00::/18");
+        assert!(fakeip.get("inet6_range").is_none());
 
         let remote_doh = build_dns_server("dns_remote", "https://1.1.1.1/dns-query", Some("proxy"));
         assert_eq!(remote_doh["type"], "https");
@@ -616,6 +623,7 @@ mod tests {
         let conn = crate::db::init_db(":memory:").unwrap();
         let cfg = SimpleConfig::default();
         assert_eq!(cfg.dns.mode, "preset_fakeip");
+
         let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
 
         assert!(generated_cfg.get("log").is_some());
@@ -624,16 +632,59 @@ mod tests {
         assert!(generated_cfg.get("outbounds").is_some());
         assert!(generated_cfg.get("route").is_some());
 
+        // Strategy must be ipv4_only for robust, reliable operation without dual-stack leaks
+        assert_eq!(
+            generated_cfg
+                .get("dns")
+                .unwrap()
+                .get("strategy")
+                .unwrap()
+                .as_str(),
+            Some("ipv4_only")
+        );
+
+        // TUN address must only contain IPv4 address
+        let inbounds = generated_cfg.get("inbounds").unwrap().as_array().unwrap();
+        let tun_addr = inbounds[0].get("address").unwrap().as_array().unwrap();
+        assert_eq!(tun_addr.len(), 1);
+        assert_eq!(tun_addr[0].as_str(), Some("172.19.0.1/30"));
+
         // Check DNS servers in default preset_fakeip mode
-        let dns_servers = generated_cfg.get("dns").unwrap().get("servers").unwrap().as_array().unwrap();
-        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_local")));
-        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_fakeip")));
+        let dns_servers = generated_cfg
+            .get("dns")
+            .unwrap()
+            .get("servers")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(
+            dns_servers
+                .iter()
+                .any(|s| s.get("tag").unwrap().as_str() == Some("dns_local"))
+        );
+        let fakeip_srv = dns_servers
+            .iter()
+            .find(|s| s.get("tag").unwrap().as_str() == Some("dns_fakeip"))
+            .unwrap();
+        assert!(fakeip_srv.get("inet6_range").is_none());
 
         // Check Outbounds when no nodes are in DB (clean direct mode, no AUTO-Test probing)
         let outbounds = generated_cfg.get("outbounds").unwrap().as_array().unwrap();
-        assert!(outbounds.iter().any(|o| o.get("tag").unwrap().as_str() == Some("proxy")));
-        assert!(outbounds.iter().any(|o| o.get("tag").unwrap().as_str() == Some("direct")));
-        assert!(!outbounds.iter().any(|o| o.get("tag").unwrap().as_str() == Some("AUTO-Test")));
+        assert!(
+            outbounds
+                .iter()
+                .any(|o| o.get("tag").unwrap().as_str() == Some("proxy"))
+        );
+        assert!(
+            outbounds
+                .iter()
+                .any(|o| o.get("tag").unwrap().as_str() == Some("direct"))
+        );
+        assert!(
+            !outbounds
+                .iter()
+                .any(|o| o.get("tag").unwrap().as_str() == Some("AUTO-Test"))
+        );
 
         // Now add a proxy node to DB and verify AUTO-Test is properly created and dns_fakeip is used
         crate::db::save_node(
@@ -649,21 +700,74 @@ mod tests {
                 "server": "1.2.3.4",
                 "server_port": 443,
                 "uuid": "00000000-0000-0000-0000-000000000000"
-            }).to_string(),
+            })
+            .to_string(),
             true,
             true,
-        ).unwrap();
+        )
+        .unwrap();
 
         let generated_with_nodes = generate_simple_singbox_config(&conn, &cfg).unwrap();
-        let outbounds_with_nodes = generated_with_nodes.get("outbounds").unwrap().as_array().unwrap();
-        assert!(outbounds_with_nodes.iter().any(|o| o.get("tag").unwrap().as_str() == Some("AUTO-Test")));
-        assert!(outbounds_with_nodes.iter().any(|o| o.get("tag").unwrap().as_str() == Some("HK-Node-01")));
+        let outbounds_with_nodes = generated_with_nodes
+            .get("outbounds")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(
+            outbounds_with_nodes
+                .iter()
+                .any(|o| o.get("tag").unwrap().as_str() == Some("AUTO-Test"))
+        );
+        assert!(
+            outbounds_with_nodes
+                .iter()
+                .any(|o| o.get("tag").unwrap().as_str() == Some("HK-Node-01"))
+        );
 
         // Check DNS rules route foreign domains to dns_fakeip
-        let dns_rules = generated_with_nodes.get("dns").unwrap().get("rules").unwrap().as_array().unwrap();
-        let foreign_dns_rule = dns_rules.iter().find(|r| r.get("rule_set").and_then(|rs| rs.as_str()) == Some("geosite-geolocation-!cn"));
+        let dns_rules = generated_with_nodes
+            .get("dns")
+            .unwrap()
+            .get("rules")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let foreign_dns_rule = dns_rules.iter().find(|r| {
+            r.get("rule_set").and_then(|rs| rs.as_str()) == Some("geosite-geolocation-!cn")
+        });
         assert!(foreign_dns_rule.is_some());
-        assert_eq!(foreign_dns_rule.unwrap().get("server").and_then(|s| s.as_str()), Some("dns_fakeip"));
+        assert_eq!(
+            foreign_dns_rule
+                .unwrap()
+                .get("server")
+                .and_then(|s| s.as_str()),
+            Some("dns_fakeip")
+        );
+
+        // Check foreign rule_set download_detour routes via proxy when proxy is available
+        let rule_sets = generated_with_nodes
+            .get("route")
+            .unwrap()
+            .get("rule_set")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let foreign_rs = rule_sets
+            .iter()
+            .find(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geosite-geolocation-!cn"))
+            .unwrap();
+        assert_eq!(
+            foreign_rs.get("download_detour").and_then(|d| d.as_str()),
+            Some("proxy")
+        );
+        let cn_rs = rule_sets
+            .iter()
+            .find(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geosite-cn"))
+            .unwrap();
+        assert_eq!(
+            cn_rs.get("download_detour").and_then(|d| d.as_str()),
+            Some("direct")
+        );
     }
 
     #[test]
@@ -682,10 +786,12 @@ mod tests {
                 "server": "1.2.3.4",
                 "server_port": 443,
                 "uuid": "00000000-0000-0000-0000-000000000000"
-            }).to_string(),
+            })
+            .to_string(),
             true,
             true,
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut cfg = SimpleConfig::default();
         cfg.dns.mode = "preset_domestic_foreign".to_string();
@@ -693,13 +799,41 @@ mod tests {
         cfg.dns.foreign_dns = "https://1.1.1.1/dns-query".to_string();
 
         let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
-        let dns_servers = generated_cfg.get("dns").unwrap().get("servers").unwrap().as_array().unwrap();
-        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_local")));
-        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_remote")));
+        let dns_servers = generated_cfg
+            .get("dns")
+            .unwrap()
+            .get("servers")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(
+            dns_servers
+                .iter()
+                .any(|s| s.get("tag").unwrap().as_str() == Some("dns_local"))
+        );
+        assert!(
+            dns_servers
+                .iter()
+                .any(|s| s.get("tag").unwrap().as_str() == Some("dns_remote"))
+        );
 
-        let dns_rules = generated_cfg.get("dns").unwrap().get("rules").unwrap().as_array().unwrap();
-        let foreign_dns_rule = dns_rules.iter().find(|r| r.get("rule_set").and_then(|rs| rs.as_str()) == Some("geosite-geolocation-!cn"));
-        assert_eq!(foreign_dns_rule.unwrap().get("server").and_then(|s| s.as_str()), Some("dns_remote"));
+        let dns_rules = generated_cfg
+            .get("dns")
+            .unwrap()
+            .get("rules")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let foreign_dns_rule = dns_rules.iter().find(|r| {
+            r.get("rule_set").and_then(|rs| rs.as_str()) == Some("geosite-geolocation-!cn")
+        });
+        assert_eq!(
+            foreign_dns_rule
+                .unwrap()
+                .get("server")
+                .and_then(|s| s.as_str()),
+            Some("dns_remote")
+        );
     }
 
     #[test]
@@ -713,13 +847,25 @@ mod tests {
         let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
         let inbounds = generated_cfg.get("inbounds").unwrap().as_array().unwrap();
         assert_eq!(inbounds[0].get("type").unwrap().as_str(), Some("tun"));
+        assert_eq!(
+            inbounds[0]
+                .get("address")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
 
         // Test mixed mode fallback/customization
         let mut mixed_cfg = SimpleConfig::default();
         mixed_cfg.inbound.inbound_type = "mixed".to_string();
         let generated_mixed = generate_simple_singbox_config(&conn, &mixed_cfg).unwrap();
         let mixed_inbounds = generated_mixed.get("inbounds").unwrap().as_array().unwrap();
-        assert_eq!(mixed_inbounds[0].get("type").unwrap().as_str(), Some("mixed"));
+        assert_eq!(
+            mixed_inbounds[0].get("type").unwrap().as_str(),
+            Some("mixed")
+        );
     }
 
     #[test]
@@ -733,7 +879,10 @@ mod tests {
         let inbounds = generated_cfg.get("inbounds").cloned().unwrap_or(json!([]));
         let outbounds = generated_cfg.get("outbounds").cloned().unwrap_or(json!([]));
         let route = generated_cfg.get("route").cloned().unwrap_or(json!({}));
-        let experimental = generated_cfg.get("experimental").cloned().unwrap_or(json!({}));
+        let experimental = generated_cfg
+            .get("experimental")
+            .cloned()
+            .unwrap_or(json!({}));
 
         let res = crate::web::config::validate_config_with_singbox(
             &log,

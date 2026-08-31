@@ -985,10 +985,7 @@ pub async fn save_running_config(
     logs.push(ExecutionStepLog {
         step: "保存参数".to_string(),
         status: "info".to_string(),
-        message: format!(
-            "正在保存运行配置参数 (配置ID: {:?})...",
-            payload.config_id
-        ),
+        message: format!("正在保存运行配置参数 (配置ID: {:?})...", payload.config_id),
         timestamp: get_execution_timestamp(),
     });
 
@@ -1265,13 +1262,20 @@ pub async fn save_running_config(
         logs.push(ExecutionStepLog {
             step: "核心运行".to_string(),
             status: "info".to_string(),
-            message: format!("正在使用 sing-box 核心内核 ({}) 启动服务...", singbox_bin.display()),
+            message: format!(
+                "正在使用 sing-box 核心内核 ({}) 启动服务...",
+                singbox_bin.display()
+            ),
             timestamp: get_execution_timestamp(),
         });
 
         let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
 
-        match state.service_manager.restart_with_sudo(&generated, sudo_pass.as_deref()).await {
+        match state
+            .service_manager
+            .restart_with_sudo(&generated, sudo_pass.as_deref())
+            .await
+        {
             Ok(_) => {
                 logs.push(ExecutionStepLog {
                     step: "核心运行".to_string(),

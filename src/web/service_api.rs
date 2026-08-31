@@ -48,7 +48,12 @@ pub async fn kill_external_service(
         .service_manager
         .kill_external_process(payload.pid, sudo_pass.as_deref())
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("终止外部进程失败: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("终止外部进程失败: {}", e),
+            )
+        })?;
 
     Ok(Json(serde_json::json!({
         "status": "success",
@@ -65,8 +70,7 @@ pub async fn start_service(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    let conn = get_db_conn(&state.db_path)
-        .map_err(|s| (s, "数据库连接失败".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
     let (config_val, custom_sudo_pass) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
@@ -90,7 +94,10 @@ pub async fn start_service(
             if err_str.contains("外部 sing-box 进程正在运行") {
                 (StatusCode::CONFLICT, format!("启动服务失败: {}", err_str))
             } else {
-                (StatusCode::BAD_REQUEST, format!("启动服务失败: {}", err_str))
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("启动服务失败: {}", err_str),
+                )
             }
         })?;
 
@@ -108,11 +115,12 @@ pub async fn stop_service(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    state
-        .service_manager
-        .stop()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("停止服务失败: {}", e)))?;
+    state.service_manager.stop().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("停止服务失败: {}", e),
+        )
+    })?;
 
     Ok(Json(serde_json::json!({
         "status": "success",
@@ -129,8 +137,7 @@ pub async fn restart_service(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    let conn = get_db_conn(&state.db_path)
-        .map_err(|s| (s, "数据库连接失败".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
     let (config_val, custom_sudo_pass) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
@@ -149,7 +156,12 @@ pub async fn restart_service(
         .service_manager
         .restart_with_sudo(&config_val, sudo_pass.as_deref())
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("重启服务失败: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("重启服务失败: {}", e),
+            )
+        })?;
 
     Ok(Json(serde_json::json!({
         "status": "success",
@@ -175,11 +187,18 @@ pub async fn clear_service_logs(
     Ok(StatusCode::OK)
 }
 
-pub fn get_config_for_mode(conn: &rusqlite::Connection, mode: &str) -> Result<Value, (StatusCode, String)> {
+pub fn get_config_for_mode(
+    conn: &rusqlite::Connection,
+    mode: &str,
+) -> Result<Value, (StatusCode, String)> {
     if mode == "simple" {
         let simple_cfg = simple_config::get_saved_simple_config(conn);
-        simple_config::generate_simple_singbox_config(conn, &simple_cfg)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("生成简单配置失败: {}", e)))
+        simple_config::generate_simple_singbox_config(conn, &simple_cfg).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("生成简单配置失败: {}", e),
+            )
+        })
     } else {
         // In expert mode, check if running_config_id is set
         let running_id_str = db::get_setting(conn, "running_config_id")
@@ -193,22 +212,45 @@ pub fn get_config_for_mode(conn: &rusqlite::Connection, mode: &str) -> Result<Va
                         let log = c.get("log").cloned().unwrap_or(serde_json::json!({}));
                         let dns = c.get("dns").cloned().unwrap_or(serde_json::json!({}));
                         let inbounds = c.get("inbounds").cloned().unwrap_or(serde_json::json!([]));
-                        let outbounds = c.get("outbounds").cloned().unwrap_or(serde_json::json!([]));
+                        let outbounds =
+                            c.get("outbounds").cloned().unwrap_or(serde_json::json!([]));
                         let route = c.get("route").cloned().unwrap_or(serde_json::json!({}));
-                        let experimental = c.get("experimental").cloned().unwrap_or(serde_json::json!({}));
-                        return generator::generate_config_with_base(conn, log, dns, inbounds, outbounds, route, experimental)
-                            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("生成配置失败: {}", e)));
+                        let experimental = c
+                            .get("experimental")
+                            .cloned()
+                            .unwrap_or(serde_json::json!({}));
+                        return generator::generate_config_with_base(
+                            conn,
+                            log,
+                            dns,
+                            inbounds,
+                            outbounds,
+                            route,
+                            experimental,
+                        )
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("生成配置失败: {}", e),
+                            )
+                        });
                     }
                 }
             }
         }
 
-        generator::generate_config(conn)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("生成配置失败: {}", e)))
+        generator::generate_config(conn).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("生成配置失败: {}", e),
+            )
+        })
     }
 }
 
-pub fn get_active_config_for_mode(conn: &rusqlite::Connection) -> Result<Value, (StatusCode, String)> {
+pub fn get_active_config_for_mode(
+    conn: &rusqlite::Connection,
+) -> Result<Value, (StatusCode, String)> {
     let mode = db::get_setting(conn, "app_mode")
         .unwrap_or(None)
         .unwrap_or_else(|| "simple".to_string());

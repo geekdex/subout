@@ -742,8 +742,16 @@
                                       min-width: 60px;
                                       padding: 0.15rem 0.3rem;
                                     "
-                                    :disabled="isApplePlatform || isWindowsPlatform"
-                                    :placeholder="isApplePlatform ? '系统自动分配 (utun)' : (isWindowsPlatform ? '系统自动分配 (wintun)' : '网卡名 (tun0)')"
+                                    :disabled="
+                                      isApplePlatform || isWindowsPlatform
+                                    "
+                                    :placeholder="
+                                      isApplePlatform
+                                        ? '系统自动分配 (utun)'
+                                        : isWindowsPlatform
+                                          ? '系统自动分配 (wintun)'
+                                          : '网卡名 (tun0)'
+                                    "
                                   />
                                   <select
                                     v-model="inb.stack"
@@ -2398,13 +2406,35 @@
                       type="text"
                       class="input-control"
                       :disabled="isApplePlatform || isWindowsPlatform"
-                      :placeholder="isApplePlatform ? '系统自动分配 (utun)' : (isWindowsPlatform ? '系统自动分配 (wintun)' : 'tun0')"
+                      :placeholder="
+                        isApplePlatform
+                          ? '系统自动分配 (utun)'
+                          : isWindowsPlatform
+                            ? '系统自动分配 (wintun)'
+                            : 'tun0'
+                      "
                     />
-                    <small v-if="isApplePlatform" style="color: var(--text-muted); margin-top: 4px; display: block;">
-                      📌 macOS 虚拟网卡由系统内核自动挂载命名为 utun，固定为系统自动分配。
+                    <small
+                      v-if="isApplePlatform"
+                      style="
+                        color: var(--text-muted);
+                        margin-top: 4px;
+                        display: block;
+                      "
+                    >
+                      📌 macOS 虚拟网卡由系统内核自动挂载命名为
+                      utun，固定为系统自动分配。
                     </small>
-                    <small v-else-if="isWindowsPlatform" style="color: var(--text-muted); margin-top: 4px; display: block;">
-                      📌 Windows Wintun 虚拟网卡由系统内核自动挂载命名，固定为系统自动分配。
+                    <small
+                      v-else-if="isWindowsPlatform"
+                      style="
+                        color: var(--text-muted);
+                        margin-top: 4px;
+                        display: block;
+                      "
+                    >
+                      📌 Windows Wintun
+                      虚拟网卡由系统内核自动挂载命名，固定为系统自动分配。
                     </small>
                   </div>
                   <div class="input-group">
@@ -5380,9 +5410,7 @@ const isLinux = computed(() => systemOs.value === "linux");
 const isApplePlatform = computed(
   () => systemOs.value === "macos" || systemOs.value === "darwin",
 );
-const isWindowsPlatform = computed(
-  () => systemOs.value === "windows",
-);
+const isWindowsPlatform = computed(() => systemOs.value === "windows");
 
 const browserPresets = computed(() => {
   const isWin = isWindowsPlatform.value;

@@ -333,7 +333,10 @@ pub async fn run_auto_update_process(
         }
         let new_config_str = serde_json::to_string_pretty(&final_config)?;
         std::fs::write(&running_config_path, &new_config_str)?;
-        update_log(&format!("  -> 配置文件已成功保存至 {:?}", running_config_path));
+        update_log(&format!(
+            "  -> 配置文件已成功保存至 {:?}",
+            running_config_path
+        ));
 
         // Save history config and update active config id
         let new_history_desc = format!(
@@ -451,8 +454,19 @@ pub fn build_updated_outbounds(
     deleted_tags: &[String],
 ) -> Result<Vec<Value>> {
     let proxy_types = [
-        "vmess", "vless", "trojan", "shadowsocks", "socks", "http",
-        "hysteria", "hysteria2", "anytls", "tuic", "wireguard", "shadowtls", "v2ray",
+        "vmess",
+        "vless",
+        "trojan",
+        "shadowsocks",
+        "socks",
+        "http",
+        "hysteria",
+        "hysteria2",
+        "anytls",
+        "tuic",
+        "wireguard",
+        "shadowtls",
+        "v2ray",
     ];
 
     let deleted_set: HashSet<&str> = deleted_tags.iter().map(|s| s.as_str()).collect();
@@ -549,19 +563,29 @@ pub fn build_updated_outbounds(
                 });
                 if db_g.group_type == "urltest" {
                     if let Some(ref u) = db_g.url {
-                        g_val.as_object_mut().unwrap().insert("url".to_string(), json!(u));
+                        g_val
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("url".to_string(), json!(u));
                     }
                     if let Some(ref iv) = db_g.interval {
-                        g_val.as_object_mut().unwrap().insert("interval".to_string(), json!(iv));
+                        g_val
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("interval".to_string(), json!(iv));
                     }
                     if let Some(tol) = db_g.tolerance {
-                        g_val.as_object_mut().unwrap().insert("tolerance".to_string(), json!(tol));
+                        g_val
+                            .as_object_mut()
+                            .unwrap()
+                            .insert("tolerance".to_string(), json!(tol));
                     }
                 }
                 final_groups.push(g_val);
             } else {
                 let mut g_val = t_group.clone();
-                if let Some(member_arr) = g_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+                if let Some(member_arr) = g_val.get_mut("outbounds").and_then(|o| o.as_array_mut())
+                {
                     member_arr.retain(|m| {
                         let m_str = m.as_str().unwrap_or_default();
                         !deleted_set.contains(m_str)
@@ -586,13 +610,22 @@ pub fn build_updated_outbounds(
             });
             if group.group_type == "urltest" {
                 if let Some(ref u) = group.url {
-                    g_val.as_object_mut().unwrap().insert("url".to_string(), json!(u));
+                    g_val
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("url".to_string(), json!(u));
                 }
                 if let Some(ref iv) = group.interval {
-                    g_val.as_object_mut().unwrap().insert("interval".to_string(), json!(iv));
+                    g_val
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("interval".to_string(), json!(iv));
                 }
                 if let Some(tol) = group.tolerance {
-                    g_val.as_object_mut().unwrap().insert("tolerance".to_string(), json!(tol));
+                    g_val
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("tolerance".to_string(), json!(tol));
                 }
             }
             final_groups.push(g_val);
@@ -653,7 +686,9 @@ mod tests {
         let conn = crate::db::init_db(":memory:").unwrap();
 
         // Add a subscription and node
-        let sub_id = crate::db::add_subscription(&conn, "http://example.com/sub", "sub1", "[]", true).unwrap();
+        let sub_id =
+            crate::db::add_subscription(&conn, "http://example.com/sub", "sub1", "[]", true)
+                .unwrap();
         crate::db::save_node(
             &conn,
             Some(sub_id),
@@ -704,18 +739,27 @@ mod tests {
         // Groups
         let group_tags: Vec<&str> = outbounds
             .iter()
-            .filter(|o| matches!(o.get("type").and_then(|t| t.as_str()), Some("selector") | Some("urltest")))
+            .filter(|o| {
+                matches!(
+                    o.get("type").and_then(|t| t.as_str()),
+                    Some("selector") | Some("urltest")
+                )
+            })
             .map(|o| o.get("tag").unwrap().as_str().unwrap())
             .collect();
         assert!(group_tags.contains(&"proxy"));
         assert!(group_tags.contains(&"HK-Group"));
 
         // Custom node from template is preserved
-        let has_custom = outbounds.iter().any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("us_custom"));
+        let has_custom = outbounds
+            .iter()
+            .any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("us_custom"));
         assert!(has_custom, "Custom node in template should be preserved");
 
         // Subscription node hk-01 is present
-        let has_hk = outbounds.iter().any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("hk-01"));
+        let has_hk = outbounds
+            .iter()
+            .any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("hk-01"));
         assert!(has_hk, "Referenced subscription node should be present");
     }
 
@@ -748,7 +792,10 @@ mod tests {
         let deleted_tags = vec!["dead-node".to_string()];
         let outbounds = build_updated_outbounds(&conn, &template_config, &deleted_tags).unwrap();
 
-        let auto_group = outbounds.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("Auto-Group")).unwrap();
+        let auto_group = outbounds
+            .iter()
+            .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("Auto-Group"))
+            .unwrap();
         let member_outbounds = auto_group.get("outbounds").unwrap().as_array().unwrap();
         assert_eq!(member_outbounds.len(), 1);
         assert_eq!(member_outbounds[0].as_str(), Some("direct"));

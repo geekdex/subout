@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 #[cfg(unix)]
 use anyhow::anyhow;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 use crate::platform::{BoxFuture, PlatformStrategy};
 use crate::service::ConflictingProcessInfo;
@@ -232,101 +232,101 @@ impl PlatformStrategy for LinuxPlatform {
             }
 
             // 2. Linux /proc inspection
-        if let Ok(entries) = std::fs::read_dir("/proc") {
-            for entry in entries.flatten() {
-                let file_name = entry.file_name();
-                let pid_str = file_name.to_string_lossy();
-                if let Ok(pid) = pid_str.parse::<u32>() {
-                    if pid == current_pid
-                        || Some(pid) == managed_pid
-                        || pid == 0
-                        || pid == 1
-                        || seen_pids.contains(&pid)
-                    {
-                        continue;
-                    }
+            if let Ok(entries) = std::fs::read_dir("/proc") {
+                for entry in entries.flatten() {
+                    let file_name = entry.file_name();
+                    let pid_str = file_name.to_string_lossy();
+                    if let Ok(pid) = pid_str.parse::<u32>() {
+                        if pid == current_pid
+                            || Some(pid) == managed_pid
+                            || pid == 0
+                            || pid == 1
+                            || seen_pids.contains(&pid)
+                        {
+                            continue;
+                        }
 
-                    let proc_path = entry.path();
-                    let stat_path = proc_path.join("stat");
-                    if let Ok(stat_str) = std::fs::read_to_string(&stat_path) {
-                        if let Some(rparen) = stat_str.rfind(')') {
-                            let after = stat_str[rparen + 1..].trim_start();
-                            let stat_parts: Vec<&str> = after.split_whitespace().collect();
-                            if stat_parts.len() >= 2 {
-                                if let Ok(ppid) = stat_parts[1].parse::<u32>() {
-                                    if ppid == current_pid
-                                        || (managed_pid.is_some() && Some(ppid) == managed_pid)
-                                    {
-                                        continue;
+                        let proc_path = entry.path();
+                        let stat_path = proc_path.join("stat");
+                        if let Ok(stat_str) = std::fs::read_to_string(&stat_path) {
+                            if let Some(rparen) = stat_str.rfind(')') {
+                                let after = stat_str[rparen + 1..].trim_start();
+                                let stat_parts: Vec<&str> = after.split_whitespace().collect();
+                                if stat_parts.len() >= 2 {
+                                    if let Ok(ppid) = stat_parts[1].parse::<u32>() {
+                                        if ppid == current_pid
+                                            || (managed_pid.is_some() && Some(ppid) == managed_pid)
+                                        {
+                                            continue;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    let comm_path = proc_path.join("comm");
-                    let cmdline_path = proc_path.join("cmdline");
-                    let exe_path = std::fs::read_link(proc_path.join("exe"))
-                        .ok()
-                        .map(|p| p.to_string_lossy().to_string());
+                        let comm_path = proc_path.join("comm");
+                        let cmdline_path = proc_path.join("cmdline");
+                        let exe_path = std::fs::read_link(proc_path.join("exe"))
+                            .ok()
+                            .map(|p| p.to_string_lossy().to_string());
 
-                    let comm = std::fs::read_to_string(&comm_path)
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string();
+                        let comm = std::fs::read_to_string(&comm_path)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
 
-                    let cmdline = std::fs::read(&cmdline_path).ok().map(|bytes| {
-                        bytes
-                            .split(|&b| b == 0)
-                            .filter(|slice| !slice.is_empty())
-                            .map(|slice| String::from_utf8_lossy(slice).to_string())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    });
-
-                    let is_subout = comm == "subout"
-                        || comm.contains("subout")
-                        || cmdline
-                            .as_deref()
-                            .map(|c| {
-                                c.contains("subout")
-                                    || c.contains(&config_path_str)
-                                    || c.contains("sing-box-running.json")
-                            })
-                            .unwrap_or(false);
-
-                    if is_subout {
-                        continue;
-                    }
-
-                    let is_singbox = comm == "sing-box"
-                        || exe_path
-                            .as_deref()
-                            .map(|p| p.ends_with("/sing-box"))
-                            .unwrap_or(false)
-                        || cmdline
-                            .as_deref()
-                            .map(|c| {
-                                c.starts_with("sing-box ")
-                                    || c.contains("/sing-box ")
-                                    || c.contains("sing-box run")
-                                    || c == "sing-box"
-                            })
-                            .unwrap_or(false);
-
-                    if is_singbox && seen_pids.insert(pid) {
-                        results.push(ConflictingProcessInfo {
-                            pid,
-                            name: comm,
-                            cmdline,
-                            exe_path,
+                        let cmdline = std::fs::read(&cmdline_path).ok().map(|bytes| {
+                            bytes
+                                .split(|&b| b == 0)
+                                .filter(|slice| !slice.is_empty())
+                                .map(|slice| String::from_utf8_lossy(slice).to_string())
+                                .collect::<Vec<_>>()
+                                .join(" ")
                         });
+
+                        let is_subout = comm == "subout"
+                            || comm.contains("subout")
+                            || cmdline
+                                .as_deref()
+                                .map(|c| {
+                                    c.contains("subout")
+                                        || c.contains(&config_path_str)
+                                        || c.contains("sing-box-running.json")
+                                })
+                                .unwrap_or(false);
+
+                        if is_subout {
+                            continue;
+                        }
+
+                        let is_singbox = comm == "sing-box"
+                            || exe_path
+                                .as_deref()
+                                .map(|p| p.ends_with("/sing-box"))
+                                .unwrap_or(false)
+                            || cmdline
+                                .as_deref()
+                                .map(|c| {
+                                    c.starts_with("sing-box ")
+                                        || c.contains("/sing-box ")
+                                        || c.contains("sing-box run")
+                                        || c == "sing-box"
+                                })
+                                .unwrap_or(false);
+
+                        if is_singbox && seen_pids.insert(pid) {
+                            results.push(ConflictingProcessInfo {
+                                pid,
+                                name: comm,
+                                cmdline,
+                                exe_path,
+                            });
+                        }
                     }
                 }
             }
-        }
 
-        // 3. Systemd inspection
+            // 3. Systemd inspection
             if let Ok(output) = std::process::Command::new("systemctl")
                 .args(["show", "sing-box", "-p", "MainPID", "-p", "ActiveState"])
                 .output()
@@ -339,12 +339,14 @@ impl PlatformStrategy for LinuxPlatform {
                         if line.starts_with("ActiveState=active") {
                             is_active = true;
                         } else if line.starts_with("MainPID=") {
-                            if let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>() {
+                            if let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>()
+                            {
                                 s_pid = p;
                             }
                         }
                     }
-                    if is_active && s_pid > 1 && s_pid != current_pid && Some(s_pid) != managed_pid {
+                    if is_active && s_pid > 1 && s_pid != current_pid && Some(s_pid) != managed_pid
+                    {
                         if seen_pids.insert(s_pid) {
                             results.push(ConflictingProcessInfo {
                                 pid: s_pid,
@@ -585,12 +587,17 @@ impl PlatformStrategy for LinuxPlatform {
                     obj.insert("strict_route".to_string(), serde_json::json!(false));
                 }
                 if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr.iter().any(|a| a.as_str().map_or(false, |s| s.contains(':')));
+                    let has_ipv6 = addr_arr
+                        .iter()
+                        .any(|a| a.as_str().map_or(false, |s| s.contains(':')));
                     if !has_ipv6 {
                         addr_arr.push(serde_json::json!("fd00::1/126"));
                     }
                 } else if !obj.contains_key("address") {
-                    obj.insert("address".to_string(), serde_json::json!(["172.19.0.1/30", "fd00::1/126"]));
+                    obj.insert(
+                        "address".to_string(),
+                        serde_json::json!(["172.19.0.1/30", "fd00::1/126"]),
+                    );
                 }
             }
         }
@@ -644,10 +651,7 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(cmd_name)
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output() {
             if output.status.success() {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 for line in out_str.lines() {

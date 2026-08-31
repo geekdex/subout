@@ -44,12 +44,16 @@ pub async fn download_kernel(
         }
     }
 
-    state.kernel_download_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+    state
+        .kernel_download_cancel
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let status_lock_clone = state.kernel_download_status.clone();
     let cancel_flag_clone = state.kernel_download_cancel.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = kernel::download_and_install_kernel(status_lock_clone, cancel_flag_clone).await {
+        if let Err(e) =
+            kernel::download_and_install_kernel(status_lock_clone, cancel_flag_clone).await
+        {
             eprintln!("[Kernel] Download and install task ended: {}", e);
         }
     });
@@ -68,7 +72,9 @@ pub async fn cancel_download(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    state.kernel_download_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    state
+        .kernel_download_cancel
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     {
         let mut st = state.kernel_download_status.write().await;
         st.status = "idle".to_string();

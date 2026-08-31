@@ -76,28 +76,36 @@ fn parse_args() -> Result<CliArgs, String> {
                 if let Some(d) = args_iter.next() {
                     data_dir = Some(d);
                 } else {
-                    return Err("Error: Parameter '--data-dir' requires a directory path.".to_string());
+                    return Err(
+                        "Error: Parameter '--data-dir' requires a directory path.".to_string()
+                    );
                 }
             }
             "--config-dir" => {
                 if let Some(c) = args_iter.next() {
                     config_dir = Some(c);
                 } else {
-                    return Err("Error: Parameter '--config-dir' requires a directory path.".to_string());
+                    return Err(
+                        "Error: Parameter '--config-dir' requires a directory path.".to_string()
+                    );
                 }
             }
             "--log-dir" => {
                 if let Some(l) = args_iter.next() {
                     log_dir = Some(l);
                 } else {
-                    return Err("Error: Parameter '--log-dir' requires a directory path.".to_string());
+                    return Err(
+                        "Error: Parameter '--log-dir' requires a directory path.".to_string()
+                    );
                 }
             }
             "--runtime-dir" => {
                 if let Some(r) = args_iter.next() {
                     runtime_dir = Some(r);
                 } else {
-                    return Err("Error: Parameter '--runtime-dir' requires a directory path.".to_string());
+                    return Err(
+                        "Error: Parameter '--runtime-dir' requires a directory path.".to_string(),
+                    );
                 }
             }
             "--portable" => {
@@ -110,7 +118,9 @@ fn parse_args() -> Result<CliArgs, String> {
                 if let Some(k) = args_iter.next() {
                     kernel_path = Some(k);
                 } else {
-                    return Err("Error: Parameter '--kernel-path' requires a file path.".to_string());
+                    return Err(
+                        "Error: Parameter '--kernel-path' requires a file path.".to_string()
+                    );
                 }
             }
             other => {

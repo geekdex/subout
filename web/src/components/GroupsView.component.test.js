@@ -303,7 +303,9 @@ describe("GroupsView - 分流出站组管理", () => {
       // 2. 提交保留 Tag (direct)
       await tagInput.setValue("direct");
       await flushPromises();
-      expect(wrapper.text()).toContain("出站 Tag 不能使用系统保留名称 'direct'");
+      expect(wrapper.text()).toContain(
+        "出站 Tag 不能使用系统保留名称 'direct'",
+      );
       await form.trigger("submit.prevent");
       await flushPromises();
       expect(mockShowToast).toHaveBeenCalledWith(
@@ -335,7 +337,8 @@ describe("GroupsView - 分流出站组管理", () => {
             status: 409,
             json: () =>
               Promise.resolve({
-                error: "保存分组失败，出站 Tag 名字必须唯一 ('custom-dup' 已存在)",
+                error:
+                  "保存分组失败，出站 Tag 名字必须唯一 ('custom-dup' 已存在)",
               }),
           });
         }

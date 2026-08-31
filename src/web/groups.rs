@@ -66,7 +66,10 @@ pub async fn get_groups(
         )
     })?;
     let groups = db::get_outbound_groups(&conn).map_err(|e| {
-        eprintln!("[groups::get_groups] Failed to query outbound_groups: {:?}", e);
+        eprintln!(
+            "[groups::get_groups] Failed to query outbound_groups: {:?}",
+            e
+        );
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("获取出站分组列表失败: {}", e) })),
@@ -105,7 +108,9 @@ pub async fn add_group(
     {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能使用系统保留名称 '{}'", tag) })),
+            Json(
+                serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能使用系统保留名称 '{}'", tag) }),
+            ),
         ));
     }
 
@@ -120,7 +125,9 @@ pub async fn add_group(
     if exists_in_groups {
         return Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 名字必须唯一 ('{}' 已存在于分流出站组)", tag) })),
+            Json(
+                serde_json::json!({ "error": format!("保存分组失败，出站 Tag 名字必须唯一 ('{}' 已存在于分流出站组)", tag) }),
+            ),
         ));
     }
 
@@ -135,7 +142,9 @@ pub async fn add_group(
     if exists_in_nodes {
         return Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能与节点重名 ('{}' 已存在于节点池中)", tag) })),
+            Json(
+                serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能与节点重名 ('{}' 已存在于节点池中)", tag) }),
+            ),
         ));
     }
 
@@ -202,7 +211,9 @@ pub async fn update_group(
     {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能使用系统保留名称 '{}'", tag) })),
+            Json(
+                serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能使用系统保留名称 '{}'", tag) }),
+            ),
         ));
     }
 
@@ -217,7 +228,9 @@ pub async fn update_group(
     if exists_in_groups {
         return Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 名字必须唯一 ('{}' 已存在于分流出站组)", tag) })),
+            Json(
+                serde_json::json!({ "error": format!("保存分组失败，出站 Tag 名字必须唯一 ('{}' 已存在于分流出站组)", tag) }),
+            ),
         ));
     }
 
@@ -232,7 +245,9 @@ pub async fn update_group(
     if exists_in_nodes {
         return Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能与节点重名 ('{}' 已存在于节点池中)", tag) })),
+            Json(
+                serde_json::json!({ "error": format!("保存分组失败，出站 Tag 不能与节点重名 ('{}' 已存在于节点池中)", tag) }),
+            ),
         ));
     }
 

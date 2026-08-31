@@ -15,7 +15,7 @@ pub struct KernelTarget {
     pub arch: &'static str,         // "amd64", "arm64"
     pub archive_type: &'static str, // "zip", "tar.gz"
     pub url: &'static str,
-    pub binary_name: &'static str,  // "sing-box.exe" or "sing-box"
+    pub binary_name: &'static str, // "sing-box.exe" or "sing-box"
 }
 
 pub fn get_supported_targets() -> Vec<KernelTarget> {
@@ -100,7 +100,10 @@ pub fn get_singbox_executable() -> Option<PathBuf> {
 }
 
 pub fn get_installed_kernel_version(path: &Path) -> Option<String> {
-    let output = std::process::Command::new(path).arg("version").output().ok()?;
+    let output = std::process::Command::new(path)
+        .arg("version")
+        .output()
+        .ok()?;
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Some(line) = stdout.lines().next() {
@@ -175,7 +178,10 @@ pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
 
     let (supported, download_url, filename) = match &target {
         Some(t) => {
-            let fname = format!("sing-box-{}-{}-{}.{}", SINGBOX_VERSION, t.os, t.arch, t.archive_type);
+            let fname = format!(
+                "sing-box-{}-{}-{}.{}",
+                SINGBOX_VERSION, t.os, t.arch, t.archive_type
+            );
             (true, Some(t.url.to_string()), Some(fname))
         }
         None => (false, None, None),
@@ -208,8 +214,8 @@ pub fn extract_archive(
 
     if archive_type == "zip" {
         let cursor = Cursor::new(archive_bytes);
-        let mut zip_archive = zip::ZipArchive::new(cursor)
-            .map_err(|e| anyhow!("解析 Zip 压缩包失败: {}", e))?;
+        let mut zip_archive =
+            zip::ZipArchive::new(cursor).map_err(|e| anyhow!("解析 Zip 压缩包失败: {}", e))?;
 
         let mut extracted = false;
         for i in 0..zip_archive.len() {
@@ -313,7 +319,11 @@ pub async fn download_and_install_kernel(
     let mut stream = response.bytes_stream();
     use futures_util::StreamExt;
 
-    let mut downloaded_data = Vec::with_capacity(if total_size > 0 { total_size as usize } else { 15 * 1024 * 1024 });
+    let mut downloaded_data = Vec::with_capacity(if total_size > 0 {
+        total_size as usize
+    } else {
+        15 * 1024 * 1024
+    });
     let mut downloaded_bytes: u64 = 0;
     let mut last_speed_time = std::time::Instant::now();
     let mut last_speed_bytes: u64 = 0;
@@ -424,16 +434,34 @@ mod tests {
         let targets = get_supported_targets();
         assert_eq!(targets.len(), 6);
 
-        let win_amd64 = targets.iter().find(|t| t.os == "windows" && t.arch == "amd64").unwrap();
-        assert_eq!(win_amd64.url, "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-windows-amd64.zip");
+        let win_amd64 = targets
+            .iter()
+            .find(|t| t.os == "windows" && t.arch == "amd64")
+            .unwrap();
+        assert_eq!(
+            win_amd64.url,
+            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-windows-amd64.zip"
+        );
         assert_eq!(win_amd64.binary_name, "sing-box.exe");
 
-        let linux_amd64 = targets.iter().find(|t| t.os == "linux" && t.arch == "amd64").unwrap();
-        assert_eq!(linux_amd64.url, "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-amd64.tar.gz");
+        let linux_amd64 = targets
+            .iter()
+            .find(|t| t.os == "linux" && t.arch == "amd64")
+            .unwrap();
+        assert_eq!(
+            linux_amd64.url,
+            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-amd64.tar.gz"
+        );
         assert_eq!(linux_amd64.binary_name, "sing-box");
 
-        let darwin_arm64 = targets.iter().find(|t| t.os == "darwin" && t.arch == "arm64").unwrap();
-        assert_eq!(darwin_arm64.url, "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-darwin-arm64.tar.gz");
+        let darwin_arm64 = targets
+            .iter()
+            .find(|t| t.os == "darwin" && t.arch == "arm64")
+            .unwrap();
+        assert_eq!(
+            darwin_arm64.url,
+            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-darwin-arm64.tar.gz"
+        );
         assert_eq!(darwin_arm64.binary_name, "sing-box");
     }
 
@@ -441,8 +469,11 @@ mod tests {
     fn test_detect_current_target() {
         let target = detect_current_target();
         // Should detect on supported host
-        if cfg!(any(target_os = "linux", target_os = "macos", target_os = "windows"))
-            && cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
+        if cfg!(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "windows"
+        )) && cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
         {
             assert!(target.is_some());
         }

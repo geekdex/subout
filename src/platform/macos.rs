@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 #[cfg(unix)]
 use anyhow::anyhow;
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
 
 use crate::platform::{BoxFuture, PlatformStrategy};
 use crate::service::ConflictingProcessInfo;
@@ -378,8 +378,14 @@ impl PlatformStrategy for MacOsPlatform {
         let port_str = port.to_string();
         for svc in services {
             run_macos_netsetup(&["-setwebproxy", &svc, "127.0.0.1", &port_str], sudo_pass);
-            run_macos_netsetup(&["-setsecurewebproxy", &svc, "127.0.0.1", &port_str], sudo_pass);
-            run_macos_netsetup(&["-setsocksfirewallproxy", &svc, "127.0.0.1", &port_str], sudo_pass);
+            run_macos_netsetup(
+                &["-setsecurewebproxy", &svc, "127.0.0.1", &port_str],
+                sudo_pass,
+            );
+            run_macos_netsetup(
+                &["-setsocksfirewallproxy", &svc, "127.0.0.1", &port_str],
+                sudo_pass,
+            );
             run_macos_netsetup(&["-setwebproxystate", &svc, "on"], sudo_pass);
             run_macos_netsetup(&["-setsecurewebproxystate", &svc, "on"], sudo_pass);
             run_macos_netsetup(&["-setsocksfirewallproxystate", &svc, "on"], sudo_pass);
@@ -428,12 +434,17 @@ impl PlatformStrategy for MacOsPlatform {
 
                 // Ensure IPv6 dual-stack address is present on macOS to prevent leakage
                 if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr.iter().any(|a| a.as_str().map_or(false, |s| s.contains(':')));
+                    let has_ipv6 = addr_arr
+                        .iter()
+                        .any(|a| a.as_str().map_or(false, |s| s.contains(':')));
                     if !has_ipv6 {
                         addr_arr.push(json!("fd00::1/126"));
                     }
                 } else {
-                    obj.insert("address".to_string(), json!(["172.19.0.1/30", "fd00::1/126"]));
+                    obj.insert(
+                        "address".to_string(),
+                        json!(["172.19.0.1/30", "fd00::1/126"]),
+                    );
                 }
 
                 // macOS strict_route MUST be true
@@ -489,14 +500,13 @@ impl PlatformStrategy for MacOsPlatform {
     }
 
     fn legacy_db_candidates(&self, _config_dir: &Path) -> Vec<PathBuf> {
-        vec![PathBuf::from("/Library/Application Support/subout/subout.db")]
+        vec![PathBuf::from(
+            "/Library/Application Support/subout/subout.db",
+        )]
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(cmd_name)
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output() {
             if output.status.success() {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 for line in out_str.lines() {
@@ -527,9 +537,7 @@ pub fn get_macos_network_services() -> Vec<String> {
         .lines()
         .filter(|line| {
             let trimmed = line.trim();
-            !trimmed.is_empty()
-                && !trimmed.starts_with('*')
-                && !trimmed.contains("An asterisk")
+            !trimmed.is_empty() && !trimmed.starts_with('*') && !trimmed.contains("An asterisk")
         })
         .map(|s| s.trim().to_string())
         .collect()

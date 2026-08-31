@@ -161,7 +161,9 @@ describe("SimpleConfigView", () => {
     expect(dnsCards[3].text()).toContain("自定义 DNS");
 
     // Verify inbound cards order: TUN first, Mixed second
-    const inboundCards = wrapper.findAll(".option-grid")[2].findAll(".option-card");
+    const inboundCards = wrapper
+      .findAll(".option-grid")[2]
+      .findAll(".option-card");
     expect(inboundCards[0].text()).toContain("TUN 虚拟网卡");
     expect(inboundCards[1].text()).toContain("混合端口");
 
@@ -395,7 +397,8 @@ describe("DashboardView - Mode Switch Confirmation", () => {
       if (url.includes("/api/service/status")) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ running: false, conflicting_processes: [] }),
+          json: () =>
+            Promise.resolve({ running: false, conflicting_processes: [] }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -442,7 +445,8 @@ describe("DashboardView - Mode Switch Confirmation", () => {
       if (url.includes("/api/service/status")) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ running: false, conflicting_processes: [] }),
+          json: () =>
+            Promise.resolve({ running: false, conflicting_processes: [] }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -478,7 +482,8 @@ describe("DashboardView - Mode Switch Confirmation", () => {
       if (url.includes("/api/service/status")) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ running: true, ready: true, pid: 12345 }),
+          json: () =>
+            Promise.resolve({ running: true, ready: true, pid: 12345 }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -487,7 +492,9 @@ describe("DashboardView - Mode Switch Confirmation", () => {
     const wrapper = mount(DashboardView);
     await new Promise((r) => setTimeout(r, 20));
 
-    const siteTestBtn = wrapper.findAll(".service-power-actions button").find((b) => b.text().includes("网站测速"));
+    const siteTestBtn = wrapper
+      .findAll(".service-power-actions button")
+      .find((b) => b.text().includes("网站测速"));
     expect(siteTestBtn).toBeDefined();
     expect(siteTestBtn.exists()).toBe(true);
 
@@ -499,10 +506,11 @@ describe("DashboardView - Mode Switch Confirmation", () => {
 
 describe("SimpleConfigView Speed Test & Best Node Indicator", () => {
   it("triggers node speed test and updates node latency displays", async () => {
-    const { default: SimpleConfigView } = await import("./SimpleConfigView.vue");
+    const { default: SimpleConfigView } =
+      await import("./SimpleConfigView.vue");
 
     let pingCalled = false;
-    global.fetch = vi.fn().mockImplementation((url, options) => {
+    global.fetch = vi.fn().mockImplementation((url) => {
       if (url.includes("/api/nodes/ping")) {
         pingCalled = true;
         return Promise.resolve({
@@ -530,8 +538,8 @@ describe("SimpleConfigView Speed Test & Best Node Indicator", () => {
           json: () =>
             Promise.resolve({
               config: {
-                dns: { mode: "preset_fakeip" },
-                inbound: { inbound_type: "tun" },
+                dns: { mode: "preset_fakeip", enable_ipv6: false },
+                inbound: { inbound_type: "tun", enable_ipv6: false },
                 route: { mode: "smart", default_outbound: "HK-01" },
               },
             }),
@@ -552,5 +560,135 @@ describe("SimpleConfigView Speed Test & Best Node Indicator", () => {
 
     expect(pingCalled).toBe(true);
     expect(wrapper.text()).toContain("68ms");
+  });
+});
+
+describe("SimpleConfigView Preview Modal with Foldable JSON Tree", () => {
+  it("renders feature switches and loads pure IPv4 configuration", async () => {
+    const { default: SimpleConfigView } =
+      await import("./SimpleConfigView.vue");
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/nodes")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
+      if (url.includes("/api/simple-config")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              config: {
+                dns: { mode: "preset_fakeip" },
+                inbound: { inbound_type: "tun" },
+                route: { mode: "smart", default_outbound: "AUTO-Test" },
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(SimpleConfigView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(wrapper.text()).toContain("广告与恶意追踪拦截");
+    expect(wrapper.text()).toContain("局域网私有地址直连");
+    const checkboxes = wrapper.findAll(".switches-row input[type='checkbox']");
+    expect(checkboxes.length).toBe(2);
+  });
+
+  it("opens preview modal with foldable JSON tree view and supports view switching", async () => {
+    const { default: SimpleConfigView } =
+      await import("./SimpleConfigView.vue");
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/nodes")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
+      if (url.includes("/api/simple-config/preview")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              log: { level: "info" },
+              dns: {
+                strategy: "ipv4_only",
+                servers: [
+                  { tag: "dns_local", type: "udp", server: "223.5.5.5" },
+                  {
+                    tag: "dns_fakeip",
+                    type: "fakeip",
+                    inet4_range: "198.18.0.0/15",
+                  },
+                ],
+              },
+              inbounds: [
+                { type: "tun", tag: "tun-in", address: ["172.19.0.1/30"] },
+              ],
+              outbounds: [
+                { type: "direct", tag: "direct" },
+                { type: "block", tag: "block" },
+              ],
+              route: { rules: [{ action: "sniff" }] },
+            }),
+        });
+      }
+      if (url.includes("/api/simple-config")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              config: {
+                dns: { mode: "preset_fakeip" },
+                inbound: { inbound_type: "tun" },
+                route: { mode: "smart", default_outbound: "AUTO-Test" },
+              },
+              generated: {
+                dns: { strategy: "ipv4_only" },
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(SimpleConfigView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Click "查看配置预览"
+    const previewBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("查看配置预览"));
+    expect(previewBtn).toBeDefined();
+    await previewBtn.trigger("click");
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Verify modal is visible
+    expect(wrapper.find(".modal.active").exists()).toBe(true);
+    expect(wrapper.text()).toContain("sing-box 配置预览");
+    expect(wrapper.text()).toContain("树状折叠");
+    expect(wrapper.text()).toContain("原始 JSON");
+    expect(wrapper.text()).toContain("全部展开");
+    expect(wrapper.text()).toContain("全部折叠");
+    expect(wrapper.text()).toContain("展开常用 (2级)");
+
+    // Verify JsonTreeView renders
+    expect(wrapper.findComponent({ name: "JsonTreeView" }).exists()).toBe(true);
+
+    // Switch to Raw JSON view
+    const rawBtn = wrapper
+      .findAll(".modal-card button")
+      .find((b) => b.text().includes("原始 JSON"));
+    expect(rawBtn).toBeDefined();
+    await rawBtn.trigger("click");
+    expect(wrapper.find("pre.log-console").exists()).toBe(true);
+
+    // Switch back to Tree View
+    const treeBtn = wrapper
+      .findAll(".modal-card button")
+      .find((b) => b.text().includes("树状折叠"));
+    expect(treeBtn).toBeDefined();
+    await treeBtn.trigger("click");
+    expect(wrapper.findComponent({ name: "JsonTreeView" }).exists()).toBe(true);
   });
 });

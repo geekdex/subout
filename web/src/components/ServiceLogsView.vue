@@ -192,7 +192,9 @@ const filteredLogs = computed(() => {
     return logs.value.join("\n");
   }
   const kw = filterKeyword.value.toLowerCase();
-  return logs.value.filter((l) => typeof l === "string" && l.toLowerCase().includes(kw)).join("\n");
+  return logs.value
+    .filter((l) => typeof l === "string" && l.toLowerCase().includes(kw))
+    .join("\n");
 });
 
 const scrollToBottom = () => {
