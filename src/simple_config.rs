@@ -8,17 +8,17 @@ use crate::generator;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SimpleDnsConfig {
-    pub mode: String, // "preset_domestic_foreign" | "fast_public" | "custom"
+    pub mode: String, // "preset_fakeip" | "preset_domestic_foreign" | "fast_public" | "custom"
     pub domestic_dns: String, // "223.5.5.5"
-    pub foreign_dns: String, // "https://1.1.1.1/dns-query"
+    pub foreign_dns: String, // "fakeip" | "https://1.1.1.1/dns-query"
 }
 
 impl Default for SimpleDnsConfig {
     fn default() -> Self {
         Self {
-            mode: "preset_domestic_foreign".to_string(),
+            mode: "preset_fakeip".to_string(),
             domestic_dns: "223.5.5.5".to_string(),
-            foreign_dns: "https://1.1.1.1/dns-query".to_string(),
+            foreign_dns: "fakeip".to_string(),
         }
     }
 }
@@ -106,6 +106,14 @@ fn apply_dns_detour(obj: &mut Value, detour: Option<&str>) {
 
 pub fn build_dns_server(tag: &str, address_str: &str, detour: Option<&str>) -> Value {
     let s = address_str.trim();
+    if s.eq_ignore_ascii_case("fakeip") {
+        return json!({
+            "tag": tag,
+            "type": "fakeip",
+            "inet4_range": "198.18.0.0/15",
+            "inet6_range": "fc00::/18"
+        });
+    }
     if s == "local" {
         let mut obj = json!({
             "tag": tag,
@@ -234,6 +242,10 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     });
 
     // 2. DNS section
+    let is_fakeip_mode = cfg.dns.mode == "preset_fakeip"
+        || cfg.dns.mode == "fakeip"
+        || cfg.dns.foreign_dns.trim().eq_ignore_ascii_case("fakeip");
+
     let domestic_dns = if cfg.dns.domestic_dns.trim().is_empty() {
         "223.5.5.5".to_string()
     } else {
@@ -241,7 +253,11 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     };
 
     let foreign_dns = if cfg.dns.foreign_dns.trim().is_empty() {
-        "https://1.1.1.1/dns-query".to_string()
+        if is_fakeip_mode {
+            "fakeip".to_string()
+        } else {
+            "https://1.1.1.1/dns-query".to_string()
+        }
     } else {
         cfg.dns.foreign_dns.trim().to_string()
     };
@@ -281,18 +297,24 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         "AUTO-Test".to_string()
     };
 
-    // If proxy nodes exist and target_proxy is not direct, route foreign DNS through proxy.
-    // Otherwise route foreign DNS directly without proxy detour.
-    let remote_dns_detour = if has_nodes && target_proxy != "direct" {
-        Some("proxy")
+    let dns_servers = if is_fakeip_mode {
+        vec![
+            build_dns_server("dns_local", &domestic_dns, None),
+            build_dns_server("dns_fakeip", "fakeip", None),
+        ]
     } else {
-        None
+        // If proxy nodes exist and target_proxy is not direct, route foreign DNS through proxy.
+        // Otherwise route foreign DNS directly without proxy detour.
+        let remote_dns_detour = if has_nodes && target_proxy != "direct" {
+            Some("proxy")
+        } else {
+            None
+        };
+        vec![
+            build_dns_server("dns_local", &domestic_dns, None),
+            build_dns_server("dns_remote", &foreign_dns, remote_dns_detour),
+        ]
     };
-
-    let dns_servers = vec![
-        build_dns_server("dns_local", &domestic_dns, None),
-        build_dns_server("dns_remote", &foreign_dns, remote_dns_detour),
-    ];
 
     let mut dns_rules = Vec::new();
 
@@ -305,7 +327,11 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     }
 
     let remote_dns_tag = if has_nodes && target_proxy != "direct" {
-        "dns_remote"
+        if is_fakeip_mode {
+            "dns_fakeip"
+        } else {
+            "dns_remote"
+        }
     } else {
         "dns_local"
     };
@@ -564,6 +590,11 @@ mod tests {
         // "direct" detour should be omitted to avoid sing-box "detour to empty direct outbound" error
         assert!(local_udp.get("detour").is_none());
 
+        let fakeip = build_dns_server("dns_fakeip", "fakeip", None);
+        assert_eq!(fakeip["type"], "fakeip");
+        assert_eq!(fakeip["inet4_range"], "198.18.0.0/15");
+        assert_eq!(fakeip["inet6_range"], "fc00::/18");
+
         let remote_doh = build_dns_server("dns_remote", "https://1.1.1.1/dns-query", Some("proxy"));
         assert_eq!(remote_doh["type"], "https");
         assert_eq!(remote_doh["server"], "1.1.1.1");
@@ -584,6 +615,7 @@ mod tests {
     fn test_generate_simple_singbox_config_structure() {
         let conn = crate::db::init_db(":memory:").unwrap();
         let cfg = SimpleConfig::default();
+        assert_eq!(cfg.dns.mode, "preset_fakeip");
         let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
 
         assert!(generated_cfg.get("log").is_some());
@@ -592,10 +624,10 @@ mod tests {
         assert!(generated_cfg.get("outbounds").is_some());
         assert!(generated_cfg.get("route").is_some());
 
-        // Check DNS servers
+        // Check DNS servers in default preset_fakeip mode
         let dns_servers = generated_cfg.get("dns").unwrap().get("servers").unwrap().as_array().unwrap();
         assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_local")));
-        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_remote")));
+        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_fakeip")));
 
         // Check Outbounds when no nodes are in DB (clean direct mode, no AUTO-Test probing)
         let outbounds = generated_cfg.get("outbounds").unwrap().as_array().unwrap();
@@ -603,7 +635,7 @@ mod tests {
         assert!(outbounds.iter().any(|o| o.get("tag").unwrap().as_str() == Some("direct")));
         assert!(!outbounds.iter().any(|o| o.get("tag").unwrap().as_str() == Some("AUTO-Test")));
 
-        // Now add a proxy node to DB and verify AUTO-Test is properly created
+        // Now add a proxy node to DB and verify AUTO-Test is properly created and dns_fakeip is used
         crate::db::save_node(
             &conn,
             None,
@@ -626,6 +658,48 @@ mod tests {
         let outbounds_with_nodes = generated_with_nodes.get("outbounds").unwrap().as_array().unwrap();
         assert!(outbounds_with_nodes.iter().any(|o| o.get("tag").unwrap().as_str() == Some("AUTO-Test")));
         assert!(outbounds_with_nodes.iter().any(|o| o.get("tag").unwrap().as_str() == Some("HK-Node-01")));
+
+        // Check DNS rules route foreign domains to dns_fakeip
+        let dns_rules = generated_with_nodes.get("dns").unwrap().get("rules").unwrap().as_array().unwrap();
+        let foreign_dns_rule = dns_rules.iter().find(|r| r.get("rule_set").and_then(|rs| rs.as_str()) == Some("geosite-geolocation-!cn"));
+        assert!(foreign_dns_rule.is_some());
+        assert_eq!(foreign_dns_rule.unwrap().get("server").and_then(|s| s.as_str()), Some("dns_fakeip"));
+    }
+
+    #[test]
+    fn test_simple_config_preset_domestic_foreign_mode() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        crate::db::save_node(
+            &conn,
+            None,
+            "HK-01",
+            "vless",
+            "1.2.3.4",
+            443,
+            &serde_json::json!({
+                "type": "vless",
+                "tag": "HK-01",
+                "server": "1.2.3.4",
+                "server_port": 443,
+                "uuid": "00000000-0000-0000-0000-000000000000"
+            }).to_string(),
+            true,
+            true,
+        ).unwrap();
+
+        let mut cfg = SimpleConfig::default();
+        cfg.dns.mode = "preset_domestic_foreign".to_string();
+        cfg.dns.domestic_dns = "223.5.5.5".to_string();
+        cfg.dns.foreign_dns = "https://1.1.1.1/dns-query".to_string();
+
+        let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        let dns_servers = generated_cfg.get("dns").unwrap().get("servers").unwrap().as_array().unwrap();
+        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_local")));
+        assert!(dns_servers.iter().any(|s| s.get("tag").unwrap().as_str() == Some("dns_remote")));
+
+        let dns_rules = generated_cfg.get("dns").unwrap().get("rules").unwrap().as_array().unwrap();
+        let foreign_dns_rule = dns_rules.iter().find(|r| r.get("rule_set").and_then(|rs| rs.as_str()) == Some("geosite-geolocation-!cn"));
+        assert_eq!(foreign_dns_rule.unwrap().get("server").and_then(|s| s.as_str()), Some("dns_remote"));
     }
 
     #[test]

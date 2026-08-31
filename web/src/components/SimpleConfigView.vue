@@ -392,6 +392,23 @@
       <div class="option-grid">
         <div
           class="option-card"
+          :class="{ active: form.dns.mode === 'preset_fakeip' }"
+          @click="selectDnsPreset('preset_fakeip')"
+        >
+          <div class="option-card-header">
+            <div class="flex items-center gap-2">
+              <span class="option-icon">⚡</span>
+              <span class="option-title">LocalDNS + FakeIP</span>
+            </div>
+            <span class="badge badge-success">推荐</span>
+          </div>
+          <p class="option-desc">
+            国内域名直连 LocalDNS (223.5.5.5) 高速解析，代理流量全走 FakeIP 极速响应并防 DNS 污染与泄漏。
+          </p>
+        </div>
+
+        <div
+          class="option-card"
           :class="{ active: form.dns.mode === 'preset_domestic_foreign' }"
           @click="selectDnsPreset('preset_domestic_foreign')"
         >
@@ -400,7 +417,6 @@
               <span class="option-icon">🚀</span>
               <span class="option-title">阿里 + Cloudflare DoH</span>
             </div>
-            <span class="badge badge-success">推荐</span>
           </div>
           <p class="option-desc">
             国内使用 223.5.5.5，国外走 Cloudflare DoH 加密防污染解析。
@@ -414,7 +430,7 @@
         >
           <div class="option-card-header">
             <div class="flex items-center gap-2">
-              <span class="option-icon">⚡</span>
+              <span class="option-icon">🌐</span>
               <span class="option-title">腾讯 + Google DoH</span>
             </div>
           </div>
@@ -764,9 +780,9 @@ const setOutboundMode = (mode) => {
 
 const form = reactive({
   dns: {
-    mode: "preset_domestic_foreign",
+    mode: "preset_fakeip",
     domestic_dns: "223.5.5.5",
-    foreign_dns: "https://1.1.1.1/dns-query",
+    foreign_dns: "fakeip",
   },
   inbound: {
     inbound_type: "tun",
@@ -785,7 +801,10 @@ const form = reactive({
 
 const selectDnsPreset = (preset) => {
   form.dns.mode = preset;
-  if (preset === "preset_domestic_foreign") {
+  if (preset === "preset_fakeip") {
+    form.dns.domestic_dns = "223.5.5.5";
+    form.dns.foreign_dns = "fakeip";
+  } else if (preset === "preset_domestic_foreign") {
     form.dns.domestic_dns = "223.5.5.5";
     form.dns.foreign_dns = "https://1.1.1.1/dns-query";
   } else if (preset === "fast_public") {

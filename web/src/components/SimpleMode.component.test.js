@@ -92,7 +92,7 @@ describe("KernelDownloadCard", () => {
 });
 
 describe("SimpleConfigView", () => {
-  it("renders compact simplified DNS and Route cards with AUTO-Test and TUN first", () => {
+  it("renders compact simplified DNS and Route cards with AUTO-Test, TUN, and LocalDNS + FakeIP first", () => {
     global.fetch = vi.fn().mockImplementation((url) => {
       if (url.includes("/api/nodes")) {
         return Promise.resolve({
@@ -115,9 +115,9 @@ describe("SimpleConfigView", () => {
           Promise.resolve({
             config: {
               dns: {
-                mode: "preset_domestic_foreign",
+                mode: "preset_fakeip",
                 domestic_dns: "223.5.5.5",
-                foreign_dns: "https://1.1.1.1/dns-query",
+                foreign_dns: "fakeip",
               },
               inbound: {
                 inbound_type: "tun",
@@ -141,13 +141,24 @@ describe("SimpleConfigView", () => {
     const wrapper = mount(SimpleConfigView);
     expect(wrapper.text()).toContain("极简配置管理");
     expect(wrapper.text()).toContain("智能分流");
+    expect(wrapper.text()).toContain("LocalDNS + FakeIP");
     expect(wrapper.text()).toContain("阿里 + Cloudflare DoH");
+    expect(wrapper.text()).toContain("腾讯 + Google DoH");
+    expect(wrapper.text()).toContain("自定义 DNS");
     expect(wrapper.text()).toContain("TUN 虚拟网卡 (整机透明代理)");
     expect(wrapper.text()).toContain("混合端口 (Mixed HTTP + SOCKS5)");
     expect(wrapper.text()).toContain("查看配置预览");
     expect(wrapper.text()).toContain("默认出口策略与节点");
     expect(wrapper.text()).toContain("自动测速优选");
     expect(wrapper.text()).toContain("手动指定节点");
+
+    // Verify DNS cards order: LocalDNS + FakeIP first and recommended
+    const dnsCards = wrapper.findAll(".option-grid")[1].findAll(".option-card");
+    expect(dnsCards[0].text()).toContain("LocalDNS + FakeIP");
+    expect(dnsCards[0].text()).toContain("推荐");
+    expect(dnsCards[1].text()).toContain("阿里 + Cloudflare DoH");
+    expect(dnsCards[2].text()).toContain("腾讯 + Google DoH");
+    expect(dnsCards[3].text()).toContain("自定义 DNS");
 
     // Verify inbound cards order: TUN first, Mixed second
     const inboundCards = wrapper.findAll(".option-grid")[2].findAll(".option-card");
