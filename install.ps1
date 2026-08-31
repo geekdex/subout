@@ -65,6 +65,33 @@ function Test-IsAdmin {
     )
 }
 
+# Disable Windows system (WinINET/IE) proxy settings via registry.
+# Called BEFORE stopping/killing the subout process so the system proxy is cleared
+# even if Rust's graceful shutdown doesn't run (e.g. process is force-killed).
+# Without this, all HTTP/HTTPS traffic would be routed through a dead port → disconnection.
+function Disable-SystemProxy {
+    try {
+        $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        Set-ItemProperty -Path $regPath -Name "ProxyEnable" -Value 0 -ErrorAction SilentlyContinue
+        # Notify WinINET of the change so running apps pick it up immediately
+        $signature = @"
+[DllImport("wininet.dll", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
+"@
+        $type = Add-Type -MemberDefinition $signature -Name WinInet -Namespace Win32 -PassThru -ErrorAction SilentlyContinue
+        if ($type) {
+            # INTERNET_OPTION_SETTINGS_CHANGED = 39, INTERNET_OPTION_REFRESH = 37
+            $type::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
+            $type::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
+        }
+        Write-Host "  ✓ Windows 系统代理已清除" -ForegroundColor Green
+    }
+    catch {
+        # Non-fatal: best-effort only
+        Write-Host "  提示: 清除系统代理设置时出错 (非致命): $_" -ForegroundColor Yellow
+    }
+}
+
 function Add-Argument {
     param (
         [System.Collections.Generic.List[string]]$List,
@@ -259,6 +286,13 @@ if ($Uninstall) {
 
     # 1. Stop and remove Windows Scheduled Task
     Write-Host "[1/3] 正在停止与注销 Windows 后台任务 ($TaskName)..." -ForegroundColor Blue
+
+    # IMPORTANT: Clear system proxy BEFORE killing the subout process.
+    # If subout has system proxy enabled, force-killing it leaves the proxy pointing at
+    # a dead port → all HTTP/HTTPS traffic fails → long-term network disconnection.
+    Write-Host "  正在清除 Windows 系统代理设置 (防止断网)..." -ForegroundColor Blue
+    Disable-SystemProxy
+
     try {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -690,6 +724,12 @@ else {
     Write-Host "[4/4] 正在配置 Windows 开机自启后台任务 ($TaskName)..." -ForegroundColor Blue
 
     # 1. Stop and remove existing task & legacy service
+    # IMPORTANT: Clear system proxy BEFORE killing the old subout process.
+    # If subout has system proxy enabled, force-killing it leaves proxy pointing at a dead port
+    # → long-term network disconnection during the install/update process.
+    Write-Host "  正在清除 Windows 系统代理设置 (防止断网)..." -ForegroundColor Blue
+    Disable-SystemProxy
+
     try {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue

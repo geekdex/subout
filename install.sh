@@ -230,6 +230,56 @@ case "$OS" in
 esac
 
 # ------------------------------------------------------------------------------
+# PROXY CLEANUP HELPERS
+# These functions operate at the OS level and do NOT depend on the subout/sing-box
+# process being alive. They are the safety net that prevents long-term disconnection.
+# ------------------------------------------------------------------------------
+
+# Disable all macOS system HTTP/HTTPS/SOCKS proxy settings for all active network services.
+# This is called BEFORE stopping/reloading the service so the system proxy is cleared
+# even if the subout process is killed abruptly (e.g. killed by SIGKILL or SIGTERM timeout).
+macos_disable_system_proxy() {
+    if [[ "$TARGET_OS" != "darwin" ]]; then
+        return
+    fi
+    if ! command -v networksetup >/dev/null 2>&1; then
+        return
+    fi
+    echo -e "${BLUE}  正在清除 macOS 系统代理设置 (防止断网)...${NC}"
+    # Get active network services (skip lines starting with * or "An asterisk")
+    local services
+    services=$(networksetup -listallnetworkservices 2>/dev/null | grep -v '^\*' | grep -v 'An asterisk' | grep -v '^$' || true)
+    if [[ -z "$services" ]]; then
+        return
+    fi
+    while IFS= read -r svc; do
+        [[ -z "$svc" ]] && continue
+        networksetup -setwebproxystate "$svc" off 2>/dev/null || true
+        networksetup -setsecurewebproxystate "$svc" off 2>/dev/null || true
+        networksetup -setsocksfirewallproxystate "$svc" off 2>/dev/null || true
+        # Also clear TUN DNS - reset to "Empty" (system default)
+        networksetup -setdnsservers "$svc" "Empty" 2>/dev/null || true
+    done <<< "$services"
+    echo -e "${GREEN}  ✓ macOS 系统代理已清除${NC}"
+}
+
+# Gracefully stop the subout service via its REST API (if running), then wait briefly.
+# This gives the Rust process a chance to run its own disable_system_proxy() before
+# the OS-level kill from launchctl/systemctl.
+stop_subout_gracefully() {
+    local port="${1:-$PORT}"
+    # Try to call the stop API — ignore all errors (service may not be running)
+    if command -v curl >/dev/null 2>&1; then
+        # Use a very short timeout — we don't want to block the install if it fails
+        curl -fsSL -X POST "http://127.0.0.1:${port}/api/service/stop" \
+            -H "Content-Type: application/json" \
+            -m 3 >/dev/null 2>&1 || true
+        # Allow up to 1.5s for the Rust process to clean up proxy settings
+        sleep 1.5
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # UNINSTALL LOGIC (Requirement 1: 干净卸载)
 # ------------------------------------------------------------------------------
 do_uninstall() {
@@ -258,6 +308,10 @@ do_uninstall() {
     # 2. Stop and remove launchd plist (macOS)
     elif [[ "$TARGET_OS" == "darwin" ]]; then
         echo -e "${BLUE}[1/3] 正在停止并卸载 launchd 守护服务...${NC}"
+        # IMPORTANT: Clear system proxy BEFORE killing the service process.
+        # This is the OS-level safety net in case the Rust process doesn't get
+        # a chance to run its own cleanup (e.g. killed by SIGKILL or SIGTERM timeout).
+        macos_disable_system_proxy
         if [[ -f "$PLIST_FILE" ]]; then
             $SUDO launchctl unload -w "$PLIST_FILE" 2>/dev/null || true
             $SUDO rm -f "$PLIST_FILE"
@@ -540,6 +594,8 @@ Type=simple
 User=root
 WorkingDirectory=${DATA_DIR}
 ExecStart=${BIN_TARGET_DIR}/${APP_NAME} web -p ${PORT}
+# Give subout up to 15s to handle SIGTERM gracefully (disable system proxy, stop sing-box)
+TimeoutStopSec=15
 Restart=always
 RestartSec=3s
 LimitNOFILE=65535
@@ -591,11 +647,23 @@ SERVICE_EOF
     <string>${LOG_DIR}/stdout.log</string>
     <key>StandardErrorPath</key>
     <string>${LOG_DIR}/stderr.log</string>
+    <!-- Allow up to 10s for graceful SIGTERM shutdown so subout can disable system proxy -->
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
 </dict>
 </plist>
 PLIST_EOF
 
         $SUDO chmod 644 "$PLIST_FILE"
+
+        # IMPORTANT: Clear system proxy BEFORE unloading/killing the old service.
+        # If the old service is running and has system proxy enabled, killing it abruptly
+        # (via launchctl unload) will leave the proxy pointing at a dead port, which routes
+        # all HTTP/HTTPS traffic through a non-existent proxy → long-term network disconnection.
+        # This OS-level cleanup is the safety net that prevents this even if the Rust
+        # process is killed before it can run its own shutdown/cleanup logic.
+        echo -e "${BLUE}  正在安全停止旧服务 (清理系统代理设置，防止断网)...${NC}"
+        macos_disable_system_proxy
         $SUDO launchctl unload "$PLIST_FILE" 2>/dev/null || true
         $SUDO launchctl unload "$LEGACY_PLIST_FILE1" 2>/dev/null || true
         $SUDO launchctl unload "$LEGACY_PLIST_FILE2" 2>/dev/null || true
