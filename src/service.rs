@@ -251,8 +251,7 @@ impl SingBoxServiceManager {
             self.last_error.read().await.clone()
         };
 
-        let binary_path =
-            kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
+        let binary_path = kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
         let running_config_path_buf = Self::get_running_config_path();
         let config_path = running_config_path_buf.to_string_lossy().to_string();
         let inbounds_summary = get_inbounds_summary_from_config(&running_config_path_buf);
@@ -399,6 +398,27 @@ impl SingBoxServiceManager {
             }
         });
 
+        let log_output_file: Option<PathBuf> = config_json
+            .get("log")
+            .and_then(|l| l.get("output"))
+            .and_then(|o| o.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                let path = PathBuf::from(s);
+                if path.is_absolute() {
+                    path
+                } else {
+                    abs_data_dir.join(path)
+                }
+            });
+
+        if let Some(ref out_path) = log_output_file {
+            if let Some(parent) = out_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+
         let mut cmd = if use_sudo {
             let mut c = tokio::process::Command::new("sudo");
             c.arg("-S")
@@ -530,6 +550,91 @@ impl SingBoxServiceManager {
                         l.pop_front();
                     }
                     l.push_back(formatted);
+                }
+            });
+        }
+
+        // Pipe log file if configured in sing-box config
+        if let Some(output_path) = log_output_file {
+            let logs_clone = self.logs.clone();
+            let last_error_clone = self.last_error.clone();
+            let ready_clone = self.ready.clone();
+            let is_running_child = self.child.clone();
+            tokio::spawn(async move {
+                // Wait up to 5s for sing-box to create the log file
+                let mut file = None;
+                for _ in 0..100 {
+                    if let Ok(f) = tokio::fs::File::open(&output_path).await {
+                        file = Some(f);
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+
+                if let Some(f) = file {
+                    let mut reader = BufReader::new(f);
+                    let mut line_buf = String::new();
+                    loop {
+                        let still_running = {
+                            let mut c = is_running_child.write().await;
+                            if let Some(ref mut child) = *c {
+                                match child.try_wait() {
+                                    Ok(None) => true,
+                                    _ => false,
+                                }
+                            } else {
+                                false
+                            }
+                        };
+
+                        let mut read_any = false;
+                        loop {
+                            line_buf.clear();
+                            match reader.read_line(&mut line_buf).await {
+                                Ok(0) => break,
+                                Ok(_) => {
+                                    read_any = true;
+                                    let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
+                                    if !trimmed.is_empty() {
+                                        let clean = strip_ansi_codes(trimmed);
+                                        let timestamp = chrono::Local::now()
+                                            .format("%Y-%m-%d %H:%M:%S")
+                                            .to_string();
+                                        let formatted =
+                                            format!("[{}] [sing-box] {}", timestamp, clean);
+
+                                        if is_actual_singbox_error(&clean) {
+                                            *last_error_clone.write().await = Some(clean.clone());
+                                        } else {
+                                            let lower = clean.to_lowercase();
+                                            if lower.contains("sing-box started")
+                                                || lower.contains("server started at")
+                                                || lower.contains("started inbound")
+                                                || lower.contains(": started")
+                                                || lower.contains("router: started")
+                                                || lower.contains("dns: started")
+                                            {
+                                                *ready_clone.write().await = true;
+                                            }
+                                        }
+
+                                        let mut l = logs_clone.write().await;
+                                        if l.len() >= MAX_LOG_LINES {
+                                            l.pop_front();
+                                        }
+                                        l.push_back(formatted);
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+
+                        if !still_running && !read_any {
+                            break;
+                        }
+
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
                 }
             });
         }
@@ -1205,5 +1310,115 @@ mod tests {
         assert!(!st2.running);
         assert!(st2.last_error.is_none());
     }
-}
 
+    #[tokio::test]
+    async fn test_file_tailer_captures_logs_and_ready_signal() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let log_file = std::env::temp_dir().join(format!("singbox_test_{}.log", unique_id));
+
+        let logs = Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOG_LINES)));
+        let last_error = Arc::new(RwLock::new(None));
+        let ready = Arc::new(RwLock::new(false));
+        let child_lock: Arc<RwLock<Option<tokio::process::Child>>> = Arc::new(RwLock::new(None));
+
+        let logs_clone = logs.clone();
+        let last_error_clone = last_error.clone();
+        let ready_clone = ready.clone();
+        let is_running_child = child_lock.clone();
+        let output_path = log_file.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut file = None;
+            for _ in 0..50 {
+                if let Ok(f) = tokio::fs::File::open(&output_path).await {
+                    file = Some(f);
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+            }
+
+            if let Some(f) = file {
+                let mut reader = BufReader::new(f);
+                let mut line_buf = String::new();
+                for _ in 0..20 {
+                    let still_running = {
+                        let mut c = is_running_child.write().await;
+                        if let Some(ref mut child) = *c {
+                            match child.try_wait() {
+                                Ok(None) => true,
+                                _ => false,
+                            }
+                        } else {
+                            false
+                        }
+                    };
+
+                    let mut read_any = false;
+                    loop {
+                        line_buf.clear();
+                        match reader.read_line(&mut line_buf).await {
+                            Ok(0) => break,
+                            Ok(_) => {
+                                read_any = true;
+                                let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
+                                if !trimmed.is_empty() {
+                                    let clean = strip_ansi_codes(trimmed);
+                                    let timestamp = chrono::Local::now()
+                                        .format("%Y-%m-%d %H:%M:%S")
+                                        .to_string();
+                                    let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
+
+                                    if is_actual_singbox_error(&clean) {
+                                        *last_error_clone.write().await = Some(clean.clone());
+                                    } else {
+                                        let lower = clean.to_lowercase();
+                                        if lower.contains("sing-box started")
+                                            || lower.contains("server started at")
+                                            || lower.contains("started inbound")
+                                            || lower.contains(": started")
+                                            || lower.contains("router: started")
+                                            || lower.contains("dns: started")
+                                        {
+                                            *ready_clone.write().await = true;
+                                        }
+                                    }
+
+                                    let mut l = logs_clone.write().await;
+                                    if l.len() >= MAX_LOG_LINES {
+                                        l.pop_front();
+                                    }
+                                    l.push_back(formatted);
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+
+                    if !still_running && !read_any && logs_clone.read().await.len() >= 2 {
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+            }
+        });
+
+        // Write sample log lines to file
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+        std::fs::write(
+            &log_file,
+            "INFO[0000] router: started\nINFO[0001] inbound/mixed: started\n",
+        )
+        .unwrap();
+
+        let _ = handle.await;
+
+        let captured = logs.read().await;
+        assert_eq!(captured.len(), 2);
+        assert!(captured[0].contains("router: started"));
+        assert!(captured[1].contains("inbound/mixed: started"));
+        assert!(*ready.read().await);
+    }
+}

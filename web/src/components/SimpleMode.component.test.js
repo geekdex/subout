@@ -692,3 +692,70 @@ describe("SimpleConfigView Preview Modal with Foldable JSON Tree", () => {
     expect(wrapper.findComponent({ name: "JsonTreeView" }).exists()).toBe(true);
   });
 });
+
+describe("ServiceLogsView & Cross-Mode Log Filtering", () => {
+  it("renders logs and filters correctly with keyword in both simple and expert mode", async () => {
+    const { default: ServiceLogsView } = await import("./ServiceLogsView.vue");
+    const { serviceStatus, appMode } = await import("../store.js");
+
+    appMode.value = "expert";
+    serviceStatus.value = {
+      running: true,
+      ready: true,
+      pid: 12345,
+      last_error: null,
+      conflicting_processes: [],
+    };
+
+    const mockLogs = [
+      "[2026-09-01 00:00:01] [sing-box] INFO router: started",
+      "[2026-09-01 00:00:02] [sing-box] INFO [TCP] 127.0.0.1:54321 -> google.com:443 [proxy]",
+      "[2026-09-01 00:00:03] [sing-box] WARN dns: cache expired for baidu.com",
+      "[2026-09-01 00:00:04] [sing-box] ERROR connection failed: dial tcp 1.1.1.1: timeout",
+    ];
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/service/logs")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockLogs),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(serviceStatus.value),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(ServiceLogsView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Verify all logs are displayed initially
+    expect(wrapper.text()).toContain("sing-box 运行日志");
+    expect(wrapper.text()).toContain("核心运行中 (PID: 12345)");
+    expect(wrapper.find("pre").text()).toContain("google.com:443");
+    expect(wrapper.find("pre").text()).toContain("baidu.com");
+    expect(wrapper.find("pre").text()).toContain("connection failed");
+
+    // Filter by keyword "google"
+    const input = wrapper.find("input[placeholder*='搜索日志关键字']");
+    expect(input.exists()).toBe(true);
+    await input.setValue("google");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(wrapper.find("pre").text()).toContain("google.com:443");
+    expect(wrapper.find("pre").text()).not.toContain("baidu.com");
+    expect(wrapper.find("pre").text()).not.toContain("connection failed");
+
+    // Filter by keyword "ERROR"
+    await input.setValue("error");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(wrapper.find("pre").text()).toContain("connection failed");
+    expect(wrapper.find("pre").text()).not.toContain("google.com");
+    expect(wrapper.find("pre").text()).not.toContain("baidu.com");
+  });
+});

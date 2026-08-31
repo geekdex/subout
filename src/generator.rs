@@ -151,15 +151,32 @@ pub fn sanitize_route_value(route: &mut Value) {
     }
 }
 
+pub fn sanitize_log_value(log: &mut Value) {
+    if let Some(obj) = log.as_object_mut() {
+        if !obj.contains_key("level")
+            || obj
+                .get("level")
+                .and_then(|s| s.as_str())
+                .map_or(true, |s| s.trim().is_empty())
+        {
+            obj.insert("level".to_string(), json!("info"));
+        }
+        if !obj.contains_key("timestamp") {
+            obj.insert("timestamp".to_string(), json!(true));
+        }
+    }
+}
+
 pub fn generate_config_with_base(
     _conn: &Connection,
-    log: Value,
+    mut log: Value,
     mut dns: Value,
     mut inbounds: Value,
     mut outbounds: Value,
     mut route: Value,
     experimental: Value,
 ) -> Result<Value> {
+    sanitize_log_value(&mut log);
     sanitize_dns_value(&mut dns);
     sanitize_inbounds_value(&mut inbounds);
     sanitize_outbounds_value(&mut outbounds);
@@ -180,10 +197,34 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn test_sanitize_log_defaults() {
+        let mut log = json!({});
+        sanitize_log_value(&mut log);
+        assert_eq!(log.get("level").and_then(|v| v.as_str()), Some("info"));
+        assert_eq!(log.get("timestamp").and_then(|v| v.as_bool()), Some(true));
+
+        let mut custom_log =
+            json!({ "level": "warn", "output": "sing-box.log", "timestamp": false });
+        sanitize_log_value(&mut custom_log);
+        assert_eq!(
+            custom_log.get("level").and_then(|v| v.as_str()),
+            Some("warn")
+        );
+        assert_eq!(
+            custom_log.get("output").and_then(|v| v.as_str()),
+            Some("sing-box.log")
+        );
+        assert_eq!(
+            custom_log.get("timestamp").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn test_passthrough_merges_sections_as_is() {
         let conn = db::init_db(":memory:").unwrap();
 
-        let log = json!({ "level": "warn" });
+        let log = json!({ "level": "warn", "timestamp": true });
         let dns = json!({ "final": "local-dns", "strategy": "prefer_ipv4" });
         let inbounds = json!([{ "type": "mixed", "tag": "mixed-in" }]);
         let outbounds = json!([

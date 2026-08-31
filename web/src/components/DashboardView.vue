@@ -814,8 +814,8 @@ const toggleMode = async () => {
   if (success) {
     // 4. 路由自适应检查（避免停留在当前模式不存在的页面）
     const currentHash = window.location.hash.replace("#", "");
-    const simpleOnlyViews = ["simpleConfig", "serviceLogs"];
-    const expertOnlyViews = ["groups", "config", "siteTest"];
+    const simpleOnlyViews = ["simpleConfig"];
+    const expertOnlyViews = ["groups", "config"];
 
     if (targetMode === "simple" && expertOnlyViews.includes(currentHash)) {
       window.location.hash = "dashboard";

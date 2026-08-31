@@ -229,7 +229,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
     if has_config == 0 {
         conn.execute(
             "INSERT INTO base_config (section, content) VALUES ('log', ?)",
-            ["{}"],
+            [r#"{"level":"info","timestamp":true}"#],
         )?;
         conn.execute(
             "INSERT INTO base_config (section, content) VALUES ('dns', ?)",
