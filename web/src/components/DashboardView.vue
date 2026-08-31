@@ -610,6 +610,159 @@
           </p>
         </div>
       </div>
+
+      <!-- Quick Tutorial & Architecture Guide Card -->
+      <div class="panel tutorial-card" style="margin-top: 1.5rem">
+        <div class="tutorial-header">
+          <div class="flex items-center gap-2">
+            <span class="tutorial-icon">💡</span>
+            <div>
+              <h3 class="tutorial-title">工作原理与使用教程</h3>
+              <p class="tutorial-subtitle">
+                了解 Subout 的核心数据流、快照隔离设计与自动化更新逻辑
+              </p>
+            </div>
+          </div>
+          <span class="tutorial-badge">核心设计架构</span>
+        </div>
+
+        <!-- Visual Flow Diagram -->
+        <div class="workflow-container">
+          <div class="workflow-step">
+            <div class="step-badge">步骤 1</div>
+            <div class="step-card">
+              <div class="step-card-header">
+                <span class="step-card-icon">🔗</span>
+                <strong>订阅列表</strong>
+              </div>
+              <p class="step-card-desc">添加服务商订阅链接或手动导入</p>
+              <div class="step-card-footer">
+                <span class="tag-pill">数据输入</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="workflow-arrow">
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+            <span class="arrow-label">抓取/解析</span>
+          </div>
+
+          <div class="workflow-step">
+            <div class="step-badge">步骤 2</div>
+            <div class="step-card">
+              <div class="step-card-header">
+                <span class="step-card-icon">🌐</span>
+                <strong>节点列表</strong>
+              </div>
+              <p class="step-card-desc">自动去重、测速淘汰超时节点</p>
+              <div class="step-card-footer">
+                <span class="tag-pill">独立节点池</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="workflow-arrow">
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+            <span class="arrow-label">规则匹配</span>
+          </div>
+
+          <div class="workflow-step">
+            <div class="step-badge">步骤 3</div>
+            <div class="step-card">
+              <div class="step-card-header">
+                <span class="step-card-icon">🔀</span>
+                <strong>出站策略组</strong>
+              </div>
+              <p class="step-card-desc">地区/类型/关键词自动或手动成组</p>
+              <div class="step-card-footer">
+                <span class="tag-pill">策略分流</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="workflow-arrow">
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+            <span class="arrow-label">构建快照</span>
+          </div>
+
+          <div class="workflow-step highlight">
+            <div class="step-badge primary">步骤 4</div>
+            <div class="step-card primary">
+              <div class="step-card-header">
+                <span class="step-card-icon">🚀</span>
+                <strong>最终配置 / 服务</strong>
+              </div>
+              <p class="step-card-desc">融合 DNS、入站、路由，启动 sing-box</p>
+              <div class="step-card-footer">
+                <span class="tag-pill primary">当前运行环境</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Streamlined Architecture Insights Strip -->
+        <div class="insights-grid">
+          <div class="insight-card">
+            <div class="insight-header">
+              <span class="insight-icon">📸</span>
+              <strong class="insight-title">单向快照机制</strong>
+            </div>
+            <p class="insight-text">
+              各级配置均基于独立快照生成。删除上游订阅/节点<strong>绝不影响</strong>运行中的下游服务；更新上游后需手动保存下游以同步。
+            </p>
+          </div>
+
+          <div class="insight-card">
+            <div class="insight-header">
+              <span class="insight-icon">🔄</span>
+              <strong class="insight-title">安全自动更新</strong>
+            </div>
+            <p class="insight-text">
+              定时任务仅更新开启<strong>「自动匹配」</strong>的出站策略组，并<strong>自动生成新版本历史记录</strong>，安全平滑重载不覆盖原配置。
+            </p>
+          </div>
+
+          <div class="insight-card">
+            <div class="insight-header">
+              <span class="insight-icon">🎈</span>
+              <strong class="insight-title">双模式相互隔离</strong>
+            </div>
+            <p class="insight-text">
+              <strong>小白模式</strong>（一键自动托管）与<strong>专业模式</strong>（精细化路由与DNS编排）配置完全隔离独立，随时无缝切换。
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Fetch Log Modal -->
@@ -1333,6 +1486,243 @@ onUnmounted(() => {
 .btn-lg {
   padding: 0.65rem 1.4rem;
   font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* Tutorial & Architecture Guide Styles */
+.tutorial-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.tutorial-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tutorial-icon {
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tutorial-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.tutorial-subtitle {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.tutorial-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--primary);
+  border-radius: 20px;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+/* Responsive Workflow Visual Flowchart */
+.workflow-container {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.75rem;
+  position: relative;
+}
+
+@media (max-width: 900px) {
+  .workflow-container {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+.workflow-step {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.step-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.step-badge.primary {
+  color: var(--primary);
+}
+
+.step-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  height: 100%;
+  transition: all 0.2s ease;
+}
+
+.step-card:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.step-card.primary {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.step-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  color: var(--text-main);
+}
+
+.step-card-icon {
+  font-size: 1.1rem;
+}
+
+.step-card-desc {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  flex-grow: 1;
+}
+
+.step-card-footer {
+  margin-top: 0.35rem;
+}
+
+.tag-pill {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.tag-pill.primary {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--primary);
+  font-weight: 500;
+}
+
+/* Arrow styling between workflow steps */
+.workflow-arrow {
+  display: none;
+}
+
+@media (min-width: 901px) {
+  .workflow-container {
+    display: flex;
+    justify-content: space-between;
+  }
+  .workflow-step {
+    flex: 1;
+  }
+  .workflow-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 0 0.5rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+    flex-shrink: 0;
+    margin-top: 1.2rem;
+  }
+  .arrow-label {
+    font-size: 0.68rem;
+    white-space: nowrap;
+    color: var(--text-muted);
+  }
+}
+
+/* Minimalist 3-Column Architecture Insights */
+.insights-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.85rem;
+}
+
+@media (max-width: 850px) {
+  .insights-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.insight-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: all 0.2s ease;
+}
+
+.insight-card:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.insight-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.insight-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.insight-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.insight-text {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.insight-text strong {
+  color: var(--text-main);
   font-weight: 600;
 }
 </style>
