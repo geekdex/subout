@@ -185,8 +185,24 @@ impl SingBoxServiceManager {
             if let Some(ref mut child) = *child_guard {
                 match child.try_wait() {
                     Ok(None) => (true, child.id()),
-                    _ => {
+                    Ok(Some(status)) => {
                         *child_guard = None;
+                        *self.ready.write().await = false;
+                        *self.started_at.write().await = None;
+                        if self.last_error.read().await.is_none() && !status.success() {
+                            *self.last_error.write().await =
+                                Some(format!("sing-box 核心进程已退出 ({})", status));
+                        }
+                        (false, None)
+                    }
+                    Err(e) => {
+                        *child_guard = None;
+                        *self.ready.write().await = false;
+                        *self.started_at.write().await = None;
+                        if self.last_error.read().await.is_none() {
+                            *self.last_error.write().await =
+                                Some(format!("检测 sing-box 进程状态异常: {}", e));
+                        }
                         (false, None)
                     }
                 }
@@ -216,16 +232,27 @@ impl SingBoxServiceManager {
             if r {
                 true
             } else if let Some(up) = uptime_secs {
-                up >= 2 && self.last_error.read().await.is_none()
+                if up >= 1 {
+                    *self.ready.write().await = true;
+                    true
+                } else {
+                    false
+                }
             } else {
-                false
+                true
             }
         } else {
             false
         };
 
-        let last_error = self.last_error.read().await.clone();
-        let binary_path = kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
+        let last_error = if is_run {
+            None
+        } else {
+            self.last_error.read().await.clone()
+        };
+
+        let binary_path =
+            kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
         let running_config_path_buf = Self::get_running_config_path();
         let config_path = running_config_path_buf.to_string_lossy().to_string();
         let inbounds_summary = get_inbounds_summary_from_config(&running_config_path_buf);
@@ -459,6 +486,7 @@ impl SingBoxServiceManager {
                             || lower.contains("started inbound")
                             || lower.contains(": started")
                             || lower.contains("router: started")
+                            || lower.contains("dns: started")
                         {
                             *ready_clone.write().await = true;
                         }
@@ -492,6 +520,7 @@ impl SingBoxServiceManager {
                             || lower.contains("started inbound")
                             || lower.contains(": started")
                             || lower.contains("router: started")
+                            || lower.contains("dns: started")
                         {
                             *ready_clone.write().await = true;
                         }
@@ -514,19 +543,13 @@ impl SingBoxServiceManager {
             if !self.is_running().await {
                 break;
             }
-            if self.last_error.read().await.is_some() {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                if !self.is_running().await {
-                    break;
-                }
-            }
-            if *self.ready.read().await && self.last_error.read().await.is_none() {
+            if *self.ready.read().await {
                 started_ready = true;
                 break;
             }
         }
 
-        if self.is_running().await && self.last_error.read().await.is_none() {
+        if self.is_running().await {
             *self.ready.write().await = true;
             started_ready = true;
         }
@@ -919,9 +942,34 @@ pub fn strip_ansi_codes(input: &str) -> String {
 
 pub fn is_actual_singbox_error(line: &str) -> bool {
     let upper = line.to_uppercase();
+
+    // 1. Exclude all runtime proxy traffic / connection level error logs
+    // These are normal network events during proxy operation, NOT core service crashes/failures.
+    if upper.contains("CONNECTION:")
+        || upper.contains("CONNECT: CONNECTION REFUSED")
+        || upper.contains("CONNECT: NETWORK IS UNREACHABLE")
+        || upper.contains("CONNECT: HOST IS DOWN")
+        || upper.contains("CONNECT: NO ROUTE TO HOST")
+        || upper.contains("DIAL TCP")
+        || upper.contains("DIAL UDP")
+        || upper.contains("I/O TIMEOUT")
+        || upper.contains("IO TIMEOUT")
+        || upper.contains("DEADLINE EXCEEDED")
+        || upper.contains("CONNECTION RESET")
+        || upper.contains("BROKEN PIPE")
+        || upper.contains("HANDSHAKE FAILED")
+        || upper.contains("EXCHANGE FAILED")
+        || upper.contains("ROUTER: MATCH")
+        || upper.contains("OUTBOUND/")
+    {
+        return false;
+    }
+
+    // 2. Fatal engine crashes, panics, configuration decode errors, and permission failures
     if upper.contains("FATAL")
         || upper.contains("PANIC")
         || upper.contains("ADDRESS ALREADY IN USE")
+        || upper.contains("FAILED TO BIND")
         || upper.contains("OPERATION NOT PERMITTED")
         || upper.contains("PERMISSION DENIED")
         || upper.contains("TUNSETIFF")
@@ -931,25 +979,24 @@ pub fn is_actual_singbox_error(line: &str) -> bool {
         || upper.contains("AUTHENTICATION FAILURE")
         || upper.contains("A PASSWORD IS REQUIRED")
         || upper.contains("SORRY, TRY AGAIN")
+        || upper.contains("CREATE SERVICE:")
+        || upper.contains("START SERVICE:")
+        || upper.contains("INVALID CONFIGURATION")
+        || upper.contains("DECODE CONFIG")
     {
         return true;
     }
-    if upper.contains("ERROR") {
-        if upper.contains("NOERROR")
-            && !upper.contains(" ERROR")
-            && !upper.contains("ERROR:")
-            && !upper.contains("[ERROR]")
-        {
-            return false;
-        }
-        if upper.contains(" ERROR ")
-            || upper.contains("ERROR:")
-            || upper.contains("[ERROR]")
-            || upper.contains("LEVEL=ERROR")
-        {
-            return true;
-        }
+
+    // 3. Inbound server failure to listen / bind
+    if upper.contains("INBOUND/")
+        && (upper.contains("FAILED TO BIND")
+            || upper.contains("BIND:")
+            || upper.contains("LISTEN TCP")
+            || upper.contains("LISTEN UDP"))
+    {
+        return true;
     }
+
     false
 }
 
@@ -985,6 +1032,23 @@ mod tests {
         assert!(!is_actual_singbox_error("INFO sing-box started (1.10s)"));
         assert!(!is_actual_singbox_error(
             "INFO[0000] inbound/tun[tun-in]: started"
+        ));
+
+        // Runtime proxy connection errors must NOT be treated as core service errors
+        assert!(!is_actual_singbox_error(
+            "+0800 2026-08-31 18:15:48 ERROR [2133602452 1.14s] connection: open connection to 192.168.3.80:39459 using outbound/direct[direct]: dial tcp 192.168.3.80:39459: connect: connection refused"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR [760202674 10ms] connection: open connection to 192.168.3.80:39459 using outbound/direct[direct]: dial tcp 192.168.3.80:39459: connect: connection refused"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR outbound/proxy[hk-01]: dial tcp 1.2.3.4:443: i/o timeout"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR inbound/mixed[mixed-in]: connection: read: connection reset by peer"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR dns: exchange failed for google.com: i/o timeout"
         ));
 
         // Genuine fatal or errors
@@ -1120,4 +1184,26 @@ mod tests {
         assert!(!is_pid_alive(0));
         assert!(!is_pid_alive(4_000_000_000));
     }
+
+    #[tokio::test]
+    async fn test_service_status_running_and_ready_logic() {
+        let mgr = SingBoxServiceManager::new();
+        // Initially stopped
+        let st = mgr.get_status().await;
+        assert!(!st.running);
+        assert!(!st.ready);
+        assert!(st.last_error.is_none());
+
+        // Simulate log appending with connection refused error
+        mgr.append_log("+0800 2026-08-31 18:15:48 ERROR [2133602452 1.14s] connection: open connection to 192.168.3.80:39459 using outbound/direct[direct]: dial tcp 192.168.3.80:39459: connect: connection refused").await;
+        let logs = mgr.get_logs().await;
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].contains("connection refused"));
+
+        // Status is still stopped and last_error is None (since runtime log isn't a fatal service crash)
+        let st2 = mgr.get_status().await;
+        assert!(!st2.running);
+        assert!(st2.last_error.is_none());
+    }
 }
+
