@@ -337,6 +337,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             }
         });
 
+        // Stop sing-box and clean up system proxy settings (disable_system_proxy / disable_tun_dns).
+        // This MUST happen BEFORE axum connection draining so that even if the process is killed
+        // by launchctl/systemctl's ExitTimeOut immediately after, the proxy is already cleared.
+        // Without this, the system proxy would point at a dead port → long-term disconnection.
         let _ = service_mgr_for_shutdown.stop().await;
     };
 

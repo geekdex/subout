@@ -31,6 +31,7 @@ pub struct ServiceStatusInfo {
     pub binary_path: Option<String>,
     pub config_path: String,
     pub inbounds_summary: Option<String>,
+    pub is_tun: bool,
     pub conflicting_processes: Vec<ConflictingProcessInfo>,
 }
 
@@ -185,8 +186,24 @@ impl SingBoxServiceManager {
             if let Some(ref mut child) = *child_guard {
                 match child.try_wait() {
                     Ok(None) => (true, child.id()),
-                    _ => {
+                    Ok(Some(status)) => {
                         *child_guard = None;
+                        *self.ready.write().await = false;
+                        *self.started_at.write().await = None;
+                        if self.last_error.read().await.is_none() && !status.success() {
+                            *self.last_error.write().await =
+                                Some(format!("sing-box 核心进程已退出 ({})", status));
+                        }
+                        (false, None)
+                    }
+                    Err(e) => {
+                        *child_guard = None;
+                        *self.ready.write().await = false;
+                        *self.started_at.write().await = None;
+                        if self.last_error.read().await.is_none() {
+                            *self.last_error.write().await =
+                                Some(format!("检测 sing-box 进程状态异常: {}", e));
+                        }
                         (false, None)
                     }
                 }
@@ -216,19 +233,35 @@ impl SingBoxServiceManager {
             if r {
                 true
             } else if let Some(up) = uptime_secs {
-                up >= 2 && self.last_error.read().await.is_none()
+                if up >= 1 {
+                    *self.ready.write().await = true;
+                    true
+                } else {
+                    false
+                }
             } else {
-                false
+                true
             }
         } else {
             false
         };
 
-        let last_error = self.last_error.read().await.clone();
+        let last_error = if is_run {
+            None
+        } else {
+            self.last_error.read().await.clone()
+        };
+
         let binary_path = kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
         let running_config_path_buf = Self::get_running_config_path();
         let config_path = running_config_path_buf.to_string_lossy().to_string();
         let inbounds_summary = get_inbounds_summary_from_config(&running_config_path_buf);
+        let is_tun = is_run
+            && std::fs::read_to_string(&running_config_path_buf)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .map(|json| is_tun_mode(&json))
+                .unwrap_or(false);
         let conflicting_processes = detect_conflicting_singbox_processes(pid);
 
         ServiceStatusInfo {
@@ -241,6 +274,7 @@ impl SingBoxServiceManager {
             binary_path,
             config_path,
             inbounds_summary,
+            is_tun,
             conflicting_processes,
         }
     }
@@ -372,6 +406,27 @@ impl SingBoxServiceManager {
             }
         });
 
+        let log_output_file: Option<PathBuf> = config_json
+            .get("log")
+            .and_then(|l| l.get("output"))
+            .and_then(|o| o.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                let path = PathBuf::from(s);
+                if path.is_absolute() {
+                    path
+                } else {
+                    abs_data_dir.join(path)
+                }
+            });
+
+        if let Some(ref out_path) = log_output_file {
+            if let Some(parent) = out_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+
         let mut cmd = if use_sudo {
             let mut c = tokio::process::Command::new("sudo");
             c.arg("-S")
@@ -459,6 +514,7 @@ impl SingBoxServiceManager {
                             || lower.contains("started inbound")
                             || lower.contains(": started")
                             || lower.contains("router: started")
+                            || lower.contains("dns: started")
                         {
                             *ready_clone.write().await = true;
                         }
@@ -492,6 +548,7 @@ impl SingBoxServiceManager {
                             || lower.contains("started inbound")
                             || lower.contains(": started")
                             || lower.contains("router: started")
+                            || lower.contains("dns: started")
                         {
                             *ready_clone.write().await = true;
                         }
@@ -505,6 +562,91 @@ impl SingBoxServiceManager {
             });
         }
 
+        // Pipe log file if configured in sing-box config
+        if let Some(output_path) = log_output_file {
+            let logs_clone = self.logs.clone();
+            let last_error_clone = self.last_error.clone();
+            let ready_clone = self.ready.clone();
+            let is_running_child = self.child.clone();
+            tokio::spawn(async move {
+                // Wait up to 5s for sing-box to create the log file
+                let mut file = None;
+                for _ in 0..100 {
+                    if let Ok(f) = tokio::fs::File::open(&output_path).await {
+                        file = Some(f);
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+
+                if let Some(f) = file {
+                    let mut reader = BufReader::new(f);
+                    let mut line_buf = String::new();
+                    loop {
+                        let still_running = {
+                            let mut c = is_running_child.write().await;
+                            if let Some(ref mut child) = *c {
+                                match child.try_wait() {
+                                    Ok(None) => true,
+                                    _ => false,
+                                }
+                            } else {
+                                false
+                            }
+                        };
+
+                        let mut read_any = false;
+                        loop {
+                            line_buf.clear();
+                            match reader.read_line(&mut line_buf).await {
+                                Ok(0) => break,
+                                Ok(_) => {
+                                    read_any = true;
+                                    let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
+                                    if !trimmed.is_empty() {
+                                        let clean = strip_ansi_codes(trimmed);
+                                        let timestamp = chrono::Local::now()
+                                            .format("%Y-%m-%d %H:%M:%S")
+                                            .to_string();
+                                        let formatted =
+                                            format!("[{}] [sing-box] {}", timestamp, clean);
+
+                                        if is_actual_singbox_error(&clean) {
+                                            *last_error_clone.write().await = Some(clean.clone());
+                                        } else {
+                                            let lower = clean.to_lowercase();
+                                            if lower.contains("sing-box started")
+                                                || lower.contains("server started at")
+                                                || lower.contains("started inbound")
+                                                || lower.contains(": started")
+                                                || lower.contains("router: started")
+                                                || lower.contains("dns: started")
+                                            {
+                                                *ready_clone.write().await = true;
+                                            }
+                                        }
+
+                                        let mut l = logs_clone.write().await;
+                                        if l.len() >= MAX_LOG_LINES {
+                                            l.pop_front();
+                                        }
+                                        l.push_back(formatted);
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+
+                        if !still_running && !read_any {
+                            break;
+                        }
+
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                }
+            });
+        }
+
         *self.child.write().await = Some(child);
 
         // Wait up to 3000ms for sing-box to initialize and report ready or exit
@@ -514,19 +656,13 @@ impl SingBoxServiceManager {
             if !self.is_running().await {
                 break;
             }
-            if self.last_error.read().await.is_some() {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                if !self.is_running().await {
-                    break;
-                }
-            }
-            if *self.ready.read().await && self.last_error.read().await.is_none() {
+            if *self.ready.read().await {
                 started_ready = true;
                 break;
             }
         }
 
-        if self.is_running().await && self.last_error.read().await.is_none() {
+        if self.is_running().await {
             *self.ready.write().await = true;
             started_ready = true;
         }
@@ -919,9 +1055,34 @@ pub fn strip_ansi_codes(input: &str) -> String {
 
 pub fn is_actual_singbox_error(line: &str) -> bool {
     let upper = line.to_uppercase();
+
+    // 1. Exclude all runtime proxy traffic / connection level error logs
+    // These are normal network events during proxy operation, NOT core service crashes/failures.
+    if upper.contains("CONNECTION:")
+        || upper.contains("CONNECT: CONNECTION REFUSED")
+        || upper.contains("CONNECT: NETWORK IS UNREACHABLE")
+        || upper.contains("CONNECT: HOST IS DOWN")
+        || upper.contains("CONNECT: NO ROUTE TO HOST")
+        || upper.contains("DIAL TCP")
+        || upper.contains("DIAL UDP")
+        || upper.contains("I/O TIMEOUT")
+        || upper.contains("IO TIMEOUT")
+        || upper.contains("DEADLINE EXCEEDED")
+        || upper.contains("CONNECTION RESET")
+        || upper.contains("BROKEN PIPE")
+        || upper.contains("HANDSHAKE FAILED")
+        || upper.contains("EXCHANGE FAILED")
+        || upper.contains("ROUTER: MATCH")
+        || upper.contains("OUTBOUND/")
+    {
+        return false;
+    }
+
+    // 2. Fatal engine crashes, panics, configuration decode errors, and permission failures
     if upper.contains("FATAL")
         || upper.contains("PANIC")
         || upper.contains("ADDRESS ALREADY IN USE")
+        || upper.contains("FAILED TO BIND")
         || upper.contains("OPERATION NOT PERMITTED")
         || upper.contains("PERMISSION DENIED")
         || upper.contains("TUNSETIFF")
@@ -931,25 +1092,24 @@ pub fn is_actual_singbox_error(line: &str) -> bool {
         || upper.contains("AUTHENTICATION FAILURE")
         || upper.contains("A PASSWORD IS REQUIRED")
         || upper.contains("SORRY, TRY AGAIN")
+        || upper.contains("CREATE SERVICE:")
+        || upper.contains("START SERVICE:")
+        || upper.contains("INVALID CONFIGURATION")
+        || upper.contains("DECODE CONFIG")
     {
         return true;
     }
-    if upper.contains("ERROR") {
-        if upper.contains("NOERROR")
-            && !upper.contains(" ERROR")
-            && !upper.contains("ERROR:")
-            && !upper.contains("[ERROR]")
-        {
-            return false;
-        }
-        if upper.contains(" ERROR ")
-            || upper.contains("ERROR:")
-            || upper.contains("[ERROR]")
-            || upper.contains("LEVEL=ERROR")
-        {
-            return true;
-        }
+
+    // 3. Inbound server failure to listen / bind
+    if upper.contains("INBOUND/")
+        && (upper.contains("FAILED TO BIND")
+            || upper.contains("BIND:")
+            || upper.contains("LISTEN TCP")
+            || upper.contains("LISTEN UDP"))
+    {
+        return true;
     }
+
     false
 }
 
@@ -985,6 +1145,23 @@ mod tests {
         assert!(!is_actual_singbox_error("INFO sing-box started (1.10s)"));
         assert!(!is_actual_singbox_error(
             "INFO[0000] inbound/tun[tun-in]: started"
+        ));
+
+        // Runtime proxy connection errors must NOT be treated as core service errors
+        assert!(!is_actual_singbox_error(
+            "+0800 2026-08-31 18:15:48 ERROR [2133602452 1.14s] connection: open connection to 192.168.3.80:39459 using outbound/direct[direct]: dial tcp 192.168.3.80:39459: connect: connection refused"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR [760202674 10ms] connection: open connection to 192.168.3.80:39459 using outbound/direct[direct]: dial tcp 192.168.3.80:39459: connect: connection refused"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR outbound/proxy[hk-01]: dial tcp 1.2.3.4:443: i/o timeout"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR inbound/mixed[mixed-in]: connection: read: connection reset by peer"
+        ));
+        assert!(!is_actual_singbox_error(
+            "ERROR dns: exchange failed for google.com: i/o timeout"
         ));
 
         // Genuine fatal or errors
@@ -1052,6 +1229,7 @@ mod tests {
             binary_path: Some("/usr/bin/sing-box".to_string()),
             config_path: "/root/.config/subout/sing-box-running.json".to_string(),
             inbounds_summary: Some("127.0.0.1:2080 (混合代理)".to_string()),
+            is_tun: false,
             conflicting_processes: vec![ConflictingProcessInfo {
                 pid: 12345,
                 name: "sing-box".to_string(),
@@ -1119,5 +1297,137 @@ mod tests {
         assert!(is_pid_alive(current_pid));
         assert!(!is_pid_alive(0));
         assert!(!is_pid_alive(4_000_000_000));
+    }
+
+    #[tokio::test]
+    async fn test_service_status_running_and_ready_logic() {
+        let mgr = SingBoxServiceManager::new();
+        // Initially stopped
+        let st = mgr.get_status().await;
+        assert!(!st.running);
+        assert!(!st.ready);
+        assert!(st.last_error.is_none());
+
+        // Simulate log appending with connection refused error
+        mgr.append_log("+0800 2026-08-31 18:15:48 ERROR [2133602452 1.14s] connection: open connection to 192.168.3.80:39459 using outbound/direct[direct]: dial tcp 192.168.3.80:39459: connect: connection refused").await;
+        let logs = mgr.get_logs().await;
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].contains("connection refused"));
+
+        // Status is still stopped and last_error is None (since runtime log isn't a fatal service crash)
+        let st2 = mgr.get_status().await;
+        assert!(!st2.running);
+        assert!(st2.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_file_tailer_captures_logs_and_ready_signal() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let log_file = std::env::temp_dir().join(format!("singbox_test_{}.log", unique_id));
+
+        let logs = Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOG_LINES)));
+        let last_error = Arc::new(RwLock::new(None));
+        let ready = Arc::new(RwLock::new(false));
+        let child_lock: Arc<RwLock<Option<tokio::process::Child>>> = Arc::new(RwLock::new(None));
+
+        let logs_clone = logs.clone();
+        let last_error_clone = last_error.clone();
+        let ready_clone = ready.clone();
+        let is_running_child = child_lock.clone();
+        let output_path = log_file.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut file = None;
+            for _ in 0..50 {
+                if let Ok(f) = tokio::fs::File::open(&output_path).await {
+                    file = Some(f);
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+            }
+
+            if let Some(f) = file {
+                let mut reader = BufReader::new(f);
+                let mut line_buf = String::new();
+                for _ in 0..20 {
+                    let still_running = {
+                        let mut c = is_running_child.write().await;
+                        if let Some(ref mut child) = *c {
+                            match child.try_wait() {
+                                Ok(None) => true,
+                                _ => false,
+                            }
+                        } else {
+                            false
+                        }
+                    };
+
+                    let mut read_any = false;
+                    loop {
+                        line_buf.clear();
+                        match reader.read_line(&mut line_buf).await {
+                            Ok(0) => break,
+                            Ok(_) => {
+                                read_any = true;
+                                let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
+                                if !trimmed.is_empty() {
+                                    let clean = strip_ansi_codes(trimmed);
+                                    let timestamp = chrono::Local::now()
+                                        .format("%Y-%m-%d %H:%M:%S")
+                                        .to_string();
+                                    let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
+
+                                    if is_actual_singbox_error(&clean) {
+                                        *last_error_clone.write().await = Some(clean.clone());
+                                    } else {
+                                        let lower = clean.to_lowercase();
+                                        if lower.contains("sing-box started")
+                                            || lower.contains("server started at")
+                                            || lower.contains("started inbound")
+                                            || lower.contains(": started")
+                                            || lower.contains("router: started")
+                                            || lower.contains("dns: started")
+                                        {
+                                            *ready_clone.write().await = true;
+                                        }
+                                    }
+
+                                    let mut l = logs_clone.write().await;
+                                    if l.len() >= MAX_LOG_LINES {
+                                        l.pop_front();
+                                    }
+                                    l.push_back(formatted);
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+
+                    if !still_running && !read_any && logs_clone.read().await.len() >= 2 {
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+            }
+        });
+
+        // Write sample log lines to file
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+        std::fs::write(
+            &log_file,
+            "INFO[0000] router: started\nINFO[0001] inbound/mixed: started\n",
+        )
+        .unwrap();
+
+        let _ = handle.await;
+
+        let captured = logs.read().await;
+        assert_eq!(captured.len(), 2);
+        assert!(captured[0].contains("router: started"));
+        assert!(captured[1].contains("inbound/mixed: started"));
+        assert!(*ready.read().await);
     }
 }

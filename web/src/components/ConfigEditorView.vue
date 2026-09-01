@@ -594,18 +594,33 @@
                       </select>
                     </div>
                     <div class="input-group">
-                      <label>日志输出文件路径 (留空输出到 stdout)</label>
+                      <label
+                        >日志输出文件路径
+                        (留空输出到标准输出并在面板展示)</label
+                      >
                       <input
                         v-model="configData.log.output"
                         type="text"
                         class="input-control"
-                        placeholder="/var/log/sing-box.log"
+                        placeholder="例如: sing-box.log 或 /var/log/sing-box.log"
                       />
                     </div>
                   </div>
+                  <p
+                    style="
+                      font-size: 0.8rem;
+                      color: var(--text-muted);
+                      margin-top: 0.5rem;
+                      margin-bottom: 0.5rem;
+                    "
+                  >
+                    💡
+                    提示：无论是否指定日志输出文件，核心日志都会实时同步显示在
+                    Web 后台「核心日志」页面中，并支持关键字快速筛选。
+                  </p>
                   <div
                     class="grid-2"
-                    style="margin-top: 1rem; margin-bottom: 1rem"
+                    style="margin-top: 0.75rem; margin-bottom: 1rem"
                   >
                     <div class="input-group">
                       <label
@@ -5565,7 +5580,7 @@ const rawJson = reactive({
 });
 
 const configData = reactive({
-  log: { disabled: false, level: "warn", timestamp: true, output: "" },
+  log: { disabled: false, level: "info", timestamp: true, output: "" },
   dns: {
     strategy: "ipv4_only",
     final: "local-dns",
@@ -6755,7 +6770,7 @@ const invertNodePoolSelection = () => {
 // Parsers
 const parseLog = (json) => {
   configData.log.disabled = !!json.disabled;
-  configData.log.level = json.level || "warn";
+  configData.log.level = json.level || "info";
   configData.log.timestamp = json.timestamp !== false;
   configData.log.output = json.output || "";
   configData.log._extra = { ...json };

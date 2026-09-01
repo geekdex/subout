@@ -81,6 +81,7 @@ export const serviceStatus = ref({
   binary_path: null,
   config_path: "",
   inbounds_summary: null,
+  is_tun: false,
   conflicting_processes: [],
 });
 
@@ -233,6 +234,28 @@ export async function killExternalProcess(pid, sudoPass = "") {
     }
   } catch (e) {
     showToast(`终止外部进程请求出错: ${e.message || e}`, "danger");
+    return false;
+  }
+}
+
+export async function stopService() {
+  if (!token.value) return false;
+  try {
+    const res = await fetch(`${API_BASE}/api/service/stop`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token.value}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) {
+      await fetchServiceStatus();
+      return true;
+    } else {
+      const err = await res.text();
+      showToast(`停止服务失败: ${err}`, "danger");
+      return false;
+    }
+  } catch (e) {
+    showToast(`停止服务请求出错: ${e.message || e}`, "danger");
     return false;
   }
 }

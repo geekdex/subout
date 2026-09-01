@@ -559,13 +559,15 @@ pub fn validate_config_with_singbox(
     route: &Value,
     experimental: &Value,
 ) -> Result<(), String> {
+    let mut sanitized_log = log.clone();
+    generator::sanitize_log_value(&mut sanitized_log);
     let mut sanitized_outbounds = outbounds.clone();
     generator::sanitize_outbounds_value(&mut sanitized_outbounds);
 
     // Configs are self-contained snapshots — merge the 6 sections directly
     // without any database lookup.
     let config = json!({
-        "log": log,
+        "log": sanitized_log,
         "dns": dns,
         "inbounds": inbounds,
         "outbounds": sanitized_outbounds,
