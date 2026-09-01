@@ -112,41 +112,9 @@ pub fn sanitize_dns_value(dns: &mut Value) {
 
 pub fn sanitize_route_value(route: &mut Value) {
     if let Some(obj) = route.as_object_mut() {
-        // Ensure auto_detect_interface is true to prevent routing loops
+        // Ensure auto_detect_interface is true to prevent routing loops if not specified
         if !obj.contains_key("auto_detect_interface") {
             obj.insert("auto_detect_interface".to_string(), json!(true));
-        }
-
-        // Reorder route rules so that DNS hijacking rules and sniff rules always precede
-        // any IP CIDR / private IP direct rules. Otherwise, DNS queries to router IPs (e.g. 192.168.0.1:53)
-        // match the private CIDR rule and bypass DNS hijacking entirely.
-        if let Some(rules_arr) = obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
-            let mut sniff_rules = Vec::new();
-            let mut dns_hijack_rules = Vec::new();
-            let mut other_rules = Vec::new();
-
-            for rule in rules_arr.drain(..) {
-                let action = rule.get("action").and_then(|a| a.as_str()).unwrap_or("");
-                let is_dns_hijack = action == "hijack-dns"
-                    || rule.get("protocol").and_then(|p| p.as_str()) == Some("dns")
-                    || (rule.get("port").map_or(false, |p| {
-                        p.as_u64() == Some(53)
-                            || p.as_array()
-                                .map_or(false, |arr| arr.iter().any(|v| v.as_u64() == Some(53)))
-                    }) && action == "hijack-dns");
-
-                if action == "sniff" {
-                    sniff_rules.push(rule);
-                } else if is_dns_hijack {
-                    dns_hijack_rules.push(rule);
-                } else {
-                    other_rules.push(rule);
-                }
-            }
-
-            rules_arr.extend(sniff_rules);
-            rules_arr.extend(dns_hijack_rules);
-            rules_arr.extend(other_rules);
         }
     }
 }
@@ -334,19 +302,20 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_route_reorders_hijack_dns() {
+    fn test_sanitize_route_preserves_rule_order() {
         let mut route = json!({
             "rules": [
-                { "outbound": "direct", "ip_cidr": ["192.168.0.0/24"] },
+                { "outbound": "direct", "ip_cidr": ["10.0.0.0/8"] },
                 { "action": "sniff" },
                 { "action": "hijack-dns", "protocol": "dns" }
             ]
         });
         sanitize_route_value(&mut route);
         let rules = route.get("rules").unwrap().as_array().unwrap();
-        assert_eq!(rules[0].get("action").unwrap().as_str(), Some("sniff"));
-        assert_eq!(rules[1].get("action").unwrap().as_str(), Some("hijack-dns"));
-        assert_eq!(rules[2].get("ip_cidr").is_some(), true);
+        assert_eq!(rules[0].get("ip_cidr").is_some(), true);
+        assert_eq!(rules[0].get("outbound").unwrap().as_str(), Some("direct"));
+        assert_eq!(rules[1].get("action").unwrap().as_str(), Some("sniff"));
+        assert_eq!(rules[2].get("action").unwrap().as_str(), Some("hijack-dns"));
         assert_eq!(route.get("auto_detect_interface"), Some(&json!(true)));
     }
 }
