@@ -63,8 +63,23 @@ impl Default for SimpleRouteConfig {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SimpleLogConfig {
+    pub level: String, // "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic"
+}
+
+impl Default for SimpleLogConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SimpleConfig {
+    #[serde(default)]
+    pub log: SimpleLogConfig,
     pub dns: SimpleDnsConfig,
     pub inbound: SimpleInboundConfig,
     pub route: SimpleRouteConfig,
@@ -225,8 +240,14 @@ pub fn build_dns_server(tag: &str, address_str: &str, detour: Option<&str>) -> V
 
 pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> Result<Value> {
     // 1. Log section
+    let log_level = match cfg.log.level.trim().to_lowercase().as_str() {
+        "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic" => {
+            cfg.log.level.trim().to_lowercase()
+        }
+        _ => "info".to_string(),
+    };
     let log_val = json!({
-        "level": "info",
+        "level": log_level,
         "timestamp": true
     });
 
@@ -876,5 +897,35 @@ mod tests {
             &experimental,
         );
         assert!(res.is_ok(), "Validation failed: {:?}", res.err());
+    }
+
+    #[test]
+    fn test_simple_config_log_level_customization() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        let mut cfg = SimpleConfig::default();
+        assert_eq!(cfg.log.level, "info");
+
+        // Default should output info
+        let generated_default = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_default["log"]["level"].as_str(), Some("info"));
+
+        // Customized level warn
+        cfg.log.level = "warn".to_string();
+        let generated_warn = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_warn["log"]["level"].as_str(), Some("warn"));
+
+        // Customized level error
+        cfg.log.level = "error".to_string();
+        let generated_error = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_error["log"]["level"].as_str(), Some("error"));
+
+        // Case insensitivity & invalid fallback
+        cfg.log.level = "DEBUG".to_string();
+        let generated_debug = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_debug["log"]["level"].as_str(), Some("debug"));
+
+        cfg.log.level = "invalid_level".to_string();
+        let generated_invalid = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_invalid["log"]["level"].as_str(), Some("info"));
     }
 }

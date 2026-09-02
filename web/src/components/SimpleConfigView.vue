@@ -637,6 +637,127 @@
       </div>
     </div>
 
+    <!-- Section 4: Log Level Settings -->
+    <div class="panel">
+      <div class="panel-title">
+        <div class="flex items-center gap-2">
+          <span>📝 运行日志级别</span>
+          <span
+            style="
+              font-size: 0.85rem;
+              font-weight: normal;
+              color: var(--text-muted);
+            "
+          >
+            控制 sing-box 核心日志的详细程度与输出级别
+          </span>
+        </div>
+      </div>
+
+      <div class="option-grid">
+        <div
+          class="option-card"
+          :class="{ active: form.log.level === 'info' }"
+          @click="form.log.level = 'info'"
+        >
+          <div class="option-card-header">
+            <div class="flex items-center gap-2">
+              <span class="option-icon">ℹ️</span>
+              <span class="option-title">Info (标准信息)</span>
+            </div>
+            <span class="badge badge-success">推荐</span>
+          </div>
+          <p class="option-desc">
+            记录基本启动、分流规则命中与连接事件，适合日常运行监控。
+          </p>
+        </div>
+
+        <div
+          class="option-card"
+          :class="{ active: form.log.level === 'warn' }"
+          @click="form.log.level = 'warn'"
+        >
+          <div class="option-card-header">
+            <div class="flex items-center gap-2">
+              <span class="option-icon">⚠️</span>
+              <span class="option-title">Warn (警告与错误)</span>
+            </div>
+            <span class="badge badge-info">精简静音</span>
+          </div>
+          <p class="option-desc">
+            仅记录网络波动警告与异常错误，大幅减少日常刷屏日志。
+          </p>
+        </div>
+
+        <div
+          class="option-card"
+          :class="{ active: form.log.level === 'error' }"
+          @click="form.log.level = 'error'"
+        >
+          <div class="option-card-header">
+            <div class="flex items-center gap-2">
+              <span class="option-icon">🔴</span>
+              <span class="option-title">Error (仅严重错误)</span>
+            </div>
+          </div>
+          <p class="option-desc">
+            极致静音模式，仅在内核遭遇连接中断或核心故障时输出日志。
+          </p>
+        </div>
+
+        <div
+          class="option-card"
+          :class="{ active: form.log.level === 'debug' }"
+          @click="form.log.level = 'debug'"
+        >
+          <div class="option-card-header">
+            <div class="flex items-center gap-2">
+              <span class="option-icon">🔍</span>
+              <span class="option-title">Debug (详细调试)</span>
+            </div>
+          </div>
+          <p class="option-desc">
+            输出详尽的路由、握手与协议调度内部信息，用于排查连接异常。
+          </p>
+        </div>
+      </div>
+
+      <!-- Advanced log level selector for trace/fatal/panic if needed -->
+      <div
+        class="flex items-center justify-between flex-wrap gap-2"
+        style="
+          margin-top: 1rem;
+          padding-top: 0.75rem;
+          border-top: 1px solid var(--border-color);
+          font-size: 0.85rem;
+        "
+      >
+        <div class="flex items-center gap-2 text-muted">
+          <span>更多特定日志级别:</span>
+          <select
+            v-model="form.log.level"
+            class="input-control"
+            style="width: 150px; padding: 0.25rem 0.5rem; font-size: 0.82rem"
+          >
+            <option value="trace">Trace (最深追踪)</option>
+            <option value="debug">Debug (调试)</option>
+            <option value="info">Info (标准)</option>
+            <option value="warn">Warn (警告)</option>
+            <option value="error">Error (错误)</option>
+            <option value="fatal">Fatal (致命故障)</option>
+            <option value="panic">Panic (紧急崩塌)</option>
+          </select>
+        </div>
+        <span style="font-size: 0.8rem; color: var(--text-muted)">
+          💡 生效后，可在「<a
+            href="#serviceLogs"
+            style="color: var(--primary); text-decoration: underline"
+            >核心日志</a
+          >」页面根据实际配置级别查看过滤输出。
+        </span>
+      </div>
+    </div>
+
     <!-- Preview Modal matching global modal standard with Foldable Tree View and Raw View -->
     <div class="modal" :class="{ active: showPreviewModal }">
       <div
@@ -1129,6 +1250,9 @@ const setOutboundMode = (mode) => {
 };
 
 const form = reactive({
+  log: {
+    level: "info",
+  },
   dns: {
     mode: "preset_fakeip",
     domestic_dns: "223.5.5.5",
@@ -1208,6 +1332,9 @@ const loadSimpleConfig = async () => {
     if (res.ok) {
       const data = await res.json();
       if (data.config) {
+        if (data.config.log && data.config.log.level) {
+          form.log.level = data.config.log.level;
+        }
         Object.assign(form.dns, data.config.dns);
         Object.assign(form.inbound, data.config.inbound);
         Object.assign(form.route, data.config.route);

@@ -33,6 +33,7 @@ pub struct ServiceStatusInfo {
     pub inbounds_summary: Option<String>,
     pub is_tun: bool,
     pub conflicting_processes: Vec<ConflictingProcessInfo>,
+    pub log_level: Option<String>,
 }
 
 pub struct SingBoxServiceManager {
@@ -261,13 +262,50 @@ impl SingBoxServiceManager {
         let running_config_path_buf = Self::get_running_config_path();
         let config_path = running_config_path_buf.to_string_lossy().to_string();
         let inbounds_summary = get_inbounds_summary_from_config(&running_config_path_buf);
-        let is_tun = is_run
-            && std::fs::read_to_string(&running_config_path_buf)
-                .ok()
-                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                .map(|json| is_tun_mode(&json))
-                .unwrap_or(false);
+        let running_config_content = std::fs::read_to_string(&running_config_path_buf).ok();
+        let config_json = running_config_content
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Value>(s).ok());
+        let is_tun = is_run && config_json.as_ref().map(is_tun_mode).unwrap_or(false);
         let conflicting_processes = detect_conflicting_singbox_processes(pid);
+
+        let log_level = if let Some(ref c) = config_json {
+            c.get("log")
+                .and_then(|l| l.get("level"))
+                .and_then(|lv| lv.as_str())
+                .map(|s| s.to_lowercase())
+        } else if let Some(db_path) = self.db_path.read().await.as_deref()
+            && let Ok(conn) = rusqlite::Connection::open(db_path)
+        {
+            let mode = crate::db::get_setting(&conn, "app_mode")
+                .unwrap_or(None)
+                .unwrap_or_else(|| "simple".to_string());
+            if mode == "simple" {
+                Some(
+                    crate::simple_config::get_saved_simple_config(&conn)
+                        .log
+                        .level,
+                )
+            } else {
+                let running_id_str = crate::db::get_setting(&conn, "running_config_id")
+                    .unwrap_or(None)
+                    .unwrap_or_default();
+                if let Ok(id) = running_id_str.parse::<i64>()
+                    && let Ok(Some(history)) = crate::db::get_config_history_detail(&conn, id)
+                    && let Some(content_str) = history.content
+                    && let Ok(c) = serde_json::from_str::<Value>(&content_str)
+                {
+                    c.get("log")
+                        .and_then(|l| l.get("level"))
+                        .and_then(|lv| lv.as_str())
+                        .map(|s| s.to_lowercase())
+                } else {
+                    Some("info".to_string())
+                }
+            }
+        } else {
+            Some("info".to_string())
+        };
 
         ServiceStatusInfo {
             running: is_run,
@@ -281,6 +319,7 @@ impl SingBoxServiceManager {
             inbounds_summary,
             is_tun,
             conflicting_processes,
+            log_level,
         }
     }
 
@@ -1300,12 +1339,14 @@ mod tests {
                 cmdline: Some("sing-box run -c /etc/sing-box/config.json".to_string()),
                 exe_path: Some("/usr/bin/sing-box".to_string()),
             }],
+            log_level: Some("warn".to_string()),
         };
 
         let json_val = serde_json::to_value(&status).unwrap();
         assert_eq!(json_val["conflicting_processes"][0]["pid"], 12345);
         assert_eq!(json_val["conflicting_processes"][0]["name"], "sing-box");
         assert_eq!(json_val["inbounds_summary"], "127.0.0.1:2080 (混合代理)");
+        assert_eq!(json_val["log_level"], "warn");
     }
 
     #[tokio::test]

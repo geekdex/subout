@@ -758,4 +758,169 @@ describe("ServiceLogsView & Cross-Mode Log Filtering", () => {
     expect(wrapper.find("pre").text()).not.toContain("google.com");
     expect(wrapper.find("pre").text()).not.toContain("baidu.com");
   });
+
+  it("filters logs strictly according to configured log level by default", async () => {
+    const { default: ServiceLogsView } = await import("./ServiceLogsView.vue");
+    const { serviceStatus } = await import("../store.js");
+
+    serviceStatus.value = {
+      running: true,
+      ready: true,
+      pid: 54321,
+      last_error: null,
+      conflicting_processes: [],
+      log_level: "warn",
+    };
+
+    const mockLogs = [
+      "[2026-09-01 00:00:01] 🟢 sing-box 进程已拉起 (PID: 54321)",
+      "[2026-09-01 00:00:02] [sing-box] DEBUG inbound/mixed: accept connection",
+      "[2026-09-01 00:00:03] [sing-box] INFO router: route match direct",
+      "[2026-09-01 00:00:04] [sing-box] WARN dns: response latency 1500ms exceeds threshold",
+      "[2026-09-01 00:00:05] [sing-box] ERROR connection: handshake timeout",
+    ];
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/service/logs")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockLogs),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(serviceStatus.value),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(ServiceLogsView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Badge indicates WARN level
+    expect(wrapper.text()).toContain("📋 核心配置级别: WARN");
+
+    // By default (auto: follow configured level 'warn'):
+    // INFO and DEBUG lines should be filtered out, WARN, ERROR and system lifecycle lines remain!
+    const logText = wrapper.find("pre").text();
+    expect(logText).toContain("🟢 sing-box 进程已拉起");
+    expect(logText).toContain("WARN dns: response latency 1500ms");
+    expect(logText).toContain("ERROR connection: handshake timeout");
+    expect(logText).not.toContain("DEBUG inbound/mixed");
+    expect(logText).not.toContain("INFO router: route match direct");
+
+    // Switch to 'all' level filter
+    const select = wrapper.find("select");
+    expect(select.exists()).toBe(true);
+    await select.setValue("all");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const allLogText = wrapper.find("pre").text();
+    expect(allLogText).toContain("DEBUG inbound/mixed");
+    expect(allLogText).toContain("INFO router: route match direct");
+
+    // Switch to 'error' level filter
+    await select.setValue("error");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const errorLogText = wrapper.find("pre").text();
+    expect(errorLogText).toContain("ERROR connection: handshake timeout");
+    expect(errorLogText).not.toContain("WARN dns: response latency 1500ms");
+    expect(errorLogText).not.toContain("DEBUG inbound/mixed");
+    expect(errorLogText).not.toContain("INFO router: route match direct");
+  });
+});
+
+describe("SimpleConfigView - Log Level Configuration", () => {
+  it("renders log level options and allows selecting different log levels", async () => {
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/nodes")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([]),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            config: {
+              log: {
+                level: "warn",
+              },
+              dns: {
+                mode: "preset_fakeip",
+                domestic_dns: "223.5.5.5",
+                foreign_dns: "fakeip",
+              },
+              inbound: {
+                inbound_type: "tun",
+                mixed_port: 2080,
+                allow_lan: false,
+                tun_stack: "system",
+                tun_auto_route: true,
+              },
+              route: {
+                mode: "smart",
+                block_ads: true,
+                bypass_lan: true,
+                default_outbound: "AUTO-Test",
+              },
+            },
+            generated: {},
+          }),
+      });
+    });
+
+    const wrapper = mount(SimpleConfigView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(wrapper.text()).toContain("运行日志级别");
+    expect(wrapper.text()).toContain("Info (标准信息)");
+    expect(wrapper.text()).toContain("Warn (警告与错误)");
+    expect(wrapper.text()).toContain("Error (仅严重错误)");
+    expect(wrapper.text()).toContain("Debug (详细调试)");
+
+    // Loaded with 'warn' from backend
+    const logCards = wrapper.findAll(".option-grid")[3].findAll(".option-card");
+    expect(logCards[1].classes()).toContain("active"); // Warn card
+
+    // Click Error card
+    await logCards[2].trigger("click");
+    expect(logCards[2].classes()).toContain("active");
+  });
+});
+
+describe("SiteTestView - Layout & Category Tabs Fixes", () => {
+  it("renders top-right action button and category tabs with proper structure", async () => {
+    const { default: SiteTestView } = await import("./SiteTestView.vue");
+
+    const wrapper = mount(SiteTestView, {
+      props: {
+        token: "mock-token",
+      },
+    });
+
+    // Check header structure
+    const header = wrapper.find(".view-header");
+    expect(header.exists()).toBe(true);
+    expect(header.attributes("style")).toContain(
+      "justify-content: space-between",
+    );
+
+    // Action button is inside view-header
+    const actionBtn = header.find("button.btn-primary");
+    expect(actionBtn.exists()).toBe(true);
+    expect(actionBtn.text()).toContain("一键测试全部网站");
+
+    // Category tabs are present and properly configured
+    const tabs = wrapper.find(".category-tabs");
+    expect(tabs.exists()).toBe(true);
+    const tabBtns = tabs.findAll(".tab-btn");
+    expect(tabBtns.length).toBe(5);
+    expect(tabBtns[0].text()).toContain("全部网站 (10)");
+    expect(tabBtns[0].classes()).toContain("active");
+  });
 });

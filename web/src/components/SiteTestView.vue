@@ -1,7 +1,16 @@
 <template>
   <div class="view-container">
-    <div class="view-header">
-      <div>
+    <div
+      class="view-header"
+      style="
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 1rem;
+      "
+    >
+      <div style="flex: 1; min-width: 260px">
         <h1>网站测试</h1>
         <p>
           直接检测当前系统网络对常见国外网站的连通性、响应延迟及 HTTP 状态码
@@ -9,7 +18,7 @@
         </p>
       </div>
 
-      <div>
+      <div style="flex-shrink: 0">
         <button
           class="btn btn-primary"
           :disabled="testingAll"
@@ -576,6 +585,7 @@ export default {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 12px;
+  flex-shrink: 0;
 }
 
 .control-left {
@@ -631,6 +641,7 @@ export default {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 12px;
+  flex-shrink: 0;
 }
 
 .custom-url-title {
@@ -721,6 +732,8 @@ export default {
   margin-bottom: 1.25rem;
   overflow-x: auto;
   padding-bottom: 0.25rem;
+  flex-shrink: 0;
+  min-height: 42px;
 }
 
 .tab-btn {
@@ -734,6 +747,7 @@ export default {
   font-weight: 500;
   transition: all 0.2s ease;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab-btn:hover {
@@ -752,6 +766,7 @@ export default {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 1.25rem;
+  flex-shrink: 0;
 }
 
 .site-card {
