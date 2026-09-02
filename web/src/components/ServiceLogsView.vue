@@ -210,25 +210,20 @@
 
       <pre
         ref="logBox"
-        style="
-          flex: 1;
-          min-height: 0;
-          padding: 0.75rem;
-          font-family: var(--font-mono);
-          font-size: 0.8rem;
-          color: #e2e8f0;
-          background: transparent;
-          overflow-y: auto;
-          white-space: pre-wrap;
-          word-break: break-all;
-          margin: 0;
-        "
-        >{{
-          filteredLogs ||
-          (logs.length === 0
-            ? "暂无日志输出。请先在控制中心启动 sing-box 服务..."
-            : `当前在 [${selectedLevelFilter === "auto" ? currentLogLevel.toUpperCase() : selectedLevelFilter.toUpperCase()}] 级别过滤下暂无匹配日志。`)
-        }}</pre>
+        :style="{
+          flex: '1',
+          minHeight: '0',
+          padding: '0.75rem',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.8rem',
+          color: filteredLogs ? '#e2e8f0' : '#94a3b8',
+          background: 'transparent',
+          overflowY: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all',
+          margin: '0',
+        }"
+        >{{ filteredLogs || emptyPlaceholder }}</pre>
     </div>
   </div>
 </template>
@@ -346,6 +341,29 @@ const filteredLogs = computed(() => {
   });
 
   return result.join("\n");
+});
+
+const emptyPlaceholder = computed(() => {
+  if (filteredLogs.value) return "";
+  if (logs.value.length === 0) {
+    if (serviceStatus.value.running) {
+      if (isLogDisabled.value) {
+        return "核心服务运行中，当前配置已禁用内核日志记录 (disabled: true)。产生新的服务管理事件后将在此实时显示...";
+      }
+      return `核心服务运行中，暂无新的日志输出（已配置记录级别: ${currentLogLevel.value.toUpperCase()}）。产生新网络连接或事件触发后将在此实时显示...`;
+    }
+    return "核心服务已停止，暂无日志输出。可前往控制中心启动 sing-box 服务后查看实时运行日志...";
+  }
+
+  const activeLevel =
+    selectedLevelFilter.value === "auto"
+      ? currentLogLevel.value.toUpperCase()
+      : selectedLevelFilter.value.toUpperCase();
+
+  if (filterKeyword.value.trim()) {
+    return `在关键字「${filterKeyword.value.trim()}」与 [${activeLevel}] 级别过滤下暂无匹配日志。可尝试调整搜索关键字或显示级别。`;
+  }
+  return `当前在 [${activeLevel}] 级别过滤下暂无匹配日志。可尝试将显示级别切换为「全部日志」查看更低级别输出。`;
 });
 
 const scrollToBottom = () => {

@@ -942,6 +942,58 @@ describe("SimpleConfigView - Log Level Configuration", () => {
     expect(wrapper.text()).toContain("📁 custom-singbox.log");
     expect(wrapper.text()).toContain("sing-box 核心配置已禁用日志记录");
   });
+
+  it("displays accurate dynamic placeholder when logs are empty based on running state", async () => {
+    const { default: ServiceLogsView } = await import("./ServiceLogsView.vue");
+    const { serviceStatus } = await import("../store.js");
+
+    // Case 1: Service is running
+    serviceStatus.value = {
+      running: true,
+      ready: true,
+      pid: 12345,
+      started_at: 1725200000,
+      uptime_secs: 60,
+      last_error: null,
+      binary_path: "/usr/bin/sing-box",
+      config_path: "/root/.config/subout/sing-box-running.json",
+      inbounds_summary: "127.0.0.1:2080",
+      is_tun: false,
+      conflicting_processes: [],
+      log_level: "info",
+      log_disabled: false,
+      log_output: null,
+    };
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/service/logs")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([]),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapperRunning = mount(ServiceLogsView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(wrapperRunning.find("pre").text()).toContain(
+      "核心服务运行中，暂无新的日志输出（已配置记录级别: INFO）",
+    );
+    expect(wrapperRunning.find("pre").text()).not.toContain(
+      "请先在控制中心启动 sing-box 服务",
+    );
+
+    // Case 2: Service is stopped
+    serviceStatus.value.running = false;
+    const wrapperStopped = mount(ServiceLogsView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(wrapperStopped.find("pre").text()).toContain(
+      "核心服务已停止，暂无日志输出",
+    );
+  });
 });
 
 describe("SiteTestView - Layout & Category Tabs Fixes", () => {
