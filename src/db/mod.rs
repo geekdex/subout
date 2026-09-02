@@ -113,10 +113,27 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
             action TEXT NOT NULL,
             detail TEXT NOT NULL,
             content TEXT,
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT
         )",
         [],
     )?;
+
+    // Migration: check if config_history has updated_at column
+    let has_updated_at_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('config_history') WHERE name='updated_at'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_updated_at_col == 0 {
+        let _ = conn.execute("ALTER TABLE config_history ADD COLUMN updated_at TEXT", []);
+        let _ = conn.execute(
+            "UPDATE config_history SET updated_at = created_at WHERE updated_at IS NULL",
+            [],
+        );
+    }
 
     // Migration: check if subscriptions has filter_keywords column
     let has_col: i64 = conn
@@ -867,7 +884,7 @@ pub fn log_history(
     content: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO config_history (change_type, action, detail, content) VALUES (?, ?, ?, ?)",
+        "INSERT INTO config_history (change_type, action, detail, content, updated_at) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))",
         params![change_type, action, detail, content],
     )?;
     Ok(())
@@ -875,7 +892,7 @@ pub fn log_history(
 
 pub fn get_config_history(conn: &Connection) -> Result<Vec<ConfigHistory>> {
     let mut stmt = conn.prepare(
-        "SELECT id, change_type, action, detail, created_at FROM config_history WHERE change_type IN ('配置列表', '模板配置') ORDER BY id DESC",
+        "SELECT id, change_type, action, detail, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE change_type IN ('配置列表', '模板配置') ORDER BY id DESC",
     )?;
     let history = stmt
         .query_map([], |row| {
@@ -886,6 +903,7 @@ pub fn get_config_history(conn: &Connection) -> Result<Vec<ConfigHistory>> {
                 detail: row.get(3)?,
                 content: None,
                 created_at: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -894,7 +912,7 @@ pub fn get_config_history(conn: &Connection) -> Result<Vec<ConfigHistory>> {
 
 pub fn get_config_history_detail(conn: &Connection, id: i64) -> Result<Option<ConfigHistory>> {
     let mut stmt = conn.prepare(
-        "SELECT id, change_type, action, detail, content, created_at FROM config_history WHERE id = ?"
+        "SELECT id, change_type, action, detail, content, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE id = ?"
     )?;
     let mut rows = stmt.query([id])?;
     if let Some(row) = rows.next()? {
@@ -905,6 +923,7 @@ pub fn get_config_history_detail(conn: &Connection, id: i64) -> Result<Option<Co
             detail: row.get(3)?,
             content: row.get(4)?,
             created_at: row.get(5)?,
+            updated_at: row.get(6)?,
         }))
     } else {
         Ok(None)

@@ -235,7 +235,7 @@ function createMockFetch() {
 // ============================================================
 
 async function mountConfigEditor(fetchMock = createMockFetch()) {
-  window.location.hash = "#config";
+  window.location.hash = "#configs";
   vi.spyOn(global, "fetch").mockImplementation(fetchMock);
 
   const wrapper = mount(ConfigEditorView, {
@@ -685,17 +685,17 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
   });
 
   describe("ConfigEditorView 路由与刷新状态保持", () => {
-    it("点击编辑配置 -> URL Hash 包含 tab 锚点 #config/edit/1/log", async () => {
-      window.location.hash = "#config";
+    it("点击编辑配置 -> URL Hash 包含 tab 锚点 #configs/edit/1/log", async () => {
+      window.location.hash = "#configs";
       const wrapper = await mountConfigEditor();
       await enterEditMode(wrapper);
 
-      expect(window.location.hash).toBe("#config/edit/1/log");
+      expect(window.location.hash).toBe("#configs/edit/1/log");
       expect(wrapper.text()).toContain("编辑中 #1");
     });
 
     it("切换 tab -> URL Hash 动态更新为对应锚点", async () => {
-      window.location.hash = "#config";
+      window.location.hash = "#configs";
       const wrapper = await mountConfigEditor();
       await enterEditMode(wrapper);
 
@@ -706,11 +706,11 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       await routeTab.trigger("click");
       await flushPromises();
 
-      expect(window.location.hash).toBe("#config/edit/1/route");
+      expect(window.location.hash).toBe("#configs/edit/1/route");
     });
 
-    it("刷新页面 (带 #config/edit/1/route 挂载) -> 直接进入路由规则 tab 页", async () => {
-      window.location.hash = "#config/edit/1/route";
+    it("刷新页面 (带 #configs/edit/1/route 挂载) -> 直接进入路由规则 tab 页", async () => {
+      window.location.hash = "#configs/edit/1/route";
       vi.spyOn(global, "fetch").mockImplementation(createMockFetch());
       const wrapper = mount(ConfigEditorView, {
         global: { stubs: { JsonTreeView: true } },
@@ -722,8 +722,20 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(wrapper.text()).toContain("route 配置");
     });
 
-    it("在编辑模式下点击'返回列表' -> URL Hash 恢复为 #config 并返回列表", async () => {
-      window.location.hash = "#config";
+    it("旧版 URL #config 兼容性 -> 自动支持进入编辑", async () => {
+      window.location.hash = "#config/edit/1/log";
+      vi.spyOn(global, "fetch").mockImplementation(createMockFetch());
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("编辑中 #1");
+    });
+
+    it("在编辑模式下点击'返回列表' -> URL Hash 恢复为 #configs 并返回列表", async () => {
+      window.location.hash = "#configs";
       const wrapper = await mountConfigEditor();
       await enterEditMode(wrapper);
 
@@ -734,12 +746,12 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       await backBtn.trigger("click");
       await flushPromises();
 
-      expect(window.location.hash).toBe("#config");
+      expect(window.location.hash).toBe("#configs");
       expect(wrapper.text()).toContain("配置管理");
     });
 
     it("路由规则重复项检测 -> 存在重复 RuleSet 时显示红色提示框和高亮", async () => {
-      window.location.hash = "#config/edit/1/route";
+      window.location.hash = "#configs/edit/1/route";
       const baseMockFetch = createMockFetch();
       vi.spyOn(global, "fetch").mockImplementation((url) => {
         const urlStr = String(url);
@@ -779,7 +791,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
 
     it("路由规则重复项检测 -> 存在重复域名/IP时显示红色提示框", async () => {
-      window.location.hash = "#config/edit/1/route";
+      window.location.hash = "#configs/edit/1/route";
       const baseMockFetch = createMockFetch();
       vi.spyOn(global, "fetch").mockImplementation((url) => {
         const urlStr = String(url);
@@ -813,7 +825,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
 
     it("编辑已有出站卡片 -> 传递正确的 idx 索引，防止校验时重复 push", async () => {
-      window.location.hash = "#config";
+      window.location.hash = "#configs";
       const wrapper = await mountConfigEditor();
       await enterEditMode(wrapper);
       await switchToOutboundsTab(wrapper);
@@ -852,7 +864,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
 
     it("配置详情页：若当前编辑条目为运行设置配置，展示'运行设置中'徽章与'更新'按钮", async () => {
-      window.location.hash = "#config/edit/1/log";
+      window.location.hash = "#configs/edit/1/log";
       const baseMockFetch = createMockFetch();
       global.fetch = vi.fn().mockImplementation((url) => {
         if (String(url).includes("/api/config/running")) {
@@ -884,7 +896,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
 
     it("配置详情页：点击'更新'按钮能够成功保存并触发运行配置更新，不会卡住且状态恢复正常", async () => {
-      window.location.hash = "#config/edit/1/route";
+      window.location.hash = "#configs/edit/1/route";
       const baseMockFetch = createMockFetch();
       global.fetch = vi.fn().mockImplementation((url, options) => {
         if (String(url).includes("/api/config/running")) {
@@ -921,7 +933,10 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
             json: async () => ({ valid: true }),
           });
         }
-        if (String(url).includes("/api/config/history/1") && options?.method === "PUT") {
+        if (
+          String(url).includes("/api/config/history/1") &&
+          options?.method === "PUT"
+        ) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ success: true }),
@@ -951,7 +966,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
 
   describe("DNS 规则模块（子组件托管）", () => {
     it("DNS tab 渲染 DnsEditor 组件", async () => {
-      window.location.hash = "#config/edit/1/dns";
+      window.location.hash = "#configs/edit/1/dns";
       const wrapper = mount(ConfigEditorView, {
         global: { stubs: { JsonTreeView: true } },
       });
@@ -963,7 +978,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
 
   describe("Route 与 DNS 规则快速双向同步机制（子组件托管）", () => {
     it("Route tab 渲染 RouteEditor 组件", async () => {
-      window.location.hash = "#config/edit/1/route";
+      window.location.hash = "#configs/edit/1/route";
       const wrapper = mount(ConfigEditorView, {
         global: { stubs: { JsonTreeView: true } },
       });
@@ -973,7 +988,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
 
     it("DNS tab 渲染 DnsEditor 组件", async () => {
-      window.location.hash = "#config/edit/1/dns";
+      window.location.hash = "#configs/edit/1/dns";
       const wrapper = mount(ConfigEditorView, {
         global: { stubs: { JsonTreeView: true } },
       });
@@ -983,9 +998,65 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
   });
 
+  describe("配置列表与同步最新资源", () => {
+    it("配置列表展示'最后更新时间'与'同步最新资源'按钮", async () => {
+      window.location.hash = "#configs";
+      const wrapper = await mountConfigEditor();
+
+      expect(wrapper.text()).toContain("最后更新时间");
+      const syncBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text() === "同步最新资源");
+      expect(syncBtn).toBeDefined();
+    });
+
+    it("点击'同步最新资源'弹出确认并在确认后触发同步请求", async () => {
+      window.location.hash = "#configs";
+      let syncCalled = false;
+      const baseFetch = createMockFetch();
+      const customFetch = (url, options) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/api/config/history/1/sync-resources")) {
+          syncCalled = true;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: 1,
+              nodes_count: 5,
+              groups_count: 2,
+              outbounds_count: 9,
+              repaired_routes: ["route.rules[1].outbound: dead-node -> direct"],
+              is_running: false,
+              restarted: false,
+            }),
+          });
+        }
+        return baseFetch(url, options);
+      };
+
+      const wrapper = await mountConfigEditor(customFetch);
+      const syncBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text() === "同步最新资源");
+      expect(syncBtn).toBeDefined();
+
+      await syncBtn.trigger("click");
+      await flushPromises();
+      await flushPromises();
+
+      expect(mockConfirmDialog).toHaveBeenCalled();
+      expect(syncCalled).toBe(true);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining("已成功同步最新资源"),
+        "success",
+      );
+    });
+  });
+
   describe("配置复制与 Outbounds 批量删除", () => {
     it("配置列表：点击'复制'按钮可以复制指定配置", async () => {
-      window.location.hash = "#config";
+      window.location.hash = "#configs";
       let postPayload = null;
       const baseFetch = createMockFetch();
       vi.spyOn(global, "fetch").mockImplementation((url, options) => {
@@ -1042,7 +1113,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
     });
 
     it("Outbounds tab: 勾选策略组并触发批量删除", async () => {
-      window.location.hash = "#config/edit/1/outbounds";
+      window.location.hash = "#configs/edit/1/outbounds";
       const baseFetch = createMockFetch();
       vi.spyOn(global, "fetch").mockImplementation((url, options) => {
         const urlStr = String(url);

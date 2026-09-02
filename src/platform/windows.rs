@@ -145,29 +145,31 @@ impl PlatformStrategy for WindowsPlatform {
                         "/NH",
                     ])
                     .output()
-                    && output.status.success() {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        for line in stdout.lines() {
-                            let fields: Vec<String> = line
-                                .split(',')
-                                .map(|s| s.trim_matches('"').trim().to_string())
-                                .collect();
-                            if fields.len() >= 2
-                                && let Ok(pid) = fields[1].parse::<u32>() {
-                                    if pid == current_pid || Some(pid) == managed_pid || pid <= 4 {
-                                        continue;
-                                    }
-                                    if seen_pids.insert(pid) {
-                                        results.push(ConflictingProcessInfo {
-                                            pid,
-                                            name: fields[0].clone(),
-                                            cmdline: None,
-                                            exe_path: None,
-                                        });
-                                    }
-                                }
+                    && output.status.success()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        let fields: Vec<String> = line
+                            .split(',')
+                            .map(|s| s.trim_matches('"').trim().to_string())
+                            .collect();
+                        if fields.len() >= 2
+                            && let Ok(pid) = fields[1].parse::<u32>()
+                        {
+                            if pid == current_pid || Some(pid) == managed_pid || pid <= 4 {
+                                continue;
+                            }
+                            if seen_pids.insert(pid) {
+                                results.push(ConflictingProcessInfo {
+                                    pid,
+                                    name: fields[0].clone(),
+                                    cmdline: None,
+                                    exe_path: None,
+                                });
+                            }
                         }
                     }
+                }
             }
         }
 
@@ -489,18 +491,19 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
         if let Ok(output) = std::process::Command::new("where").arg(cmd_name).output()
-            && output.status.success() {
-                let out_str = String::from_utf8_lossy(&output.stdout);
-                for line in out_str.lines() {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        let p = PathBuf::from(trimmed);
-                        if p.exists() {
-                            return Some(p);
-                        }
+            && output.status.success()
+        {
+            let out_str = String::from_utf8_lossy(&output.stdout);
+            for line in out_str.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    let p = PathBuf::from(trimmed);
+                    if p.exists() {
+                        return Some(p);
                     }
                 }
             }
+        }
         None
     }
 }
@@ -551,9 +554,10 @@ pub fn filter_conflicting_processes(
         }
 
         if let Some(ppid) = item.parent_process_id
-            && (ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid)) {
-                continue;
-            }
+            && (ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid))
+        {
+            continue;
+        }
 
         let name = item.name.unwrap_or_default();
         let name_lower = name.to_lowercase();

@@ -63,20 +63,19 @@ impl Default for SimpleRouteConfig {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SimpleConfig {
     pub dns: SimpleDnsConfig,
     pub inbound: SimpleInboundConfig,
     pub route: SimpleRouteConfig,
 }
 
-
 pub fn get_saved_simple_config(conn: &Connection) -> SimpleConfig {
     if let Ok(Some(json_str)) = db::get_setting(conn, "simple_config")
-        && let Ok(cfg) = serde_json::from_str::<SimpleConfig>(&json_str) {
-            return cfg;
-        }
+        && let Ok(cfg) = serde_json::from_str::<SimpleConfig>(&json_str)
+    {
+        return cfg;
+    }
     SimpleConfig::default()
 }
 
@@ -261,11 +260,12 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         if node.enabled {
             proxy_node_tags.push(node.tag.clone());
             if let Ok(mut val) = serde_json::from_str::<Value>(&node.raw_json)
-                && let Some(obj) = val.as_object_mut() {
-                    obj.insert("tag".to_string(), Value::String(node.tag.clone()));
-                    generator::sanitize_outbound_value(&mut val);
-                    node_outbounds.push(val);
-                }
+                && let Some(obj) = val.as_object_mut()
+            {
+                obj.insert("tag".to_string(), Value::String(node.tag.clone()));
+                generator::sanitize_outbound_value(&mut val);
+                node_outbounds.push(val);
+            }
         }
     }
 

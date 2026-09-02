@@ -71,4 +71,6 @@ pub struct ConfigHistory {
     pub detail: String,
     pub content: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }

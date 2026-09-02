@@ -11,13 +11,15 @@ pub fn decode_base64(mut input: String) -> Option<String> {
     }
 
     if let Ok(bytes) = STANDARD.decode(&input)
-        && let Ok(s) = String::from_utf8(bytes) {
-            return Some(s);
-        }
+        && let Ok(s) = String::from_utf8(bytes)
+    {
+        return Some(s);
+    }
     if let Ok(bytes) = URL_SAFE.decode(&input)
-        && let Ok(s) = String::from_utf8(bytes) {
-            return Some(s);
-        }
+        && let Ok(s) = String::from_utf8(bytes)
+    {
+        return Some(s);
+    }
     None
 }
 

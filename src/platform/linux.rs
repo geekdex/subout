@@ -167,71 +167,68 @@ impl PlatformStrategy for LinuxPlatform {
             if let Ok(output) = std::process::Command::new("ps")
                 .args(["-eo", "pid,ppid,comm,args"])
                 .output()
-                && output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines().skip(1) {
-                        let trimmed = line.trim();
-                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                        if parts.len() >= 3
-                            && let (Ok(pid), Ok(ppid)) =
-                                (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-                            {
-                                if pid == current_pid
-                                    || Some(pid) == managed_pid
-                                    || pid == 0
-                                    || pid == 1
-                                {
-                                    continue;
-                                }
-                                if ppid == current_pid
-                                    || (managed_pid.is_some() && Some(ppid) == managed_pid)
-                                {
-                                    continue;
-                                }
-                                let comm = parts[2];
-                                let full_cmd = if parts.len() >= 4 {
-                                    parts[3..].join(" ")
-                                } else {
-                                    comm.to_string()
-                                };
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines().skip(1) {
+                    let trimmed = line.trim();
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() >= 3
+                        && let (Ok(pid), Ok(ppid)) =
+                            (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                    {
+                        if pid == current_pid || Some(pid) == managed_pid || pid == 0 || pid == 1 {
+                            continue;
+                        }
+                        if ppid == current_pid
+                            || (managed_pid.is_some() && Some(ppid) == managed_pid)
+                        {
+                            continue;
+                        }
+                        let comm = parts[2];
+                        let full_cmd = if parts.len() >= 4 {
+                            parts[3..].join(" ")
+                        } else {
+                            comm.to_string()
+                        };
 
-                                let is_subout = comm == "subout"
-                                    || comm.contains("subout")
-                                    || full_cmd.contains("subout web")
-                                    || full_cmd.contains("target/debug/subout")
-                                    || full_cmd.contains("target/release/subout")
-                                    || full_cmd.contains("cargo")
-                                    || full_cmd.contains(&config_path_str)
-                                    || full_cmd.contains("sing-box.json")
-                                    || full_cmd.contains("sing-box-running.json");
+                        let is_subout = comm == "subout"
+                            || comm.contains("subout")
+                            || full_cmd.contains("subout web")
+                            || full_cmd.contains("target/debug/subout")
+                            || full_cmd.contains("target/release/subout")
+                            || full_cmd.contains("cargo")
+                            || full_cmd.contains(&config_path_str)
+                            || full_cmd.contains("sing-box.json")
+                            || full_cmd.contains("sing-box-running.json");
 
-                                if is_subout {
-                                    continue;
-                                }
+                        if is_subout {
+                            continue;
+                        }
 
-                                let is_singbox = comm == "sing-box"
-                                    || comm.ends_with("/sing-box")
-                                    || comm.contains("sing-box")
-                                    || full_cmd.starts_with("/usr/bin/sing-box")
-                                    || full_cmd.starts_with("/usr/local/bin/sing-box")
-                                    || full_cmd.starts_with("/opt/homebrew/bin/sing-box")
-                                    || full_cmd.starts_with("sing-box ")
-                                    || full_cmd.contains("/sing-box run")
-                                    || full_cmd.contains("sing-box run")
-                                    || full_cmd.contains("sing-box -D")
-                                    || full_cmd.contains("sing-box -C");
+                        let is_singbox = comm == "sing-box"
+                            || comm.ends_with("/sing-box")
+                            || comm.contains("sing-box")
+                            || full_cmd.starts_with("/usr/bin/sing-box")
+                            || full_cmd.starts_with("/usr/local/bin/sing-box")
+                            || full_cmd.starts_with("/opt/homebrew/bin/sing-box")
+                            || full_cmd.starts_with("sing-box ")
+                            || full_cmd.contains("/sing-box run")
+                            || full_cmd.contains("sing-box run")
+                            || full_cmd.contains("sing-box -D")
+                            || full_cmd.contains("sing-box -C");
 
-                                if is_singbox && seen_pids.insert(pid) {
-                                    results.push(ConflictingProcessInfo {
-                                        pid,
-                                        name: comm.to_string(),
-                                        cmdline: Some(full_cmd),
-                                        exe_path: None,
-                                    });
-                                }
-                            }
+                        if is_singbox && seen_pids.insert(pid) {
+                            results.push(ConflictingProcessInfo {
+                                pid,
+                                name: comm.to_string(),
+                                cmdline: Some(full_cmd),
+                                exe_path: None,
+                            });
+                        }
                     }
                 }
+            }
 
             // 2. Linux /proc inspection
             if let Ok(entries) = std::fs::read_dir("/proc") {
@@ -251,17 +248,18 @@ impl PlatformStrategy for LinuxPlatform {
                         let proc_path = entry.path();
                         let stat_path = proc_path.join("stat");
                         if let Ok(stat_str) = std::fs::read_to_string(&stat_path)
-                            && let Some(rparen) = stat_str.rfind(')') {
-                                let after = stat_str[rparen + 1..].trim_start();
-                                let stat_parts: Vec<&str> = after.split_whitespace().collect();
-                                if stat_parts.len() >= 2
-                                    && let Ok(ppid) = stat_parts[1].parse::<u32>()
-                                        && (ppid == current_pid
-                                            || (managed_pid.is_some() && Some(ppid) == managed_pid))
-                                        {
-                                            continue;
-                                        }
+                            && let Some(rparen) = stat_str.rfind(')')
+                        {
+                            let after = stat_str[rparen + 1..].trim_start();
+                            let stat_parts: Vec<&str> = after.split_whitespace().collect();
+                            if stat_parts.len() >= 2
+                                && let Ok(ppid) = stat_parts[1].parse::<u32>()
+                                && (ppid == current_pid
+                                    || (managed_pid.is_some() && Some(ppid) == managed_pid))
+                            {
+                                continue;
                             }
+                        }
 
                         let comm_path = proc_path.join("comm");
                         let cmdline_path = proc_path.join("cmdline");
@@ -329,29 +327,34 @@ impl PlatformStrategy for LinuxPlatform {
             if let Ok(output) = std::process::Command::new("systemctl")
                 .args(["show", "sing-box", "-p", "MainPID", "-p", "ActiveState"])
                 .output()
-                && output.status.success() {
-                    let out_str = String::from_utf8_lossy(&output.stdout);
-                    let mut is_active = false;
-                    let mut s_pid = 0u32;
-                    for line in out_str.lines() {
-                        if line.starts_with("ActiveState=active") {
-                            is_active = true;
-                        } else if line.starts_with("MainPID=")
-                            && let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>()
-                            {
-                                s_pid = p;
-                            }
+                && output.status.success()
+            {
+                let out_str = String::from_utf8_lossy(&output.stdout);
+                let mut is_active = false;
+                let mut s_pid = 0u32;
+                for line in out_str.lines() {
+                    if line.starts_with("ActiveState=active") {
+                        is_active = true;
+                    } else if line.starts_with("MainPID=")
+                        && let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>()
+                    {
+                        s_pid = p;
                     }
-                    if is_active && s_pid > 1 && s_pid != current_pid && Some(s_pid) != managed_pid
-                        && seen_pids.insert(s_pid) {
-                            results.push(ConflictingProcessInfo {
-                                pid: s_pid,
-                                name: "sing-box (systemd)".to_string(),
-                                cmdline: Some("systemctl: sing-box.service (Active)".to_string()),
-                                exe_path: Some("/usr/bin/sing-box".to_string()),
-                            });
-                        }
                 }
+                if is_active
+                    && s_pid > 1
+                    && s_pid != current_pid
+                    && Some(s_pid) != managed_pid
+                    && seen_pids.insert(s_pid)
+                {
+                    results.push(ConflictingProcessInfo {
+                        pid: s_pid,
+                        name: "sing-box (systemd)".to_string(),
+                        cmdline: Some("systemctl: sing-box.service (Active)".to_string()),
+                        exe_path: Some("/usr/bin/sing-box".to_string()),
+                    });
+                }
+            }
 
             results
         }
@@ -414,28 +417,29 @@ impl PlatformStrategy for LinuxPlatform {
                 if let Ok(output) = std::process::Command::new("ps")
                     .args(["-eo", "pid,ppid,comm,args"])
                     .output()
-                    && output.status.success() {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        for line in stdout.lines().skip(1) {
-                            let parts: Vec<&str> = line.split_whitespace().collect();
-                            if parts.len() >= 3
-                                && let (Ok(pid), Ok(ppid)) =
-                                    (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-                                {
-                                    if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid {
-                                        continue;
-                                    }
-                                    let full_cmd = parts[2..].join(" ");
-                                    let is_subout_instance = full_cmd.contains(&config_path_str)
-                                        || full_cmd.contains("sing-box.json")
-                                        || full_cmd.contains("sing-box-running.json")
-                                        || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
-                                    if is_subout_instance {
-                                        pids_to_kill.push(pid);
-                                    }
-                                }
+                    && output.status.success()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines().skip(1) {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 3
+                            && let (Ok(pid), Ok(ppid)) =
+                                (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                        {
+                            if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid {
+                                continue;
+                            }
+                            let full_cmd = parts[2..].join(" ");
+                            let is_subout_instance = full_cmd.contains(&config_path_str)
+                                || full_cmd.contains("sing-box.json")
+                                || full_cmd.contains("sing-box-running.json")
+                                || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
+                            if is_subout_instance {
+                                pids_to_kill.push(pid);
+                            }
                         }
                     }
+                }
 
                 if let Ok(entries) = std::fs::read_dir("/proc") {
                     for entry in entries.flatten() {
@@ -548,9 +552,10 @@ impl PlatformStrategy for LinuxPlatform {
                 if let Err(e) = self
                     .run_sudo_command("systemctl", &["stop", "sing-box"], Some(pass))
                     .await
-                    && e.to_string().contains("Sudo 密码不正确") {
-                        return Err(e);
-                    }
+                    && e.to_string().contains("Sudo 密码不正确")
+                {
+                    return Err(e);
+                }
                 let _ = self
                     .run_sudo_command("systemctl", &["stop", "sing-box.service"], Some(pass))
                     .await;
@@ -683,18 +688,19 @@ impl PlatformStrategy for LinuxPlatform {
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
         if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output()
-            && output.status.success() {
-                let out_str = String::from_utf8_lossy(&output.stdout);
-                for line in out_str.lines() {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        let p = PathBuf::from(trimmed);
-                        if p.exists() {
-                            return Some(p);
-                        }
+            && output.status.success()
+        {
+            let out_str = String::from_utf8_lossy(&output.stdout);
+            for line in out_str.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    let p = PathBuf::from(trimmed);
+                    if p.exists() {
+                        return Some(p);
                     }
                 }
             }
+        }
         None
     }
 }

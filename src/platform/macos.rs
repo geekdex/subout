@@ -153,71 +153,68 @@ impl PlatformStrategy for MacOsPlatform {
             if let Ok(output) = std::process::Command::new("ps")
                 .args(["-eo", "pid,ppid,comm,args"])
                 .output()
-                && output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines().skip(1) {
-                        let trimmed = line.trim();
-                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                        if parts.len() >= 3
-                            && let (Ok(pid), Ok(ppid)) =
-                                (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-                            {
-                                if pid == current_pid
-                                    || Some(pid) == managed_pid
-                                    || pid == 0
-                                    || pid == 1
-                                {
-                                    continue;
-                                }
-                                if ppid == current_pid
-                                    || (managed_pid.is_some() && Some(ppid) == managed_pid)
-                                {
-                                    continue;
-                                }
-                                let comm = parts[2];
-                                let full_cmd = if parts.len() >= 4 {
-                                    parts[3..].join(" ")
-                                } else {
-                                    comm.to_string()
-                                };
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines().skip(1) {
+                    let trimmed = line.trim();
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() >= 3
+                        && let (Ok(pid), Ok(ppid)) =
+                            (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                    {
+                        if pid == current_pid || Some(pid) == managed_pid || pid == 0 || pid == 1 {
+                            continue;
+                        }
+                        if ppid == current_pid
+                            || (managed_pid.is_some() && Some(ppid) == managed_pid)
+                        {
+                            continue;
+                        }
+                        let comm = parts[2];
+                        let full_cmd = if parts.len() >= 4 {
+                            parts[3..].join(" ")
+                        } else {
+                            comm.to_string()
+                        };
 
-                                let is_subout = comm == "subout"
-                                    || comm.contains("subout")
-                                    || full_cmd.contains("subout web")
-                                    || full_cmd.contains("target/debug/subout")
-                                    || full_cmd.contains("target/release/subout")
-                                    || full_cmd.contains("cargo")
-                                    || full_cmd.contains(&config_path_str)
-                                    || full_cmd.contains("sing-box.json")
-                                    || full_cmd.contains("sing-box-running.json");
+                        let is_subout = comm == "subout"
+                            || comm.contains("subout")
+                            || full_cmd.contains("subout web")
+                            || full_cmd.contains("target/debug/subout")
+                            || full_cmd.contains("target/release/subout")
+                            || full_cmd.contains("cargo")
+                            || full_cmd.contains(&config_path_str)
+                            || full_cmd.contains("sing-box.json")
+                            || full_cmd.contains("sing-box-running.json");
 
-                                if is_subout {
-                                    continue;
-                                }
+                        if is_subout {
+                            continue;
+                        }
 
-                                let is_singbox = comm == "sing-box"
-                                    || comm.ends_with("/sing-box")
-                                    || comm.contains("sing-box")
-                                    || full_cmd.starts_with("/usr/bin/sing-box")
-                                    || full_cmd.starts_with("/usr/local/bin/sing-box")
-                                    || full_cmd.starts_with("/opt/homebrew/bin/sing-box")
-                                    || full_cmd.starts_with("sing-box ")
-                                    || full_cmd.contains("/sing-box run")
-                                    || full_cmd.contains("sing-box run")
-                                    || full_cmd.contains("sing-box -D")
-                                    || full_cmd.contains("sing-box -C");
+                        let is_singbox = comm == "sing-box"
+                            || comm.ends_with("/sing-box")
+                            || comm.contains("sing-box")
+                            || full_cmd.starts_with("/usr/bin/sing-box")
+                            || full_cmd.starts_with("/usr/local/bin/sing-box")
+                            || full_cmd.starts_with("/opt/homebrew/bin/sing-box")
+                            || full_cmd.starts_with("sing-box ")
+                            || full_cmd.contains("/sing-box run")
+                            || full_cmd.contains("sing-box run")
+                            || full_cmd.contains("sing-box -D")
+                            || full_cmd.contains("sing-box -C");
 
-                                if is_singbox && seen_pids.insert(pid) {
-                                    results.push(ConflictingProcessInfo {
-                                        pid,
-                                        name: comm.to_string(),
-                                        cmdline: Some(full_cmd),
-                                        exe_path: None,
-                                    });
-                                }
-                            }
+                        if is_singbox && seen_pids.insert(pid) {
+                            results.push(ConflictingProcessInfo {
+                                pid,
+                                name: comm.to_string(),
+                                cmdline: Some(full_cmd),
+                                exe_path: None,
+                            });
+                        }
                     }
                 }
+            }
 
             results
         }
@@ -280,28 +277,29 @@ impl PlatformStrategy for MacOsPlatform {
                 if let Ok(output) = std::process::Command::new("ps")
                     .args(["-eo", "pid,ppid,comm,args"])
                     .output()
-                    && output.status.success() {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        for line in stdout.lines().skip(1) {
-                            let parts: Vec<&str> = line.split_whitespace().collect();
-                            if parts.len() >= 3
-                                && let (Ok(pid), Ok(ppid)) =
-                                    (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-                                {
-                                    if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid {
-                                        continue;
-                                    }
-                                    let full_cmd = parts[2..].join(" ");
-                                    let is_subout_instance = full_cmd.contains(&config_path_str)
-                                        || full_cmd.contains("sing-box.json")
-                                        || full_cmd.contains("sing-box-running.json")
-                                        || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
-                                    if is_subout_instance {
-                                        pids_to_kill.push(pid);
-                                    }
-                                }
+                    && output.status.success()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines().skip(1) {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 3
+                            && let (Ok(pid), Ok(ppid)) =
+                                (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                        {
+                            if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid {
+                                continue;
+                            }
+                            let full_cmd = parts[2..].join(" ");
+                            let is_subout_instance = full_cmd.contains(&config_path_str)
+                                || full_cmd.contains("sing-box.json")
+                                || full_cmd.contains("sing-box-running.json")
+                                || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
+                            if is_subout_instance {
+                                pids_to_kill.push(pid);
+                            }
                         }
                     }
+                }
 
                 if pids_to_kill.is_empty() {
                     return;
@@ -443,9 +441,10 @@ impl PlatformStrategy for MacOsPlatform {
             obj.remove("auto_redirect");
             if is_tun {
                 if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
-                    && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun")) {
-                        obj.remove("interface_name");
-                    }
+                    && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
+                {
+                    obj.remove("interface_name");
+                }
 
                 // On macOS, FakeIP and TUN transparent proxy require stack: "mixed" or "gvisor".
                 let current_stack = obj.get("stack").and_then(|s| s.as_str());
@@ -528,18 +527,19 @@ impl PlatformStrategy for MacOsPlatform {
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
         if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output()
-            && output.status.success() {
-                let out_str = String::from_utf8_lossy(&output.stdout);
-                for line in out_str.lines() {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        let p = PathBuf::from(trimmed);
-                        if p.exists() {
-                            return Some(p);
-                        }
+            && output.status.success()
+        {
+            let out_str = String::from_utf8_lossy(&output.stdout);
+            for line in out_str.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    let p = PathBuf::from(trimmed);
+                    if p.exists() {
+                        return Some(p);
                     }
                 }
             }
+        }
         None
     }
 }
