@@ -104,12 +104,12 @@
                 "
               >
                 系统检测到独立于 Subout 之外的 sing-box 进程（例如通过 apt/brew
-                安装或系统 systemd 服务已启动）。
+                安装或系统开机服务已启动）。
                 <br />
-                为避免端口冲突和路由争抢，<strong
-                  >请先关闭现有外部进程，然后方可使用 Subout
-                  启动代理服务</strong
-                >。
+                为避免端口冲突和路由争抢，推荐直接点击<strong
+                  >【🚀 一键接管并启动】</strong
+                >自动停止外部服务、禁用开机争抢并由 Subout
+                托管代理；或在终端中手动关闭。
               </p>
             </div>
           </div>
@@ -133,13 +133,28 @@
               📋 复制关闭命令
             </button>
             <button
-              v-if="conflictingProcesses.length > 1"
-              class="btn btn-danger"
-              style="font-size: 0.8rem; padding: 0.35rem 0.75rem"
-              :disabled="killingPid !== null"
+              class="btn btn-secondary"
+              style="
+                font-size: 0.8rem;
+                padding: 0.35rem 0.75rem;
+                color: var(--danger);
+              "
+              :disabled="killingPid !== null || isTakingOver"
               @click="handleKillExternalAll"
             >
-              🛑 一键终止全部
+              {{ killingPid !== null ? "⏳ 正在终止..." : "🛑 仅终止进程" }}
+            </button>
+            <button
+              class="btn btn-primary"
+              style="
+                font-size: 0.8rem;
+                padding: 0.35rem 0.85rem;
+                font-weight: 600;
+              "
+              :disabled="killingPid !== null || isTakingOver"
+              @click="handleTakeoverExternalAll"
+            >
+              {{ isTakingOver ? "⏳ 正在接管..." : "🚀 一键接管并启动" }}
             </button>
           </div>
         </div>
@@ -198,22 +213,45 @@
                 命令: <code>{{ proc.cmdline }}</code>
               </div>
             </div>
-            <button
-              class="btn btn-danger btn-sm"
-              style="
-                font-size: 0.75rem;
-                padding: 0.25rem 0.5rem;
-                flex-shrink: 0;
-              "
-              :disabled="killingPid === proc.pid || killingPid === 'all'"
-              @click="handleKillExternal(proc)"
-            >
-              {{
-                killingPid === proc.pid || killingPid === "all"
-                  ? "⏳ 正在终止..."
-                  : "🛑 终止进程"
-              }}
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                class="btn btn-secondary btn-sm"
+                style="
+                  font-size: 0.75rem;
+                  padding: 0.25rem 0.5rem;
+                  flex-shrink: 0;
+                  color: var(--danger);
+                "
+                :disabled="
+                  killingPid === proc.pid ||
+                  killingPid === 'all' ||
+                  isTakingOver
+                "
+                @click="handleKillExternal(proc)"
+              >
+                {{
+                  killingPid === proc.pid || killingPid === "all"
+                    ? "⏳ 正在终止..."
+                    : "🛑 终止"
+                }}
+              </button>
+              <button
+                class="btn btn-primary btn-sm"
+                style="
+                  font-size: 0.75rem;
+                  padding: 0.25rem 0.6rem;
+                  flex-shrink: 0;
+                "
+                :disabled="
+                  killingPid === proc.pid ||
+                  killingPid === 'all' ||
+                  isTakingOver
+                "
+                @click="handleTakeoverExternal(proc)"
+              >
+                {{ isTakingOver ? "⏳ 正在接管..." : "🚀 接管" }}
+              </button>
+            </div>
           </div>
 
           <div
@@ -223,22 +261,29 @@
               color: var(--text-muted);
             "
           >
-            💡 <strong>如何关闭外部进程？</strong>
+            💡 <strong>如何关闭/接管外部进程？</strong>
             <ul
               style="margin: 0.25rem 0 0 1.25rem; padding: 0; line-height: 1.6"
             >
               <li>
-                <strong>Linux</strong>：点击上方“🛑 终止进程”输入 Sudo
+                <strong>一键接管</strong>：点击上方“🚀 一键接管并启动”，Subout
+                将自动停止并禁用外部服务、接管网络流量并启动当前代理配置。
+              </li>
+              <li>
+                <strong>Linux</strong>：点击上方“🛑 终止”输入 Sudo
                 密码自动终止，或终端执行
-                <code>sudo systemctl stop sing-box</code> /
+                <code
+                  >sudo systemctl stop sing-box && sudo systemctl disable
+                  sing-box</code
+                >
+                /
                 <code
                   >sudo kill
                   {{ conflictingProcesses.map((p) => p.pid).join(" ") }}</code
                 >
               </li>
               <li>
-                <strong>macOS</strong>：点击上方“🛑
-                终止进程”自动终止，或终端执行
+                <strong>macOS</strong>：点击上方“🛑 终止”自动终止，或终端执行
                 <code>brew services stop sing-box</code> /
                 <code
                   >kill
@@ -246,8 +291,13 @@
                 >
               </li>
               <li>
-                <strong>Windows</strong>：点击上方“🛑 终止进程”自动终止，或在
-                PowerShell/CMD 中执行 <code>Stop-Service sing-box</code> /
+                <strong>Windows</strong>：点击上方“🛑 终止”自动终止，或在
+                PowerShell 中执行
+                <code
+                  >Stop-Service sing-box; Set-Service sing-box -StartupType
+                  Disabled</code
+                >
+                /
                 <code
                   >taskkill /F /PID
                   {{
@@ -758,7 +808,8 @@
               <strong class="insight-title">双模式相互隔离</strong>
             </div>
             <p class="insight-text">
-              <strong>小白模式</strong>（一键自动托管）与<strong>专业模式</strong>（精细化路由与DNS编排）配置完全隔离独立，随时无缝切换。
+              <strong>小白模式</strong
+              >（一键自动托管）与<strong>专业模式</strong>（精细化路由与DNS编排）配置完全隔离独立，随时无缝切换。
             </p>
           </div>
         </div>
@@ -807,6 +858,9 @@
           class="flex gap-2"
           style="justify-content: flex-end; margin-top: 1.5rem"
         >
+          <button type="button" class="btn btn-secondary" @click="copyLogs">
+            复制日志
+          </button>
           <button
             type="button"
             class="btn btn-secondary"
@@ -886,6 +940,7 @@ import {
   sessionSudoPassword,
   setSessionSudoPassword,
   killExternalProcess,
+  takeoverService,
 } from "../store.js";
 import { initAjv } from "../validator.js";
 import KernelDownloadCard from "./KernelDownloadCard.vue";
@@ -901,6 +956,7 @@ const startingService = ref(false);
 const stoppingService = ref(false);
 const restartingService = ref(false);
 const killingPid = ref(null);
+const isTakingOver = ref(false);
 
 const conflictingProcesses = computed(
   () => serviceStatus.value.conflicting_processes || [],
@@ -981,6 +1037,13 @@ const toggleMode = async () => {
   }
 };
 
+const copyLogs = () => {
+  if (fetchLogs.value.length === 0) return;
+  const text = fetchLogs.value.join("\n");
+  navigator.clipboard.writeText(text);
+  showToast("更新日志已复制到剪贴板");
+};
+
 const copyStopCommand = () => {
   const procs = conflictingProcesses.value;
   if (!procs.length) return;
@@ -994,14 +1057,99 @@ const copyStopCommand = () => {
 
   let cmd = `sudo kill ${pids}`;
   if (isWindows) {
-    cmd = `Stop-Service sing-box -ErrorAction SilentlyContinue; taskkill /F /PID ${procs.map((p) => p.pid).join(" /PID ")}`;
+    cmd = `Stop-Service sing-box; Set-Service sing-box -StartupType Disabled; taskkill /F /PID ${procs.map((p) => p.pid).join(" /PID ")}`;
   } else if (isMac) {
     cmd = `brew services stop sing-box 2>/dev/null; sudo kill ${pids}`;
   } else if (isLinux) {
-    cmd = `sudo systemctl stop sing-box 2>/dev/null; sudo kill ${pids}`;
+    cmd = `sudo systemctl stop sing-box 2>/dev/null; sudo systemctl disable sing-box 2>/dev/null; sudo kill ${pids}`;
   }
   navigator.clipboard.writeText(cmd);
   showToast(`已复制关闭命令: ${cmd}`);
+};
+
+const handleTakeoverExternal = async (proc) => {
+  const isWindows = systemModeInfo.value?.os === "windows";
+  const isRoot = systemModeInfo.value?.is_root;
+  const hasSaved =
+    !!sessionSudoPassword.value || !!systemModeInfo.value?.has_saved_sudo;
+
+  let sudoPass = sessionSudoPassword.value || "";
+
+  if (isWindows || isRoot || hasSaved) {
+    const ok = await confirmDialog(
+      `确定要接管外部 sing-box 进程 (PID: ${proc.pid}${proc.cmdline ? `, 命令: ${proc.cmdline}` : ""}) 并由 Subout 启动代理服务吗？\n\n💡 提示：Subout 将自动停止外部服务、禁用系统开机自启争抢，并启动当前代理配置。`,
+      {
+        title: "接管并启动",
+        confirmText: "接管并启动",
+      },
+    );
+    if (!ok) return;
+  } else {
+    const entered = await promptDialog(
+      `接管外部 sing-box 进程 (PID: ${proc.pid})\n\n💡 外部进程通常由系统服务 (sing-box.service / root) 托管。请输入系统管理员 Sudo 密码以授权接管（密码将被保存以实现免密管理）：`,
+      "",
+      {
+        title: "接管并启动",
+        confirmText: "授权并接管",
+        inputType: "password",
+        inputPlaceholder: "输入系统 Sudo 密码",
+      },
+    );
+    if (entered === null) return;
+    sudoPass = entered.trim();
+    setSessionSudoPassword(sudoPass);
+  }
+
+  isTakingOver.value = true;
+  try {
+    await takeoverService(sudoPass, true);
+  } finally {
+    isTakingOver.value = false;
+  }
+};
+
+const handleTakeoverExternalAll = async () => {
+  const procs = conflictingProcesses.value;
+  if (!procs.length) return;
+  const pids = procs.map((p) => p.pid).join(", ");
+  const isWindows = systemModeInfo.value?.os === "windows";
+  const isRoot = systemModeInfo.value?.is_root;
+  const hasSaved =
+    !!sessionSudoPassword.value || !!systemModeInfo.value?.has_saved_sudo;
+
+  let sudoPass = sessionSudoPassword.value || "";
+
+  if (isWindows || isRoot || hasSaved) {
+    const ok = await confirmDialog(
+      `确定要一键接管外部 sing-box 进程 (PID: ${pids}) 并由 Subout 启动代理服务吗？\n\n💡 提示：Subout 将自动终止并禁用外部系统服务（防止系统重启再次冲突），并加载当前配置启动代理。`,
+      {
+        title: "一键接管并启动",
+        confirmText: "一键接管并启动",
+      },
+    );
+    if (!ok) return;
+  } else {
+    const entered = await promptDialog(
+      `一键接管外部 sing-box 进程 (PID: ${pids})\n\n💡 外部进程通常由系统服务 (sing-box.service / root) 托管。请输入系统管理员 Sudo 密码以授权接管（密码将被保存以实现免密管理）：`,
+      "",
+      {
+        title: "一键接管并启动",
+        confirmText: "授权并接管",
+        inputType: "password",
+        inputPlaceholder: "输入系统 Sudo 密码",
+      },
+    );
+    if (entered === null) return;
+    sudoPass = entered.trim();
+    setSessionSudoPassword(sudoPass);
+  }
+
+  isTakingOver.value = true;
+  try {
+    await takeoverService(sudoPass, true);
+  } finally {
+    isTakingOver.value = false;
+  }
 };
 
 const handleKillExternal = async (proc) => {
@@ -1095,10 +1243,17 @@ const handleStartService = async (customSudoPass = null) => {
       ? customSudoPass.trim()
       : sessionSudoPassword.value || null;
   if (conflictingProcesses.value.length > 0) {
-    showToast(
-      `系统中检测到正在运行的外部 sing-box 进程 (PID: ${conflictingProcesses.value.map((p) => p.pid).join(", ")})，请先关闭外部进程后再启动`,
-      "danger",
+    const pids = conflictingProcesses.value.map((p) => p.pid).join(", ");
+    const ok = await confirmDialog(
+      `检测到系统中正在运行外部 sing-box 进程 (PID: ${pids})。\n\n是否立即一键接管外部服务并启动 Subout 代理？\n\n💡 提示：Subout 将自动终止并禁用外部服务开机争抢，由 Subout 托管代理。`,
+      {
+        title: "一键接管并启动",
+        confirmText: "一键接管并启动",
+      },
     );
+    if (ok) {
+      await handleTakeoverExternalAll();
+    }
     return;
   }
   if (!isKernelReady.value) {

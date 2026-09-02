@@ -16,10 +16,9 @@ pub fn parse_line(line: &str) -> Option<Outbound> {
     }
 
     // Try VMESS first because VMESS starts with vmess:// and has a base64 payload
-    if line.starts_with("vmess://") {
-        let payload = &line[8..];
-        if let Some(decoded_str) = decode_base64(payload.to_string()) {
-            if let Ok(vj) = serde_json::from_str::<VmessJsonRaw>(&decoded_str) {
+    if let Some(payload) = line.strip_prefix("vmess://") {
+        if let Some(decoded_str) = decode_base64(payload.to_string())
+            && let Ok(vj) = serde_json::from_str::<VmessJsonRaw>(&decoded_str) {
                 let port = match vj.port {
                     serde_json::Value::Number(num) => num.as_u64().unwrap_or(443) as u16,
                     serde_json::Value::String(s) => s.parse::<u16>().unwrap_or(443),
@@ -94,28 +93,24 @@ pub fn parse_line(line: &str) -> Option<Outbound> {
                     transport,
                 }));
             }
-        }
         return None;
     }
 
     // Check if the whole line starts with https://, and see if the rest of it is a base64 string
-    if line.starts_with("https://") {
-        let rest = &line[8..];
+    if let Some(rest) = line.strip_prefix("https://") {
         let (base64_part, fragment) = if let Some(pos) = rest.find('#') {
             (&rest[..pos], &rest[pos..])
         } else {
             (rest, "")
         };
-        if !base64_part.contains('@') && !base64_part.contains(':') {
-            if let Some(decoded_rest) = decode_base64(base64_part.to_string()) {
-                if decoded_rest.contains('@') {
+        if !base64_part.contains('@') && !base64_part.contains(':')
+            && let Some(decoded_rest) = decode_base64(base64_part.to_string())
+                && decoded_rest.contains('@') {
                     let mock_url = format!("http://{}{}", decoded_rest, fragment);
                     if let Ok(parsed_url) = Url::parse(&mock_url) {
                         return parse_url_to_outbound(&parsed_url, true);
                     }
                 }
-            }
-        }
     }
 
     // Try standard URL parsing
@@ -127,11 +122,10 @@ pub fn parse_line(line: &str) -> Option<Outbound> {
 }
 
 fn extract_sni(host: &str, params: &std::collections::HashMap<String, String>) -> Option<String> {
-    if let Some(sni) = params.get("sni").or_else(|| params.get("host")) {
-        if !sni.is_empty() {
+    if let Some(sni) = params.get("sni").or_else(|| params.get("host"))
+        && !sni.is_empty() {
             return Some(sni.clone());
         }
-    }
     if host.parse::<std::net::IpAddr>().is_err() && !host.is_empty() {
         Some(host.to_string())
     } else {
@@ -182,7 +176,7 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
             username,
             password,
         })),
-        "http" | "https" | _ if scheme == "http" || scheme == "https" || force_https => {
+        "http" | "https" => {
             let is_secure = scheme == "https" || force_https || port == 443;
             let tls_config = if is_secure {
                 Some(TlsConfig {
@@ -321,13 +315,12 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
                     pass = parts[1].to_string();
                 } else {
                     // Try decoding as base64
-                    if let Some(decoded) = decode_base64(user_part.clone()) {
-                        if decoded.contains(':') {
+                    if let Some(decoded) = decode_base64(user_part.clone())
+                        && decoded.contains(':') {
                             let parts: Vec<&str> = decoded.splitn(2, ':').collect();
                             method = parts[0].to_string();
                             pass = parts[1].to_string();
                         }
-                    }
                 }
             }
 

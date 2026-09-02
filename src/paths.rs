@@ -179,7 +179,7 @@ impl AppPaths {
         let _ = std::fs::create_dir_all(&self.data_dir);
         let _ = std::fs::create_dir_all(&self.log_dir);
         let _ = std::fs::create_dir_all(&self.runtime_dir);
-        let _ = std::fs::create_dir_all(&self.kernel_dir());
+        let _ = std::fs::create_dir_all(self.kernel_dir());
         let _ = std::fs::create_dir_all(self.generated_dir());
         let _ = std::fs::create_dir_all(self.subscriptions_dir());
         let _ = std::fs::create_dir_all(self.nodes_dir());
@@ -321,12 +321,11 @@ impl AppPaths {
                 PathBuf::from("sing-box-running.json"),
             ];
             for src in legacy_configs {
-                if src.exists() && src != target_config {
-                    if let Ok(_) = std::fs::copy(&src, &target_config) {
+                if src.exists() && src != target_config
+                    && std::fs::copy(&src, &target_config).is_ok() {
                         let _ = std::fs::remove_file(&src);
                         break;
                     }
-                }
             }
         }
 
@@ -409,15 +408,14 @@ pub fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
             token.trim_start_matches(|c: char| c.is_alphabetic() || c == 'v' || c == 'V');
         let semver_part = clean_token.split('-').next().unwrap_or(clean_token);
         let parts: Vec<&str> = semver_part.split('.').collect();
-        if parts.len() >= 2 {
-            if let (Ok(major), Ok(minor)) = (parts[0].parse::<u64>(), parts[1].parse::<u64>()) {
+        if parts.len() >= 2
+            && let (Ok(major), Ok(minor)) = (parts[0].parse::<u64>(), parts[1].parse::<u64>()) {
                 let patch = parts
                     .get(2)
                     .and_then(|p| p.parse::<u64>().ok())
                     .unwrap_or(0);
                 return Some((major, minor, patch));
             }
-        }
     }
     None
 }
@@ -436,12 +434,11 @@ pub fn is_version_ge(v: &str, min_v: &str) -> bool {
 /// Helper to get raw version string from sing-box executable
 pub fn get_singbox_version_raw(path: &Path) -> Option<String> {
     if !path.is_absolute() && path.components().count() == 1 {
-        if let Ok(output) = std::process::Command::new(path).arg("version").output() {
-            if output.status.success() {
+        if let Ok(output) = std::process::Command::new(path).arg("version").output()
+            && output.status.success() {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 return out_str.lines().next().map(|s| s.trim().to_string());
             }
-        }
         return None;
     }
 
@@ -449,12 +446,11 @@ pub fn get_singbox_version_raw(path: &Path) -> Option<String> {
         return None;
     }
 
-    if let Ok(output) = std::process::Command::new(path).arg("version").output() {
-        if output.status.success() {
+    if let Ok(output) = std::process::Command::new(path).arg("version").output()
+        && output.status.success() {
             let out_str = String::from_utf8_lossy(&output.stdout);
             return out_str.lines().next().map(|s| s.trim().to_string());
         }
-    }
 
     None
 }
@@ -470,11 +466,10 @@ fn find_in_path(cmd_name: &str) -> Option<PathBuf> {
         return Some(p);
     }
     // Try running directly
-    if let Ok(output) = std::process::Command::new(cmd_name).arg("version").output() {
-        if output.status.success() {
+    if let Ok(output) = std::process::Command::new(cmd_name).arg("version").output()
+        && output.status.success() {
             return Some(PathBuf::from(cmd_name));
         }
-    }
     None
 }
 
@@ -560,7 +555,7 @@ mod tests {
         std::fs::write(&legacy_db, b"sqlite-mock-data").unwrap();
 
         let paths = AppPaths {
-            config_dir: legacy_config_dir.clone(),
+            config_dir: legacy_config_dir,
             data_dir: target_data_dir.clone(),
             log_dir: temp_dir.join("logs"),
             runtime_dir: temp_dir.join("run"),

@@ -16,6 +16,14 @@ use crate::web::{AppState, check_auth, get_db_conn};
 pub struct StartServiceRequest {
     pub config: Option<Value>,
     pub sudo_pass: Option<String>,
+    pub takeover: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct TakeoverServiceRequest {
+    pub sudo_pass: Option<String>,
+    pub start_after_takeover: Option<bool>,
+    pub config: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +69,68 @@ pub async fn kill_external_service(
     })))
 }
 
+pub async fn takeover_service(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Option<TakeoverServiceRequest>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+
+    let (sudo_pass, start_after, custom_config) = if let Some(req) = payload {
+        (
+            req.sudo_pass.filter(|p| !p.trim().is_empty()),
+            req.start_after_takeover.unwrap_or(true),
+            req.config,
+        )
+    } else {
+        (None, true, None)
+    };
+
+    if start_after {
+        let config_val = if let Some(c) = custom_config {
+            c
+        } else {
+            get_active_config_for_mode(&conn)?
+        };
+
+        state
+            .service_manager
+            .takeover_and_start(&config_val, sudo_pass.as_deref())
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("一键接管并启动服务失败: {}", e),
+                )
+            })?;
+
+        Ok(Json(serde_json::json!({
+            "status": "success",
+            "message": "已成功接管外部服务并启动 Subout 代理"
+        })))
+    } else {
+        state
+            .service_manager
+            .takeover_external_processes(sudo_pass.as_deref())
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("接管外部进程失败: {}", e),
+                )
+            })?;
+
+        Ok(Json(serde_json::json!({
+            "status": "success",
+            "message": "已成功接管并终止全部外部 sing-box 服务"
+        })))
+    }
+}
+
 pub async fn start_service(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -72,26 +142,28 @@ pub async fn start_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let (config_val, custom_sudo_pass) = if let Some(req) = payload {
+    let (config_val, custom_sudo_pass, takeover) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
             c
         } else {
             get_active_config_for_mode(&conn)?
         };
-        (conf, req.sudo_pass)
+        (conf, req.sudo_pass, req.takeover.unwrap_or(false))
     } else {
-        (get_active_config_for_mode(&conn)?, None)
+        (get_active_config_for_mode(&conn)?, None, false)
     };
 
     let sudo_pass = custom_sudo_pass.filter(|p| !p.trim().is_empty());
 
     state
         .service_manager
-        .start_with_sudo(&config_val, sudo_pass.as_deref())
+        .start_with_sudo_and_takeover(&config_val, sudo_pass.as_deref(), takeover)
         .await
         .map_err(|e| {
             let err_str = e.to_string();
-            if err_str.contains("外部 sing-box 进程正在运行") {
+            if err_str.contains("外部 sing-box 服务正在运行")
+                || err_str.contains("外部独立的 sing-box")
+            {
                 (StatusCode::CONFLICT, format!("启动服务失败: {}", err_str))
             } else {
                 (
@@ -139,22 +211,22 @@ pub async fn restart_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let (config_val, custom_sudo_pass) = if let Some(req) = payload {
+    let (config_val, custom_sudo_pass, takeover) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
             c
         } else {
             get_active_config_for_mode(&conn)?
         };
-        (conf, req.sudo_pass)
+        (conf, req.sudo_pass, req.takeover.unwrap_or(false))
     } else {
-        (get_active_config_for_mode(&conn)?, None)
+        (get_active_config_for_mode(&conn)?, None, false)
     };
 
     let sudo_pass = custom_sudo_pass.filter(|p| !p.trim().is_empty());
 
     state
         .service_manager
-        .restart_with_sudo(&config_val, sudo_pass.as_deref())
+        .restart_with_sudo_and_takeover(&config_val, sudo_pass.as_deref(), takeover)
         .await
         .map_err(|e| {
             (
@@ -205,10 +277,10 @@ pub fn get_config_for_mode(
             .unwrap_or(None)
             .unwrap_or_default();
 
-        if let Ok(id) = running_id_str.parse::<i64>() {
-            if let Ok(Some(history)) = db::get_config_history_detail(conn, id) {
-                if let Some(content_str) = history.content {
-                    if let Ok(c) = serde_json::from_str::<Value>(&content_str) {
+        if let Ok(id) = running_id_str.parse::<i64>()
+            && let Ok(Some(history)) = db::get_config_history_detail(conn, id)
+                && let Some(content_str) = history.content
+                    && let Ok(c) = serde_json::from_str::<Value>(&content_str) {
                         let log = c.get("log").cloned().unwrap_or(serde_json::json!({}));
                         let dns = c.get("dns").cloned().unwrap_or(serde_json::json!({}));
                         let inbounds = c.get("inbounds").cloned().unwrap_or(serde_json::json!([]));
@@ -235,9 +307,6 @@ pub fn get_config_for_mode(
                             )
                         });
                     }
-                }
-            }
-        }
 
         generator::generate_config(conn).map_err(|e| {
             (

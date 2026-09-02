@@ -28,6 +28,7 @@ export default [
     rules: {
       'vue/multi-word-component-names': 'off', // Allow single-word components like App.vue or Dashboard.vue
       'no-unused-vars': 'warn',
+      'no-undef': 'error',
       'no-debugger': process.env.NODE_ENV === 'production' ? 'error' : 'warn',
       'no-console': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
     },

@@ -175,7 +175,7 @@ pub async fn update_node(
             if old.server != *server {
                 detail_parts.push(format!("地址: {} → {}", old.server, server));
             }
-            if old.port != port as i64 {
+            if old.port != i64::from(port) {
                 detail_parts.push(format!("端口: {} → {}", old.port, port));
             }
             let old_json: Value = serde_json::from_str(&old.raw_json).unwrap_or(Value::Null);
@@ -311,7 +311,7 @@ pub fn validate_node_json(
         .or_else(|| obj.get("port"))
         .and_then(|v| v.as_u64())
         .ok_or_else(|| "JSON 配置中缺少 server_port / port 字段".to_string())?;
-    if json_port != port as u64 {
+    if json_port != u64::from(port) {
         return Err(format!(
             "JSON 中的端口 ('{}') 必须与输入框中的端口 ('{}') 一致",
             json_port, port
@@ -420,10 +420,10 @@ async fn test_transport_latency(server: &str, port: u16, node_type: &str) -> Opt
             socket.send(&quic_probe).await.ok()?;
 
             let mut buf = [0u8; 512];
-            match socket.recv(&mut buf).await {
-                Ok(_) => Some(start.elapsed().as_millis() as u64),
-                Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => None,
-                _ => Some(start.elapsed().as_millis() as u64),
+            if socket.recv(&mut buf).await.is_ok() {
+                Some(start.elapsed().as_millis() as u64)
+            } else {
+                None
             }
         })
         .await
@@ -456,10 +456,9 @@ pub async fn test_node_web_latency(
 
         // 2. Parse the outbound configuration
         let mut outbound_json: Value = serde_json::from_str(&raw_json).ok()?;
-        if let Some(obj) = outbound_json.as_object_mut() {
+        {
+            let obj = outbound_json.as_object_mut()?;
             obj.insert("tag".to_string(), Value::String("proxy".to_string()));
-        } else {
-            return None;
         }
 
         // 3. Write a temporary config file with explicit route.final = "proxy"
@@ -525,22 +524,19 @@ pub async fn test_node_web_latency(
         let mut latency = None;
         if ready {
             let start = Instant::now();
-            if let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{}", port)) {
-                if let Ok(client) = reqwest::Client::builder()
+            if let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{}", port))
+                && let Ok(client) = reqwest::Client::builder()
                     .proxy(proxy)
                     .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                     .redirect(reqwest::redirect::Policy::limited(10))
                     .timeout(Duration::from_millis(5000))
                     .build()
-                {
-                    if let Ok(resp) = client.get(&target_url).send().await {
+                    && let Ok(resp) = client.get(&target_url).send().await {
                         let status = resp.status().as_u16();
                         if status < 400 || status == 403 || status == 405 || status == 429 {
                             latency = Some(start.elapsed().as_millis() as u64);
                         }
                     }
-                }
-            }
         }
 
         latency
@@ -758,8 +754,7 @@ pub async fn test_site_reachability(
         .redirect(reqwest::redirect::Policy::limited(10))
         .timeout(Duration::from_secs(8))
         .build()
-    {
-        if let Some((status, elapsed)) = try_fetch_url(&client, &url).await {
+        && let Some((status, elapsed)) = try_fetch_url(&client, &url).await {
             let success = status < 400 || status == 403 || status == 405 || status == 429;
             return Ok(Json(SiteTestResponse {
                 url,
@@ -769,7 +764,6 @@ pub async fn test_site_reachability(
                 error: None,
             }));
         }
-    }
 
     // 2. Fallback: If system env proxy was missing or failed, probe common local proxy ports
     let candidate_proxy_urls = [
@@ -785,15 +779,14 @@ pub async fn test_site_reachability(
     ];
 
     for proxy_str in &candidate_proxy_urls {
-        if let Ok(proxy) = reqwest::Proxy::all(*proxy_str) {
-            if let Ok(client) = reqwest::Client::builder()
+        if let Ok(proxy) = reqwest::Proxy::all(*proxy_str)
+            && let Ok(client) = reqwest::Client::builder()
                 .proxy(proxy)
                 .user_agent(user_agent)
                 .redirect(reqwest::redirect::Policy::limited(10))
                 .timeout(Duration::from_secs(6))
                 .build()
-            {
-                if let Some((status, elapsed)) = try_fetch_url(&client, &url).await {
+                && let Some((status, elapsed)) = try_fetch_url(&client, &url).await {
                     let success = status < 400 || status == 403 || status == 405 || status == 429;
                     return Ok(Json(SiteTestResponse {
                         url,
@@ -803,8 +796,6 @@ pub async fn test_site_reachability(
                         error: None,
                     }));
                 }
-            }
-        }
     }
 
     Ok(Json(SiteTestResponse {

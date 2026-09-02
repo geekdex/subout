@@ -950,6 +950,7 @@ import {
   API_BASE,
   token,
   showToast,
+  confirmDialog,
   kernelInfo,
   serviceStatus,
   fetchServiceStatus,
@@ -1227,16 +1228,25 @@ const saveConfig = async (apply = false, customSudoPass = null) => {
       ? customSudoPass.trim()
       : sessionSudoPassword.value || null;
 
+  let doTakeover = false;
+
   if (apply) {
     if (
       serviceStatus.value.conflicting_processes &&
       serviceStatus.value.conflicting_processes.length > 0
     ) {
-      showToast(
-        `检测到系统中已有外部 sing-box 进程 (PID: ${serviceStatus.value.conflicting_processes.map((p) => p.pid).join(", ")})，请先停止外部进程后再应用启动`,
-        "danger",
+      const pids = serviceStatus.value.conflicting_processes
+        .map((p) => p.pid)
+        .join(", ");
+      const ok = await confirmDialog(
+        `检测到系统中正在运行外部 sing-box 进程 (PID: ${pids})。\n\n是否立即一键接管外部服务并保存应用当前配置？\n\n💡 提示：Subout 将自动终止并禁用外部服务开机争抢，由 Subout 全权托管代理。`,
+        {
+          title: "一键接管并应用",
+          confirmText: "一键接管并应用",
+        },
       );
-      return;
+      if (!ok) return;
+      doTakeover = true;
     }
     if (!kernelInfo.value.is_installed) {
       showToast(
@@ -1256,14 +1266,16 @@ const saveConfig = async (apply = false, customSudoPass = null) => {
     const hasSaved =
       !!sessionSudoPassword.value || !!systemModeInfo.value?.has_saved_sudo;
     if (
-      form.inbound.inbound_type === "tun" &&
+      (form.inbound.inbound_type === "tun" || doTakeover) &&
       isUnix &&
       !isRoot &&
       !hasSaved &&
       !sudoPass
     ) {
       const inputPass = await promptSudoPassword(
-        "🛡️ 开启 TUN 虚拟网卡需要系统管理员 (root) 权限以接管系统流量。\n\n请输入系统的 Sudo / 管理员密码进行提权授权（保存后将免去重复输入）：",
+        doTakeover
+          ? "🛡️ 接管外部系统服务需要系统管理员 (root) 权限。\n\n请输入系统的 Sudo / 管理员密码以授权接管（保存后将免去重复输入）："
+          : "🛡️ 开启 TUN 虚拟网卡需要系统管理员 (root) 权限以接管系统流量。\n\n请输入系统的 Sudo / 管理员密码进行提权授权（保存后将免去重复输入）：",
       );
       if (inputPass === null) {
         showToast("已取消管理员提权授权，未应用配置", "warning");
@@ -1286,8 +1298,9 @@ const saveConfig = async (apply = false, customSudoPass = null) => {
         config: form,
         apply: !!apply,
         sudo_pass: sudoPass,
+        takeover: doTakeover,
       }),
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(18000),
     });
 
     if (res.ok) {

@@ -20,6 +20,7 @@ impl PlatformStrategy for MacOsPlatform {
             unsafe extern "C" {
                 fn geteuid() -> u32;
             }
+            // SAFETY: geteuid is a POSIX system call that takes no parameters and has no side effects.
             unsafe { geteuid() == 0 }
         }
         #[cfg(not(unix))]
@@ -112,7 +113,7 @@ impl PlatformStrategy for MacOsPlatform {
     }
 
     fn is_pid_alive(&self, pid: u32) -> bool {
-        if pid == 0 {
+        if pid <= 1 || pid > (i32::MAX as u32) {
             return false;
         }
         #[cfg(unix)]
@@ -120,6 +121,8 @@ impl PlatformStrategy for MacOsPlatform {
             unsafe extern "C" {
                 fn kill(pid: i32, sig: i32) -> i32;
             }
+            // SAFETY: kill with signal 0 checks process existence without sending a signal.
+            // pid is verified to be > 1 and <= i32::MAX.
             let res = unsafe { kill(pid as i32, 0) };
             if res == 0 {
                 true
@@ -150,14 +153,13 @@ impl PlatformStrategy for MacOsPlatform {
             if let Ok(output) = std::process::Command::new("ps")
                 .args(["-eo", "pid,ppid,comm,args"])
                 .output()
-            {
-                if output.status.success() {
+                && output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     for line in stdout.lines().skip(1) {
                         let trimmed = line.trim();
                         let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                        if parts.len() >= 3 {
-                            if let (Ok(pid), Ok(ppid)) =
+                        if parts.len() >= 3
+                            && let (Ok(pid), Ok(ppid)) =
                                 (parts[0].parse::<u32>(), parts[1].parse::<u32>())
                             {
                                 if pid == current_pid
@@ -214,10 +216,8 @@ impl PlatformStrategy for MacOsPlatform {
                                     });
                                 }
                             }
-                        }
                     }
                 }
-            }
 
             results
         }
@@ -235,14 +235,20 @@ impl PlatformStrategy for MacOsPlatform {
         sig: i32,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
+            if pid <= 1 || pid > (i32::MAX as u32) {
+                return;
+            }
             #[cfg(unix)]
             {
                 unsafe extern "C" {
                     fn kill(pid: i32, sig: i32) -> i32;
                 }
+                let pid_i32 = pid as i32;
+                // SAFETY: pid is validated to be > 1 and <= i32::MAX.
+                // -pid_i32 targets the process group, and pid_i32 targets the individual process.
                 unsafe {
-                    let _ = kill(-(pid as i32), sig);
-                    let _ = kill(pid as i32, sig);
+                    let _ = kill(-pid_i32, sig);
+                    let _ = kill(pid_i32, sig);
                 }
                 if let Some(pass) = sudo_pass {
                     let sig_arg = format!("-{}", sig);
@@ -274,13 +280,12 @@ impl PlatformStrategy for MacOsPlatform {
                 if let Ok(output) = std::process::Command::new("ps")
                     .args(["-eo", "pid,ppid,comm,args"])
                     .output()
-                {
-                    if output.status.success() {
+                    && output.status.success() {
                         let stdout = String::from_utf8_lossy(&output.stdout);
                         for line in stdout.lines().skip(1) {
-                            let parts: Vec<&str> = line.trim().split_whitespace().collect();
-                            if parts.len() >= 3 {
-                                if let (Ok(pid), Ok(ppid)) =
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 3
+                                && let (Ok(pid), Ok(ppid)) =
                                     (parts[0].parse::<u32>(), parts[1].parse::<u32>())
                                 {
                                     if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid {
@@ -295,10 +300,8 @@ impl PlatformStrategy for MacOsPlatform {
                                         pids_to_kill.push(pid);
                                     }
                                 }
-                            }
                         }
                     }
-                }
 
                 if pids_to_kill.is_empty() {
                     return;
@@ -346,6 +349,25 @@ impl PlatformStrategy for MacOsPlatform {
                     .await;
             }
 
+            // Also check launchctl unload for system launchdaemons
+            for plist in &[
+                "/Library/LaunchDaemons/sing-box.plist",
+                "/Library/LaunchDaemons/homebrew.mxcl.sing-box.plist",
+                "/Library/LaunchDaemons/com.sagernet.sing-box.plist",
+            ] {
+                if std::path::Path::new(plist).exists() {
+                    let _ = tokio::process::Command::new("launchctl")
+                        .args(["unload", "-w", plist])
+                        .output()
+                        .await;
+                    if !as_root {
+                        let _ = self
+                            .run_sudo_command("launchctl", &["unload", "-w", plist], sudo_pass)
+                            .await;
+                    }
+                }
+            }
+
             // 2. Direct SIGTERM signal
             self.kill_process(pid, sudo_pass, 15).await;
 
@@ -362,12 +384,12 @@ impl PlatformStrategy for MacOsPlatform {
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String {
         if !has_sudo_pass && !self.is_running_as_root() {
             format!(
-                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码进行授权终止，或在终端执行 sudo kill -9 {}",
+                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在终端执行 brew services stop sing-box / sudo kill -9 {}",
                 pid, pid
             )
         } else {
             format!(
-                "终止外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo kill -9 {}",
+                "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 brew services stop sing-box / sudo kill -9 {}",
                 pid, pid
             )
         }
@@ -420,11 +442,10 @@ impl PlatformStrategy for MacOsPlatform {
             let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
             obj.remove("auto_redirect");
             if is_tun {
-                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str()) {
-                    if iface == "tun0" || iface.is_empty() || !iface.starts_with("utun") {
+                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
+                    && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun")) {
                         obj.remove("interface_name");
                     }
-                }
 
                 // On macOS, FakeIP and TUN transparent proxy require stack: "mixed" or "gvisor".
                 let current_stack = obj.get("stack").and_then(|s| s.as_str());
@@ -436,7 +457,7 @@ impl PlatformStrategy for MacOsPlatform {
                 if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
                     let has_ipv6 = addr_arr
                         .iter()
-                        .any(|a| a.as_str().map_or(false, |s| s.contains(':')));
+                        .any(|a| a.as_str().is_some_and(|s| s.contains(':')));
                     if !has_ipv6 {
                         addr_arr.push(json!("fd00::1/126"));
                     }
@@ -506,8 +527,8 @@ impl PlatformStrategy for MacOsPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
-        if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output() {
-            if output.status.success() {
+        if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output()
+            && output.status.success() {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 for line in out_str.lines() {
                     let trimmed = line.trim();
@@ -519,7 +540,6 @@ impl PlatformStrategy for MacOsPlatform {
                     }
                 }
             }
-        }
         None
     }
 }

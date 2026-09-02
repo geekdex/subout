@@ -10,16 +10,14 @@ pub fn decode_base64(mut input: String) -> Option<String> {
         input.push_str(&"===="[rem..]);
     }
 
-    if let Ok(bytes) = STANDARD.decode(&input) {
-        if let Ok(s) = String::from_utf8(bytes) {
+    if let Ok(bytes) = STANDARD.decode(&input)
+        && let Ok(s) = String::from_utf8(bytes) {
             return Some(s);
         }
-    }
-    if let Ok(bytes) = URL_SAFE.decode(&input) {
-        if let Ok(s) = String::from_utf8(bytes) {
+    if let Ok(bytes) = URL_SAFE.decode(&input)
+        && let Ok(s) = String::from_utf8(bytes) {
             return Some(s);
         }
-    }
     None
 }
 

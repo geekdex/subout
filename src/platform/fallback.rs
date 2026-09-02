@@ -128,11 +128,10 @@ impl PlatformStrategy for FallbackPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
-        if let Ok(output) = std::process::Command::new(cmd_name).arg("version").output() {
-            if output.status.success() {
+        if let Ok(output) = std::process::Command::new(cmd_name).arg("version").output()
+            && output.status.success() {
                 return Some(PathBuf::from(cmd_name));
             }
-        }
         None
     }
 }

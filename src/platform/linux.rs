@@ -20,6 +20,7 @@ impl PlatformStrategy for LinuxPlatform {
             unsafe extern "C" {
                 fn geteuid() -> u32;
             }
+            // SAFETY: geteuid is a POSIX system call that takes no parameters and has no side effects.
             unsafe { geteuid() == 0 }
         }
         #[cfg(not(unix))]
@@ -102,6 +103,8 @@ impl PlatformStrategy for LinuxPlatform {
         _cmd.process_group(0);
 
         #[cfg(target_os = "linux")]
+        // SAFETY: pre_exec is invoked in the child process right before exec.
+        // prctl(PR_SET_PDEATHSIG, ...) is an async-signal-safe system call.
         unsafe {
             _cmd.pre_exec(|| {
                 unsafe extern "C" {
@@ -123,7 +126,7 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn is_pid_alive(&self, pid: u32) -> bool {
-        if pid == 0 {
+        if pid <= 1 || pid > (i32::MAX as u32) {
             return false;
         }
         #[cfg(unix)]
@@ -131,6 +134,8 @@ impl PlatformStrategy for LinuxPlatform {
             unsafe extern "C" {
                 fn kill(pid: i32, sig: i32) -> i32;
             }
+            // SAFETY: kill with signal 0 checks process existence without sending a signal.
+            // pid is verified to be > 1 and <= i32::MAX.
             let res = unsafe { kill(pid as i32, 0) };
             if res == 0 {
                 true
@@ -162,14 +167,13 @@ impl PlatformStrategy for LinuxPlatform {
             if let Ok(output) = std::process::Command::new("ps")
                 .args(["-eo", "pid,ppid,comm,args"])
                 .output()
-            {
-                if output.status.success() {
+                && output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     for line in stdout.lines().skip(1) {
                         let trimmed = line.trim();
                         let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                        if parts.len() >= 3 {
-                            if let (Ok(pid), Ok(ppid)) =
+                        if parts.len() >= 3
+                            && let (Ok(pid), Ok(ppid)) =
                                 (parts[0].parse::<u32>(), parts[1].parse::<u32>())
                             {
                                 if pid == current_pid
@@ -226,10 +230,8 @@ impl PlatformStrategy for LinuxPlatform {
                                     });
                                 }
                             }
-                        }
                     }
                 }
-            }
 
             // 2. Linux /proc inspection
             if let Ok(entries) = std::fs::read_dir("/proc") {
@@ -248,21 +250,18 @@ impl PlatformStrategy for LinuxPlatform {
 
                         let proc_path = entry.path();
                         let stat_path = proc_path.join("stat");
-                        if let Ok(stat_str) = std::fs::read_to_string(&stat_path) {
-                            if let Some(rparen) = stat_str.rfind(')') {
+                        if let Ok(stat_str) = std::fs::read_to_string(&stat_path)
+                            && let Some(rparen) = stat_str.rfind(')') {
                                 let after = stat_str[rparen + 1..].trim_start();
                                 let stat_parts: Vec<&str> = after.split_whitespace().collect();
-                                if stat_parts.len() >= 2 {
-                                    if let Ok(ppid) = stat_parts[1].parse::<u32>() {
-                                        if ppid == current_pid
-                                            || (managed_pid.is_some() && Some(ppid) == managed_pid)
+                                if stat_parts.len() >= 2
+                                    && let Ok(ppid) = stat_parts[1].parse::<u32>()
+                                        && (ppid == current_pid
+                                            || (managed_pid.is_some() && Some(ppid) == managed_pid))
                                         {
                                             continue;
                                         }
-                                    }
-                                }
                             }
-                        }
 
                         let comm_path = proc_path.join("comm");
                         let cmdline_path = proc_path.join("cmdline");
@@ -330,24 +329,21 @@ impl PlatformStrategy for LinuxPlatform {
             if let Ok(output) = std::process::Command::new("systemctl")
                 .args(["show", "sing-box", "-p", "MainPID", "-p", "ActiveState"])
                 .output()
-            {
-                if output.status.success() {
+                && output.status.success() {
                     let out_str = String::from_utf8_lossy(&output.stdout);
                     let mut is_active = false;
                     let mut s_pid = 0u32;
                     for line in out_str.lines() {
                         if line.starts_with("ActiveState=active") {
                             is_active = true;
-                        } else if line.starts_with("MainPID=") {
-                            if let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>()
+                        } else if line.starts_with("MainPID=")
+                            && let Ok(p) = line.trim_start_matches("MainPID=").trim().parse::<u32>()
                             {
                                 s_pid = p;
                             }
-                        }
                     }
                     if is_active && s_pid > 1 && s_pid != current_pid && Some(s_pid) != managed_pid
-                    {
-                        if seen_pids.insert(s_pid) {
+                        && seen_pids.insert(s_pid) {
                             results.push(ConflictingProcessInfo {
                                 pid: s_pid,
                                 name: "sing-box (systemd)".to_string(),
@@ -355,9 +351,7 @@ impl PlatformStrategy for LinuxPlatform {
                                 exe_path: Some("/usr/bin/sing-box".to_string()),
                             });
                         }
-                    }
                 }
-            }
 
             results
         }
@@ -375,14 +369,20 @@ impl PlatformStrategy for LinuxPlatform {
         sig: i32,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
+            if pid <= 1 || pid > (i32::MAX as u32) {
+                return;
+            }
             #[cfg(unix)]
             {
                 unsafe extern "C" {
                     fn kill(pid: i32, sig: i32) -> i32;
                 }
+                let pid_i32 = pid as i32;
+                // SAFETY: pid is validated to be > 1 and <= i32::MAX.
+                // -pid_i32 targets the process group, and pid_i32 targets the individual process.
                 unsafe {
-                    let _ = kill(-(pid as i32), sig);
-                    let _ = kill(pid as i32, sig);
+                    let _ = kill(-pid_i32, sig);
+                    let _ = kill(pid_i32, sig);
                 }
                 if let Some(pass) = sudo_pass {
                     let sig_arg = format!("-{}", sig);
@@ -414,13 +414,12 @@ impl PlatformStrategy for LinuxPlatform {
                 if let Ok(output) = std::process::Command::new("ps")
                     .args(["-eo", "pid,ppid,comm,args"])
                     .output()
-                {
-                    if output.status.success() {
+                    && output.status.success() {
                         let stdout = String::from_utf8_lossy(&output.stdout);
                         for line in stdout.lines().skip(1) {
-                            let parts: Vec<&str> = line.trim().split_whitespace().collect();
-                            if parts.len() >= 3 {
-                                if let (Ok(pid), Ok(ppid)) =
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 3
+                                && let (Ok(pid), Ok(ppid)) =
                                     (parts[0].parse::<u32>(), parts[1].parse::<u32>())
                                 {
                                     if pid == current_pid || pid <= 1 || Some(pid) == exclude_pid {
@@ -435,10 +434,8 @@ impl PlatformStrategy for LinuxPlatform {
                                         pids_to_kill.push(pid);
                                     }
                                 }
-                            }
                         }
                     }
-                }
 
                 if let Ok(entries) = std::fs::read_dir("/proc") {
                     for entry in entries.flatten() {
@@ -499,8 +496,25 @@ impl PlatformStrategy for LinuxPlatform {
         Box::pin(async move {
             let as_root = self.is_running_as_root();
 
-            // 1. Try systemctl stop
+            // 1. Try systemctl disable & stop to prevent competing auto-start on next boot
             if as_root {
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "sing-box"])
+                    .output()
+                    .await;
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "sing-box.service"])
+                    .output()
+                    .await;
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "singbox"])
+                    .output()
+                    .await;
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "singbox.service"])
+                    .output()
+                    .await;
+
                 let _ = tokio::process::Command::new("systemctl")
                     .args(["stop", "sing-box"])
                     .output()
@@ -518,14 +532,25 @@ impl PlatformStrategy for LinuxPlatform {
                     .output()
                     .await;
             } else if let Some(pass) = sudo_pass {
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box"], Some(pass))
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box.service"], Some(pass))
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "singbox"], Some(pass))
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "singbox.service"], Some(pass))
+                    .await;
+
                 if let Err(e) = self
                     .run_sudo_command("systemctl", &["stop", "sing-box"], Some(pass))
                     .await
-                {
-                    if e.to_string().contains("Sudo 密码不正确") {
+                    && e.to_string().contains("Sudo 密码不正确") {
                         return Err(e);
                     }
-                }
                 let _ = self
                     .run_sudo_command("systemctl", &["stop", "sing-box.service"], Some(pass))
                     .await;
@@ -536,6 +561,12 @@ impl PlatformStrategy for LinuxPlatform {
                     .run_sudo_command("systemctl", &["stop", "singbox.service"], Some(pass))
                     .await;
             } else {
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box"], None)
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box.service"], None)
+                    .await;
                 let _ = self
                     .run_sudo_command("systemctl", &["stop", "sing-box"], None)
                     .await;
@@ -560,12 +591,12 @@ impl PlatformStrategy for LinuxPlatform {
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String {
         if !has_sudo_pass && !self.is_running_as_root() {
             format!(
-                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码进行授权终止，或在终端执行 sudo systemctl stop sing-box",
+                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未获权限终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在系统终端中执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box",
                 pid
             )
         } else {
             format!(
-                "终止外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box / sudo kill -9 {}",
+                "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box / sudo kill -9 {}",
                 pid, pid
             )
         }
@@ -589,7 +620,7 @@ impl PlatformStrategy for LinuxPlatform {
                 if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
                     let has_ipv6 = addr_arr
                         .iter()
-                        .any(|a| a.as_str().map_or(false, |s| s.contains(':')));
+                        .any(|a| a.as_str().is_some_and(|s| s.contains(':')));
                     if !has_ipv6 {
                         addr_arr.push(serde_json::json!("fd00::1/126"));
                     }
@@ -651,8 +682,8 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
-        if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output() {
-            if output.status.success() {
+        if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output()
+            && output.status.success() {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 for line in out_str.lines() {
                     let trimmed = line.trim();
@@ -664,7 +695,6 @@ impl PlatformStrategy for LinuxPlatform {
                     }
                 }
             }
-        }
         None
     }
 }

@@ -13,6 +13,9 @@ const {
   mockConfirmDialog,
   mockPromptDialog,
   mockValidateData,
+  mockServiceStatus,
+  mockSystemModeInfo,
+  mockSessionSudoPassword,
 } = vi.hoisted(() => {
   // 在 hoisted 内部用 require 拿到 ref（vitest 支持 CommonJS require）
   const { ref } = require("vue");
@@ -22,6 +25,9 @@ const {
     mockConfirmDialog: vi.fn(() => Promise.resolve(true)),
     mockPromptDialog: vi.fn(() => Promise.resolve("test")),
     mockValidateData: vi.fn(() => ({ valid: true, errors: null })),
+    mockServiceStatus: ref({ conflicting_processes: [] }),
+    mockSystemModeInfo: ref({}),
+    mockSessionSudoPassword: ref(""),
   };
 });
 
@@ -31,6 +37,10 @@ vi.mock("../store.js", () => ({
   showToast: mockShowToast,
   confirmDialog: mockConfirmDialog,
   promptDialog: mockPromptDialog,
+  serviceStatus: mockServiceStatus,
+  systemModeInfo: mockSystemModeInfo,
+  sessionSudoPassword: mockSessionSudoPassword,
+  setSessionSudoPassword: vi.fn(),
 }));
 
 vi.mock("../validator.js", () => ({
@@ -871,6 +881,71 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
         .find((b) => b.text().includes("更新"));
       expect(updateBtn).toBeDefined();
       expect(updateBtn.exists()).toBe(true);
+    });
+
+    it("配置详情页：点击'更新'按钮能够成功保存并触发运行配置更新，不会卡住且状态恢复正常", async () => {
+      window.location.hash = "#config/edit/1/route";
+      const baseMockFetch = createMockFetch();
+      global.fetch = vi.fn().mockImplementation((url, options) => {
+        if (String(url).includes("/api/config/running")) {
+          if (options && options.method === "POST") {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({
+                status: "success",
+                message: "运行配置更新成功！",
+                logs: [
+                  {
+                    step: "初始化",
+                    status: "success",
+                    message: "正在初始化 sing-box 运行配置更新流程...",
+                    timestamp: "12:00:00",
+                  },
+                ],
+              }),
+            });
+          }
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              config_id: 1,
+              is_service_running: true,
+              kernel_installed: true,
+              kernel_version: "1.10.0",
+            }),
+          });
+        }
+        if (String(url).includes("/api/config/validate")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ valid: true }),
+          });
+        }
+        if (String(url).includes("/api/config/history/1") && options?.method === "PUT") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ success: true }),
+          });
+        }
+        return baseMockFetch(url, options);
+      });
+
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true, RouteEditor: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      const updateBtn = wrapper
+        .findAll(".config-header-right button")
+        .find((b) => b.text().includes("更新"));
+      expect(updateBtn).toBeDefined();
+
+      await updateBtn.trigger("click");
+      await flushPromises();
+      await flushPromises();
+
+      expect(mockShowToast).toHaveBeenCalledWith("运行配置更新成功！");
     });
   });
 

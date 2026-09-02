@@ -64,28 +64,19 @@ impl Default for SimpleRouteConfig {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct SimpleConfig {
     pub dns: SimpleDnsConfig,
     pub inbound: SimpleInboundConfig,
     pub route: SimpleRouteConfig,
 }
 
-impl Default for SimpleConfig {
-    fn default() -> Self {
-        Self {
-            dns: SimpleDnsConfig::default(),
-            inbound: SimpleInboundConfig::default(),
-            route: SimpleRouteConfig::default(),
-        }
-    }
-}
 
 pub fn get_saved_simple_config(conn: &Connection) -> SimpleConfig {
-    if let Ok(Some(json_str)) = db::get_setting(conn, "simple_config") {
-        if let Ok(cfg) = serde_json::from_str::<SimpleConfig>(&json_str) {
+    if let Ok(Some(json_str)) = db::get_setting(conn, "simple_config")
+        && let Ok(cfg) = serde_json::from_str::<SimpleConfig>(&json_str) {
             return cfg;
         }
-    }
     SimpleConfig::default()
 }
 
@@ -269,22 +260,19 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     for node in nodes {
         if node.enabled {
             proxy_node_tags.push(node.tag.clone());
-            if let Ok(mut val) = serde_json::from_str::<Value>(&node.raw_json) {
-                if let Some(obj) = val.as_object_mut() {
+            if let Ok(mut val) = serde_json::from_str::<Value>(&node.raw_json)
+                && let Some(obj) = val.as_object_mut() {
                     obj.insert("tag".to_string(), Value::String(node.tag.clone()));
                     generator::sanitize_outbound_value(&mut val);
                     node_outbounds.push(val);
                 }
-            }
         }
     }
 
     let has_nodes = !proxy_node_tags.is_empty();
 
     // Determine target proxy outbound
-    let target_proxy = if cfg.route.default_outbound == "direct" {
-        "direct".to_string()
-    } else if !has_nodes {
+    let target_proxy = if cfg.route.default_outbound == "direct" || !has_nodes {
         "direct".to_string()
     } else if cfg.route.default_outbound == "proxy" {
         "proxy".to_string()
@@ -506,11 +494,6 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             }));
             route_rules.push(json!({
                 "outbound": "direct"
-            }));
-        }
-        "global" => {
-            route_rules.push(json!({
-                "outbound": &target_proxy
             }));
         }
         _ => {
