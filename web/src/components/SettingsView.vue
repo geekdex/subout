@@ -144,7 +144,7 @@
           <strong>{{ autoUpdateStatus.running_config_id }}</strong>
         </span>
         <a
-          href="#config"
+          href="#configs"
           style="
             color: var(--primary);
             text-decoration: none;
@@ -178,7 +178,7 @@
           自动化更新需要依赖运行配置，请先配置并启用运行配置。
         </span>
         <a
-          href="#config"
+          href="#configs"
           style="
             color: var(--primary);
             font-weight: 600;

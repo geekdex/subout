@@ -644,9 +644,10 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
 
     let mut msg = clean.trim().to_string();
     if let Some(pos) = msg.find("decode config at .temp_singbox_val_")
-        && let Some(end_pos) = msg[pos..].find(".json: ") {
-            msg = format!("{}{}", &msg[..pos], &msg[pos + end_pos + 7..]);
-        }
+        && let Some(end_pos) = msg[pos..].find(".json: ")
+    {
+        msg = format!("{}{}", &msg[..pos], &msg[pos + end_pos + 7..]);
+    }
 
     let msg = msg.trim();
     if let Some(tag_pos) = msg.find("duplicate outbound/endpoint tag: ") {
@@ -660,33 +661,34 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
     if let Some(pos) = msg.find("initialize outbound[") {
         let rest = &msg[pos + 20..];
         if let Some(end_bracket) = rest.find(']')
-            && let Ok(idx) = rest[..end_bracket].parse::<usize>() {
-                let detail_err = rest[end_bracket + 1..].trim_start_matches(':').trim();
+            && let Ok(idx) = rest[..end_bracket].parse::<usize>()
+        {
+            let detail_err = rest[end_bracket + 1..].trim_start_matches(':').trim();
 
-                let outbound_item = config
-                    .and_then(|c| c.get("outbounds"))
-                    .and_then(|o| o.as_array())
-                    .and_then(|arr| arr.get(idx));
+            let outbound_item = config
+                .and_then(|c| c.get("outbounds"))
+                .and_then(|o| o.as_array())
+                .and_then(|arr| arr.get(idx));
 
-                let tag_desc = if let Some(ob) = outbound_item {
-                    let tag = ob.get("tag").and_then(|t| t.as_str()).unwrap_or("未命名");
-                    let ob_type = ob.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
-                    format!("第 {} 个出站 \"{}\" ({})", idx + 1, tag, ob_type)
-                } else {
-                    format!("第 {} 个出站 (索引 #{})", idx + 1, idx)
-                };
+            let tag_desc = if let Some(ob) = outbound_item {
+                let tag = ob.get("tag").and_then(|t| t.as_str()).unwrap_or("未命名");
+                let ob_type = ob.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+                format!("第 {} 个出站 \"{}\" ({})", idx + 1, tag, ob_type)
+            } else {
+                format!("第 {} 个出站 (索引 #{})", idx + 1, idx)
+            };
 
-                let detail_cn = match detail_err {
-                    "missing tags" => {
-                        "未指定任何目标节点/出站 (outbounds 列表为空)，请编辑此出站组并为其添加至少一个目标节点"
-                    }
-                    "missing server" => "未配置服务器地址 (missing server)",
-                    "missing server_port" => "未配置服务器端口 (missing server_port)",
-                    _ => detail_err,
-                };
+            let detail_cn = match detail_err {
+                "missing tags" => {
+                    "未指定任何目标节点/出站 (outbounds 列表为空)，请编辑此出站组并为其添加至少一个目标节点"
+                }
+                "missing server" => "未配置服务器地址 (missing server)",
+                "missing server_port" => "未配置服务器端口 (missing server_port)",
+                _ => detail_err,
+            };
 
-                return format!("{} 校验失败: {}", tag_desc, detail_cn);
-            }
+            return format!("{} 校验失败: {}", tag_desc, detail_cn);
+        }
     }
 
     if let Some(unknown_pos) = msg.find("json: unknown field \"") {
@@ -740,7 +742,7 @@ pub async fn create_history_config(
     };
 
     conn.execute(
-        "INSERT INTO config_history (change_type, action, detail, content) VALUES ('配置列表', '创建配置', ?, ?)",
+        "INSERT INTO config_history (change_type, action, detail, content, updated_at) VALUES ('配置列表', '创建配置', ?, ?, datetime('now', 'localtime'))",
         rusqlite::params![payload.detail, content_str],
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("写入数据库失败: {}", e)))?;
@@ -763,9 +765,10 @@ pub async fn create_history_config(
             ];
             for sec in &sections {
                 if let Some(sec_val) = c.get(*sec)
-                    && let Ok(sec_str) = serde_json::to_string(sec_val) {
-                        let _ = db::save_base_config_section(&conn, sec, &sec_str);
-                    }
+                    && let Ok(sec_str) = serde_json::to_string(sec_val)
+                {
+                    let _ = db::save_base_config_section(&conn, sec, &sec_str);
+                }
             }
         }
     }
@@ -846,7 +849,7 @@ pub async fn update_history_config(
 
     if let Some(detail) = payload.detail {
         conn.execute(
-            "UPDATE config_history SET content = ?, detail = ? WHERE id = ?",
+            "UPDATE config_history SET content = ?, detail = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
             rusqlite::params![content_str, detail, id],
         )
         .map_err(|e| {
@@ -857,7 +860,7 @@ pub async fn update_history_config(
         })?;
     } else {
         conn.execute(
-            "UPDATE config_history SET content = ? WHERE id = ?",
+            "UPDATE config_history SET content = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
             rusqlite::params![content_str, id],
         )
         .map_err(|e| {
@@ -884,9 +887,10 @@ pub async fn update_history_config(
         ];
         for sec in &sections {
             if let Some(sec_val) = payload.content.get(*sec)
-                && let Ok(sec_str) = serde_json::to_string(sec_val) {
-                    let _ = db::save_base_config_section(&conn, sec, &sec_str);
-                }
+                && let Ok(sec_str) = serde_json::to_string(sec_val)
+            {
+                let _ = db::save_base_config_section(&conn, sec, &sec_str);
+            }
         }
     }
 
@@ -913,6 +917,180 @@ pub async fn delete_history_config(
         })?;
 
     Ok(StatusCode::OK)
+}
+
+#[derive(Serialize)]
+pub struct SyncConfigResourcesResponse {
+    pub id: i64,
+    pub nodes_count: usize,
+    pub groups_count: usize,
+    pub outbounds_count: usize,
+    pub repaired_routes: Vec<String>,
+    pub is_running: bool,
+    pub restarted: bool,
+}
+
+pub async fn sync_history_config_resources(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<SyncConfigResourcesResponse>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|status| (status, "未授权".to_string()))?;
+    let conn =
+        get_db_conn(&state.db_path).map_err(|status| (status, "数据库连接失败".to_string()))?;
+
+    let history = db::get_config_history_detail(&conn, id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("查询配置失败: {}", e),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "配置项不存在".to_string()))?;
+
+    let content_str = history.content.ok_or((
+        StatusCode::BAD_REQUEST,
+        "配置内容为空，无法同步资源".to_string(),
+    ))?;
+    let base_config: Value = serde_json::from_str(&content_str)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("解析配置JSON失败: {}", e)))?;
+
+    let (updated_config, repaired_tags) =
+        generator::sync_config_with_latest_resources(&conn, &base_config, &[]).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("同步资源失败: {}", e),
+            )
+        })?;
+
+    let log_val = updated_config.get("log").cloned().unwrap_or(json!({}));
+    let dns_val = updated_config.get("dns").cloned().unwrap_or(json!({}));
+    let inbounds_val = updated_config.get("inbounds").cloned().unwrap_or(json!([]));
+    let outbounds_val = updated_config
+        .get("outbounds")
+        .cloned()
+        .unwrap_or(json!([]));
+    let route_val = updated_config.get("route").cloned().unwrap_or(json!({}));
+    let experimental_val = updated_config
+        .get("experimental")
+        .cloned()
+        .unwrap_or(json!({}));
+
+    if let Err(err_msg) = validate_config_with_singbox(
+        &log_val,
+        &dns_val,
+        &inbounds_val,
+        &outbounds_val,
+        &route_val,
+        &experimental_val,
+    ) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("同步后配置语法校验失败: {}", err_msg),
+        ));
+    }
+
+    let updated_content_str = serde_json::to_string(&updated_config).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("序列化配置失败: {}", e),
+        )
+    })?;
+
+    conn.execute(
+        "UPDATE config_history SET content = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+        rusqlite::params![updated_content_str, id],
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("更新数据库失败: {}", e)))?;
+
+    let running_id_str = db::get_setting(&conn, "running_config_id")
+        .unwrap_or(None)
+        .unwrap_or_default();
+    let is_running = running_id_str.parse::<i64>().ok() == Some(id);
+    let mut restarted = false;
+
+    if is_running {
+        let sections = [
+            "log",
+            "dns",
+            "inbounds",
+            "outbounds",
+            "route",
+            "experimental",
+        ];
+        for sec in &sections {
+            if let Some(sec_val) = updated_config.get(*sec)
+                && let Ok(sec_str) = serde_json::to_string(sec_val)
+            {
+                let _ = db::save_base_config_section(&conn, sec, &sec_str);
+            }
+        }
+
+        let running_config_path = crate::service::SingBoxServiceManager::get_running_config_path();
+        if let Some(parent) = running_config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(new_config_str) = serde_json::to_string_pretty(&updated_config) {
+            let _ = std::fs::write(&running_config_path, &new_config_str);
+        }
+
+        if state.service_manager.is_running().await
+            && state
+                .service_manager
+                .restart_with_sudo(&updated_config, None)
+                .await
+                .is_ok()
+        {
+            restarted = true;
+        }
+    }
+
+    let outbounds_arr = outbounds_val
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or(&[]);
+    let groups_count = outbounds_arr
+        .iter()
+        .filter(|o| {
+            matches!(
+                o.get("type").and_then(|t| t.as_str()),
+                Some("selector")
+                    | Some("urltest")
+                    | Some("url-test")
+                    | Some("fallback")
+                    | Some("loadbalance")
+            )
+        })
+        .count();
+    let nodes_count = outbounds_arr
+        .iter()
+        .filter(|o| {
+            let t = o.get("type").and_then(|t| t.as_str()).unwrap_or_default();
+            !matches!(
+                t,
+                "direct"
+                    | "block"
+                    | "dns"
+                    | "selector"
+                    | "urltest"
+                    | "url-test"
+                    | "fallback"
+                    | "loadbalance"
+            )
+        })
+        .count();
+
+    Ok(Json(SyncConfigResourcesResponse {
+        id,
+        nodes_count,
+        groups_count,
+        outbounds_count: outbounds_arr.len(),
+        repaired_routes: repaired_tags,
+        is_running,
+        restarted,
+    }))
 }
 
 #[derive(Deserialize, Debug)]
@@ -1007,22 +1185,24 @@ pub async fn save_running_config(
         // Sync sections to base_config for panel generation compatibility
         if let Ok(Some(history)) = db::get_config_history_detail(&conn, id)
             && let Some(content_str) = history.content
-                && let Ok(c) = serde_json::from_str::<Value>(&content_str) {
-                    let sections = [
-                        "log",
-                        "dns",
-                        "inbounds",
-                        "outbounds",
-                        "route",
-                        "experimental",
-                    ];
-                    for sec in &sections {
-                        if let Some(sec_val) = c.get(*sec)
-                            && let Ok(sec_str) = serde_json::to_string(sec_val) {
-                                let _ = db::save_base_config_section(&conn, sec, &sec_str);
-                            }
-                    }
+            && let Ok(c) = serde_json::from_str::<Value>(&content_str)
+        {
+            let sections = [
+                "log",
+                "dns",
+                "inbounds",
+                "outbounds",
+                "route",
+                "experimental",
+            ];
+            for sec in &sections {
+                if let Some(sec_val) = c.get(*sec)
+                    && let Ok(sec_str) = serde_json::to_string(sec_val)
+                {
+                    let _ = db::save_base_config_section(&conn, sec, &sec_str);
                 }
+            }
+        }
     } else {
         if let Err(e) = db::update_setting(&conn, "running_config_id", "") {
             let err_msg = format!("清除配置ID失败: {}", e);

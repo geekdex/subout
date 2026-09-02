@@ -71,12 +71,13 @@ impl SingBoxServiceManager {
     pub async fn load_saved_sudo_pass(&self) {
         if let Some(ref path) = *self.db_path.read().await
             && let Ok(conn) = rusqlite::Connection::open(path)
-                && let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password") {
-                    let trimmed = pass.trim();
-                    if !trimmed.is_empty() {
-                        *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
-                    }
-                }
+            && let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password")
+        {
+            let trimmed = pass.trim();
+            if !trimmed.is_empty() {
+                *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
+            }
+        }
     }
 
     pub async fn save_sudo_pass(&self, pass: &str) {
@@ -87,17 +88,19 @@ impl SingBoxServiceManager {
         }
         *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
         if let Some(ref path) = *self.db_path.read().await
-            && let Ok(conn) = rusqlite::Connection::open(path) {
-                let _ = crate::db::update_setting(&conn, "sudo_password", trimmed);
-            }
+            && let Ok(conn) = rusqlite::Connection::open(path)
+        {
+            let _ = crate::db::update_setting(&conn, "sudo_password", trimmed);
+        }
     }
 
     pub async fn clear_saved_sudo_pass(&self) {
         *self.cached_sudo_pass.write().await = None;
         if let Some(ref path) = *self.db_path.read().await
-            && let Ok(conn) = rusqlite::Connection::open(path) {
-                let _ = crate::db::delete_setting(&conn, "sudo_password");
-            }
+            && let Ok(conn) = rusqlite::Connection::open(path)
+        {
+            let _ = crate::db::delete_setting(&conn, "sudo_password");
+        }
     }
 
     pub async fn has_saved_sudo_pass(&self) -> bool {
@@ -479,9 +482,10 @@ impl SingBoxServiceManager {
             });
 
         if let Some(ref out_path) = log_output_file
-            && let Some(parent) = out_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
+            && let Some(parent) = out_path.parent()
+        {
+            let _ = std::fs::create_dir_all(parent);
+        }
 
         let mut cmd = if use_sudo {
             let mut c = tokio::process::Command::new("sudo");
@@ -530,13 +534,14 @@ impl SingBoxServiceManager {
 
         if use_sudo
             && let Some(ref pass) = effective_sudo_pass
-                && let Some(mut stdin) = child.stdin.take() {
-                    use tokio::io::AsyncWriteExt;
-                    let pass_bytes = format!("{}\n", pass);
-                    let _ = stdin.write_all(pass_bytes.as_bytes()).await;
-                    let _ = stdin.flush().await;
-                    drop(stdin); // Explicitly close stdin to prevent sudo from waiting for more input
-                }
+            && let Some(mut stdin) = child.stdin.take()
+        {
+            use tokio::io::AsyncWriteExt;
+            let pass_bytes = format!("{}\n", pass);
+            let _ = stdin.write_all(pass_bytes.as_bytes()).await;
+            let _ = stdin.flush().await;
+            drop(stdin); // Explicitly close stdin to prevent sudo from waiting for more input
+        }
 
         let pid = child.id();
         let now = std::time::SystemTime::now()
@@ -890,12 +895,13 @@ impl SingBoxServiceManager {
         if let Err(e) = platform
             .stop_external_service_or_process(pid, pass_clean.as_deref())
             .await
-            && e.to_string().contains("Sudo 密码不正确") {
-                self.clear_saved_sudo_pass().await;
-                self.append_log(&format!("❌ 终止外部进程失败: {}", e))
-                    .await;
-                return Err(e);
-            }
+            && e.to_string().contains("Sudo 密码不正确")
+        {
+            self.clear_saved_sudo_pass().await;
+            self.append_log(&format!("❌ 终止外部进程失败: {}", e))
+                .await;
+            return Err(e);
+        }
 
         // Verify whether the process has terminated
         let mut is_dead = false;
@@ -987,56 +993,57 @@ pub fn detect_conflicting_singbox_processes(
 pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option<String> {
     if let Ok(content) = std::fs::read_to_string(config_path)
         && let Ok(json_val) = serde_json::from_str::<Value>(&content)
-            && let Some(inbounds) = json_val.get("inbounds").and_then(|v| v.as_array()) {
-                let mut summaries = Vec::new();
-                for inb in inbounds {
-                    let inb_type = inb.get("type").and_then(|t| t.as_str()).unwrap_or("mixed");
-                    match inb_type {
-                        "tun" => {
-                            let iface = inb
-                                .get("interface_name")
-                                .and_then(|i| i.as_str())
-                                .unwrap_or("");
-                            if iface.is_empty() {
-                                summaries.push("TUN".to_string());
-                            } else {
-                                summaries.push(format!("TUN ({})", iface));
-                            }
-                        }
-                        "mixed" => {
-                            let listen = inb
-                                .get("listen")
-                                .and_then(|l| l.as_str())
-                                .unwrap_or("127.0.0.1");
-                            let port = inb
-                                .get("listen_port")
-                                .and_then(|p| p.as_u64())
-                                .unwrap_or(2080);
-                            summaries.push(format!("{}:{} (混合代理)", listen, port));
-                        }
-                        "http" => {
-                            let port = inb
-                                .get("listen_port")
-                                .and_then(|p| p.as_u64())
-                                .unwrap_or(8080);
-                            summaries.push(format!("HTTP :{}", port));
-                        }
-                        "socks" => {
-                            let port = inb
-                                .get("listen_port")
-                                .and_then(|p| p.as_u64())
-                                .unwrap_or(1080);
-                            summaries.push(format!("SOCKS5 :{}", port));
-                        }
-                        other => {
-                            summaries.push(format!("入站 ({})", other));
-                        }
+        && let Some(inbounds) = json_val.get("inbounds").and_then(|v| v.as_array())
+    {
+        let mut summaries = Vec::new();
+        for inb in inbounds {
+            let inb_type = inb.get("type").and_then(|t| t.as_str()).unwrap_or("mixed");
+            match inb_type {
+                "tun" => {
+                    let iface = inb
+                        .get("interface_name")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or("");
+                    if iface.is_empty() {
+                        summaries.push("TUN".to_string());
+                    } else {
+                        summaries.push(format!("TUN ({})", iface));
                     }
                 }
-                if !summaries.is_empty() {
-                    return Some(summaries.join(", "));
+                "mixed" => {
+                    let listen = inb
+                        .get("listen")
+                        .and_then(|l| l.as_str())
+                        .unwrap_or("127.0.0.1");
+                    let port = inb
+                        .get("listen_port")
+                        .and_then(|p| p.as_u64())
+                        .unwrap_or(2080);
+                    summaries.push(format!("{}:{} (混合代理)", listen, port));
+                }
+                "http" => {
+                    let port = inb
+                        .get("listen_port")
+                        .and_then(|p| p.as_u64())
+                        .unwrap_or(8080);
+                    summaries.push(format!("HTTP :{}", port));
+                }
+                "socks" => {
+                    let port = inb
+                        .get("listen_port")
+                        .and_then(|p| p.as_u64())
+                        .unwrap_or(1080);
+                    summaries.push(format!("SOCKS5 :{}", port));
+                }
+                other => {
+                    summaries.push(format!("入站 ({})", other));
                 }
             }
+        }
+        if !summaries.is_empty() {
+            return Some(summaries.join(", "));
+        }
+    }
     None
 }
 
@@ -1059,9 +1066,10 @@ pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
         for inbound in inbounds {
             let inbound_type = inbound.get("type").and_then(|t| t.as_str());
             if matches!(inbound_type, Some("mixed") | Some("http") | Some("socks"))
-                && let Some(port) = inbound.get("listen_port").and_then(|p| p.as_u64()) {
-                    return Some(port as u16);
-                }
+                && let Some(port) = inbound.get("listen_port").and_then(|p| p.as_u64())
+            {
+                return Some(port as u16);
+            }
         }
     }
     None
@@ -1074,10 +1082,11 @@ pub fn get_tun_ip_from_config(config: &Value) -> Option<String> {
                 if let Some(addrs) = inbound.get("address").and_then(|a| a.as_array()) {
                     for addr in addrs {
                         if let Some(s) = addr.as_str()
-                            && !s.contains(':') {
-                                let ip = s.split('/').next().unwrap_or(s);
-                                return Some(ip.to_string());
-                            }
+                            && !s.contains(':')
+                        {
+                            let ip = s.split('/').next().unwrap_or(s);
+                            return Some(ip.to_string());
+                        }
                     }
                 }
                 return Some("172.19.0.1".to_string());
@@ -1092,16 +1101,17 @@ pub fn strip_ansi_codes(input: &str) -> String {
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\x1b'
-            && let Some(&'[') = chars.peek() {
-                chars.next(); // consume '['
-                while let Some(&next_c) = chars.peek() {
-                    chars.next();
-                    if next_c.is_ascii_alphabetic() || next_c == '@' {
-                        break;
-                    }
+            && let Some(&'[') = chars.peek()
+        {
+            chars.next(); // consume '['
+            while let Some(&next_c) = chars.peek() {
+                chars.next();
+                if next_c.is_ascii_alphabetic() || next_c == '@' {
+                    break;
                 }
-                continue;
             }
+            continue;
+        }
         out.push(c);
     }
     out

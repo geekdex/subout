@@ -210,8 +210,8 @@
 
           <a
             class="menu-item"
-            :class="{ active: currentView === 'config' }"
-            href="#config"
+            :class="{ active: currentView === 'configs' }"
+            href="#configs"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <line x1="21" y1="4" x2="14" y2="4" />
@@ -472,7 +472,7 @@
       <SimpleConfigView v-else-if="currentView === 'simpleConfig'" />
       <ServiceLogsView v-else-if="currentView === 'serviceLogs'" />
       <GroupsView v-else-if="currentView === 'groups'" />
-      <ConfigEditorView v-else-if="currentView === 'config'" />
+      <ConfigEditorView v-else-if="currentView === 'configs'" />
       <SiteTestView v-else-if="currentView === 'siteTest'" :token="token" />
       <SettingsView v-else-if="currentView === 'settings'" />
     </main>
@@ -883,9 +883,11 @@ const handleRouting = () => {
   const parts = hash.split("/");
   let viewName = parts[0];
 
-  if (viewName === "history") {
-    viewName = "config";
-    window.history.replaceState(null, null, "#config");
+  if (viewName === "history" || viewName === "config") {
+    viewName = "configs";
+    const rest = parts.slice(1).join("/");
+    const newHash = rest ? `#configs/${rest}` : "#configs";
+    window.history.replaceState(null, null, newHash);
   }
 
   const validViews = [
@@ -893,7 +895,7 @@ const handleRouting = () => {
     "subscriptions",
     "nodes",
     "groups",
-    "config",
+    "configs",
     "simpleConfig",
     "serviceLogs",
     "siteTest",

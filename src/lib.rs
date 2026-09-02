@@ -128,9 +128,10 @@ pub async fn fetch_subscription_with_info(
         .headers()
         .get("subscription-userinfo")
         .or_else(|| response.headers().get("Subscription-Userinfo"))
-        && let Ok(userinfo_str) = userinfo_val.to_str() {
-            header_info = parse_userinfo_str(userinfo_str);
-        }
+        && let Ok(userinfo_str) = userinfo_val.to_str()
+    {
+        header_info = parse_userinfo_str(userinfo_str);
+    }
 
     let text = response.text().await?;
     let body_info = parse_userinfo_from_body(&text);

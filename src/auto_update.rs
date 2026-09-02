@@ -2,7 +2,6 @@ use anyhow::{Result, anyhow};
 use chrono::Local;
 use rusqlite::Connection;
 use serde_json::{Value, json};
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
@@ -277,32 +276,40 @@ pub async fn run_auto_update_process(
             tx.commit()?;
         }
 
-        // Step 5: Construct updated outbounds preserving correct sing-box topology and system outbounds
+        // Step 5: Construct updated outbounds and repair route/dns references
         update_log(
-            "步骤 5: 正在构建更新后的出站配置 (保留系统出站前置、同步最新策略组及有效代理节点)...",
+            "步骤 5: 正在构建更新后的出站配置 (保留系统出站前置、同步最新策略组及有效代理节点，并自动修复路由出口)...",
         );
-        let outbounds_list = {
+        let final_config = {
             let conn_sync = Connection::open(db_path)?;
             conn_sync.busy_timeout(std::time::Duration::from_secs(5))?;
 
-            let outbounds_list = build_updated_outbounds(&conn_sync, &full_config, &deleted_tags)?;
+            let (updated_cfg, repaired) = crate::generator::sync_config_with_latest_resources(
+                &conn_sync,
+                &full_config,
+                &deleted_tags,
+            )?;
+
+            let outbounds_len = updated_cfg
+                .get("outbounds")
+                .and_then(|o| o.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
 
             update_log(&format!(
                 "  -> 出站配置构建完成，总计出站数量: {} 个",
-                outbounds_list.len()
+                outbounds_len
             ));
 
-            outbounds_list
+            for rep in &repaired {
+                update_log(&format!("  -> [自动修复失效路由/DNS] {}", rep));
+            }
+
+            updated_cfg
         };
 
         // Step 6: Validate configuration using sing-box
         update_log("步骤 6: 正在使用 sing-box 校验生成后的全新配置...");
-        let mut final_config = full_config.clone();
-        final_config
-            .as_object_mut()
-            .unwrap()
-            .insert("outbounds".to_string(), json!(outbounds_list));
-
         let log_val = final_config.get("log").cloned().unwrap_or(json!({}));
         let dns_val = final_config.get("dns").cloned().unwrap_or(json!({}));
         let inbounds_val = final_config.get("inbounds").cloned().unwrap_or(json!([]));
@@ -453,223 +460,14 @@ pub fn build_updated_outbounds(
     full_config: &Value,
     deleted_tags: &[String],
 ) -> Result<Vec<Value>> {
-    let proxy_types = [
-        "vmess",
-        "vless",
-        "trojan",
-        "shadowsocks",
-        "socks",
-        "http",
-        "hysteria",
-        "hysteria2",
-        "anytls",
-        "tuic",
-        "wireguard",
-        "shadowtls",
-        "v2ray",
-    ];
-
-    let deleted_set: HashSet<&str> = deleted_tags.iter().map(|s| s.as_str()).collect();
-
-    let mut system_outbounds = Vec::new();
-    let mut template_groups = Vec::new();
-    let mut template_custom_nodes = Vec::new();
-
-    if let Some(orig_outbounds) = full_config.get("outbounds").and_then(|o| o.as_array()) {
-        for o in orig_outbounds {
-            let o_type = o.get("type").and_then(|t| t.as_str()).unwrap_or_default();
-            let o_tag = o.get("tag").and_then(|t| t.as_str()).unwrap_or_default();
-
-            if o_type == "selector" || o_type == "urltest" {
-                template_groups.push(o.clone());
-            } else if proxy_types.contains(&o_type) {
-                if !deleted_set.contains(o_tag) {
-                    template_custom_nodes.push(o.clone());
-                }
-            } else {
-                system_outbounds.push(o.clone());
-            }
-        }
-    }
-
-    // Ensure basic direct & block exist if template didn't have them
-    if !system_outbounds
-        .iter()
-        .any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("direct"))
-    {
-        system_outbounds.push(json!({"type": "direct", "tag": "direct"}));
-    }
-    if !system_outbounds
-        .iter()
-        .any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("block"))
-    {
-        system_outbounds.push(json!({"type": "block", "tag": "block"}));
-    }
-
-    // 2. Fetch strategy groups from DB and compute resolved nodes
-    let db_groups = crate::db::get_outbound_groups(conn)?;
-    let mut db_group_map = std::collections::HashMap::new();
-    let mut referenced_node_tags = HashSet::new();
-
-    for group in &db_groups {
-        let resolved = crate::db::resolve_group_nodes(conn, group)?;
-        for tag in &resolved {
-            referenced_node_tags.insert(tag.clone());
-        }
-        db_group_map.insert(group.tag.clone(), (group.clone(), resolved));
-    }
-
-    // 3. Collect active proxy nodes from DB
-    let enabled_nodes = crate::db::get_nodes(conn)?;
-    let mut nodes_map = std::collections::HashMap::new();
-    for node in enabled_nodes {
-        if node.enabled
-            && (referenced_node_tags.contains(&node.tag) || node.is_custom)
-                && let Ok(mut val) = serde_json::from_str::<Value>(&node.raw_json)
-                    && let Some(obj) = val.as_object_mut() {
-                        obj.insert("tag".to_string(), Value::String(node.tag.clone()));
-                        nodes_map.insert(node.tag.clone(), Value::Object(obj.clone()));
-                    }
-    }
-
-    // Preserve any custom node from template that is not in DB and not deleted
-    for custom_node in template_custom_nodes {
-        if let Some(tag) = custom_node.get("tag").and_then(|t| t.as_str())
-            && !nodes_map.contains_key(tag) && !deleted_set.contains(tag) {
-                nodes_map.insert(tag.to_string(), custom_node);
-            }
-    }
-
-    // 4. Construct strategy groups list
-    let mut final_groups = Vec::new();
-    let mut seen_group_tags = HashSet::new();
-
-    for t_group in template_groups {
-        if let Some(tag) = t_group.get("tag").and_then(|t| t.as_str()) {
-            if seen_group_tags.contains(tag) {
-                continue;
-            }
-            seen_group_tags.insert(tag.to_string());
-
-            if let Some((db_g, resolved)) = db_group_map.get(tag) {
-                let mut g_val = json!({
-                    "type": db_g.group_type,
-                    "tag": db_g.tag,
-                    "outbounds": resolved,
-                });
-                if db_g.group_type == "urltest" {
-                    if let Some(ref u) = db_g.url {
-                        g_val
-                            .as_object_mut()
-                            .unwrap()
-                            .insert("url".to_string(), json!(u));
-                    }
-                    if let Some(ref iv) = db_g.interval {
-                        g_val
-                            .as_object_mut()
-                            .unwrap()
-                            .insert("interval".to_string(), json!(iv));
-                    }
-                    if let Some(tol) = db_g.tolerance {
-                        g_val
-                            .as_object_mut()
-                            .unwrap()
-                            .insert("tolerance".to_string(), json!(tol));
-                    }
-                }
-                final_groups.push(g_val);
-            } else {
-                let mut g_val = t_group.clone();
-                if let Some(member_arr) = g_val.get_mut("outbounds").and_then(|o| o.as_array_mut())
-                {
-                    member_arr.retain(|m| {
-                        let m_str = m.as_str().unwrap_or_default();
-                        !deleted_set.contains(m_str)
-                    });
-                }
-                final_groups.push(g_val);
-            }
-        }
-    }
-
-    for group in &db_groups {
-        if !seen_group_tags.contains(&group.tag) {
-            seen_group_tags.insert(group.tag.clone());
-            let resolved = db_group_map
-                .get(&group.tag)
-                .map(|(_, r)| r.clone())
-                .unwrap_or_default();
-            let mut g_val = json!({
-                "type": group.group_type,
-                "tag": group.tag,
-                "outbounds": resolved,
-            });
-            if group.group_type == "urltest" {
-                if let Some(ref u) = group.url {
-                    g_val
-                        .as_object_mut()
-                        .unwrap()
-                        .insert("url".to_string(), json!(u));
-                }
-                if let Some(ref iv) = group.interval {
-                    g_val
-                        .as_object_mut()
-                        .unwrap()
-                        .insert("interval".to_string(), json!(iv));
-                }
-                if let Some(tol) = group.tolerance {
-                    g_val
-                        .as_object_mut()
-                        .unwrap()
-                        .insert("tolerance".to_string(), json!(tol));
-                }
-            }
-            final_groups.push(g_val);
-        }
-    }
-
-    // 5. Filter group member lists to ensure every referenced tag exists
-    let mut all_valid_tags = HashSet::new();
-    for s in &system_outbounds {
-        if let Some(t) = s.get("tag").and_then(|t| t.as_str()) {
-            all_valid_tags.insert(t.to_string());
-        }
-    }
-    for g in &final_groups {
-        if let Some(t) = g.get("tag").and_then(|t| t.as_str()) {
-            all_valid_tags.insert(t.to_string());
-        }
-    }
-    for t in nodes_map.keys() {
-        all_valid_tags.insert(t.clone());
-    }
-
-    for g in &mut final_groups {
-        if let Some(member_arr) = g.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
-            member_arr.retain(|m| {
-                let m_str = m.as_str().unwrap_or_default();
-                all_valid_tags.contains(m_str)
-            });
-            if member_arr.is_empty() && all_valid_tags.contains("direct") {
-                member_arr.push(json!("direct"));
-            }
-        }
-    }
-
-    // 6. Assemble complete outbounds list in order: System Outbounds -> Strategy Groups -> Proxy Nodes
-    let mut outbounds_list = Vec::new();
-    outbounds_list.extend(system_outbounds);
-    outbounds_list.extend(final_groups);
-
-    for (_, node_val) in nodes_map {
-        outbounds_list.push(node_val);
-    }
-
-    for o in &mut outbounds_list {
-        crate::generator::sanitize_outbound_value(o);
-    }
-
-    Ok(outbounds_list)
+    let (updated_cfg, _) =
+        crate::generator::sync_config_with_latest_resources(conn, full_config, deleted_tags)?;
+    let outbounds = updated_cfg
+        .get("outbounds")
+        .and_then(|o| o.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(outbounds)
 }
 
 #[cfg(test)]

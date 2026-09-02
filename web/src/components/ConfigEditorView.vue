@@ -124,7 +124,8 @@
                 <th style="width: 80px">ID</th>
                 <th>配置备注 / 名称</th>
                 <th>创建时间</th>
-                <th style="text-align: right; width: 280px">操作</th>
+                <th>最后更新时间</th>
+                <th style="text-align: right; width: 400px">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -133,11 +134,22 @@
                 <td>
                   <strong>{{ item.detail || "未命名配置" }}</strong>
                 </td>
-                <td style="color: var(--text-muted); font-size: 0.9rem">
+                <td style="color: var(--text-muted); font-size: 0.85rem">
                   {{ item.created_at }}
+                </td>
+                <td style="color: var(--text-muted); font-size: 0.85rem">
+                  {{ item.updated_at || item.created_at }}
                 </td>
                 <td style="text-align: right">
                   <div class="flex gap-2" style="justify-content: flex-end">
+                    <button
+                      class="btn btn-secondary"
+                      style="padding: 0.4rem 0.8rem; font-size: 0.85rem"
+                      title="拉取当前系统最新的节点池和出站组并同步到此配置"
+                      @click="syncLatestResources(item.id, item.detail)"
+                    >
+                      同步最新资源
+                    </button>
                     <button
                       class="btn btn-secondary"
                       style="padding: 0.4rem 0.8rem; font-size: 0.85rem"
@@ -173,7 +185,7 @@
               </tr>
               <tr v-if="configList.length === 0">
                 <td
-                  colspan="4"
+                  colspan="5"
                   style="text-align: center; color: var(--text-muted)"
                 >
                   暂无保存的配置模板。
@@ -7400,7 +7412,7 @@ const parseConfigRoute = () => {
   let configId = null;
   let tab = null;
 
-  if (parts[0] === "config") {
+  if (parts[0] === "configs" || parts[0] === "config") {
     if (parts[1] === "edit" && parts[2]) {
       const id = parseInt(parts[2], 10);
       if (!isNaN(id)) {
@@ -7432,8 +7444,8 @@ const parseConfigRoute = () => {
 
 const backToList = () => {
   isEditing.value = false;
-  if (window.location.hash !== "#config") {
-    window.location.hash = "#config";
+  if (window.location.hash !== "#configs") {
+    window.location.hash = "#configs";
   }
 };
 
@@ -7465,7 +7477,7 @@ const syncFromRoute = async () => {
 
 watch(activeSection, (newTab) => {
   if (isEditing.value && currentConfigId.value) {
-    const targetHash = `#config/edit/${currentConfigId.value}/${newTab}`;
+    const targetHash = `#configs/edit/${currentConfigId.value}/${newTab}`;
     if (window.location.hash !== targetHash) {
       window.location.hash = targetHash;
     }
@@ -7492,9 +7504,47 @@ watch(pageSize, () => {
 const startEditConfig = async (id) => {
   await selectConfig(id);
   isEditing.value = true;
-  const targetHash = `#config/edit/${id}/${activeSection.value}`;
+  const targetHash = `#configs/edit/${id}/${activeSection.value}`;
   if (window.location.hash !== targetHash) {
     window.location.hash = targetHash;
+  }
+};
+
+const syncLatestResources = async (id, name) => {
+  const confirmed = await confirmDialog(
+    `确定要将系统最新的节点池和分流出站组同步到配置 "${name || "#" + id}" 吗？\n\n💡 提示：此操作将使用系统当前最新的全部节点和出站组更新该配置的出站列表。\n⚠️ 注意：若原本配置绑定的部分老节点在当前节点池中已不存在，程序将自动将对应 route 路由项绑定的出口重置为 direct（直连）。`,
+    {
+      title: "同步最新资源",
+      confirmText: "确认同步",
+    },
+  );
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/config/history/${id}/sync-resources`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token.value}` },
+      },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      let msg = `已成功同步最新资源（包含 ${data.nodes_count} 个节点、${data.groups_count} 个出站组）`;
+      if (data.repaired_routes && data.repaired_routes.length > 0) {
+        msg += `，并自动修复了 ${data.repaired_routes.length} 处失效路由出口为 direct`;
+      }
+      if (data.is_running && data.restarted) {
+        msg += "，核心服务已重新加载配置生效";
+      }
+      showToast(msg, "success");
+      await loadAllSections();
+    } else {
+      const errText = await res.text();
+      showToast(`同步失败: ${errText || "接口错误"}`, "danger");
+    }
+  } catch (e) {
+    showToast(`同步失败: ${e.message || "网络请求错误"}`, "danger");
   }
 };
 
@@ -7838,8 +7888,8 @@ const loadAllSections = async () => {
       return;
     } else if (configList.value.length > 0) {
       showToast(`未找到 ID 为 #${routeState.configId} 的配置`, "warning");
-      if (window.location.hash !== "#config") {
-        window.history.replaceState(null, null, "#config");
+      if (window.location.hash !== "#configs") {
+        window.history.replaceState(null, null, "#configs");
       }
     }
   }
@@ -9176,7 +9226,8 @@ const copyLogConsole = () => {
 };
 
 const openRunningConfigModal = () => {
-  runningConfigForm.config_id = currentConfigId.value || runningConfig.config_id;
+  runningConfigForm.config_id =
+    currentConfigId.value || runningConfig.config_id;
   runningConfigModal.viewMode = "form";
   runningConfigModal.status = "idle";
   runningConfigModal.logs = [];
@@ -9236,7 +9287,8 @@ const triggerUpdateFromDetail = async () => {
   }
 
   openRunningConfigModal();
-  runningConfigForm.config_id = currentConfigId.value || runningConfig.config_id;
+  runningConfigForm.config_id =
+    currentConfigId.value || runningConfig.config_id;
   await saveRunningConfigSettings(true);
 };
 
@@ -9413,7 +9465,7 @@ const saveRunningConfigSettings = async (
       runningConfigModal.message =
         e.name === "TimeoutError"
           ? "更新请求超时，请检查 sing-box 服务状态"
-          : (e.message || "请求处理失败");
+          : e.message || "请求处理失败";
       showToast(
         e.name === "TimeoutError" ? "运行配置更新请求超时" : "运行配置更新失败",
         "danger",

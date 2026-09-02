@@ -45,18 +45,19 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
 
     // Reset auto_update_last_status to failed if it was left as running due to a crash/restart
     if let Ok(Some(status)) = db::get_setting(&_conn, "auto_update_last_status")
-        && status == "running" {
-            let _ = db::update_setting(&_conn, "auto_update_last_status", "failed");
-            let existing_log = db::get_setting(&_conn, "auto_update_last_log")
-                .unwrap_or_default()
-                .unwrap_or_default();
-            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-            let new_log = format!(
-                "{}\n[{}] 提示: 系统重启，终止了上次运行中可能被中断的自动更新任务。\n",
-                existing_log, timestamp
-            );
-            let _ = db::update_setting(&_conn, "auto_update_last_log", &new_log);
-        }
+        && status == "running"
+    {
+        let _ = db::update_setting(&_conn, "auto_update_last_status", "failed");
+        let existing_log = db::get_setting(&_conn, "auto_update_last_log")
+            .unwrap_or_default()
+            .unwrap_or_default();
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let new_log = format!(
+            "{}\n[{}] 提示: 系统重启，终止了上次运行中可能被中断的自动更新任务。\n",
+            existing_log, timestamp
+        );
+        let _ = db::update_setting(&_conn, "auto_update_last_log", &new_log);
+    }
 
     let service_manager = Arc::new(crate::service::SingBoxServiceManager::new());
     service_manager.set_db_path(&db_path).await;
@@ -195,6 +196,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route(
             "/api/config/history/:id/restore",
             post(config::restore_history_config),
+        )
+        .route(
+            "/api/config/history/:id/sync-resources",
+            post(config::sync_history_config_resources),
         )
         .route("/api/config/history/clear", post(config::clear_history))
         .route("/api/config/schemas", get(config::get_config_schemas))
@@ -386,9 +391,10 @@ pub async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Sta
     let token = &auth_str[7..];
     let guard = state.session_token.read().await;
     if let Some(ref active_token) = *guard
-        && active_token == token {
-            return Ok(());
-        }
+        && active_token == token
+    {
+        return Ok(());
+    }
     Err(StatusCode::UNAUTHORIZED)
 }
 

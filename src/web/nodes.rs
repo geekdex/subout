@@ -754,16 +754,17 @@ pub async fn test_site_reachability(
         .redirect(reqwest::redirect::Policy::limited(10))
         .timeout(Duration::from_secs(8))
         .build()
-        && let Some((status, elapsed)) = try_fetch_url(&client, &url).await {
-            let success = status < 400 || status == 403 || status == 405 || status == 429;
-            return Ok(Json(SiteTestResponse {
-                url,
-                status_code: Some(status),
-                latency: Some(elapsed),
-                success,
-                error: None,
-            }));
-        }
+        && let Some((status, elapsed)) = try_fetch_url(&client, &url).await
+    {
+        let success = status < 400 || status == 403 || status == 405 || status == 429;
+        return Ok(Json(SiteTestResponse {
+            url,
+            status_code: Some(status),
+            latency: Some(elapsed),
+            success,
+            error: None,
+        }));
+    }
 
     // 2. Fallback: If system env proxy was missing or failed, probe common local proxy ports
     let candidate_proxy_urls = [
@@ -786,16 +787,17 @@ pub async fn test_site_reachability(
                 .redirect(reqwest::redirect::Policy::limited(10))
                 .timeout(Duration::from_secs(6))
                 .build()
-                && let Some((status, elapsed)) = try_fetch_url(&client, &url).await {
-                    let success = status < 400 || status == 403 || status == 405 || status == 429;
-                    return Ok(Json(SiteTestResponse {
-                        url,
-                        status_code: Some(status),
-                        latency: Some(elapsed),
-                        success,
-                        error: None,
-                    }));
-                }
+            && let Some((status, elapsed)) = try_fetch_url(&client, &url).await
+        {
+            let success = status < 400 || status == 403 || status == 405 || status == 429;
+            return Ok(Json(SiteTestResponse {
+                url,
+                status_code: Some(status),
+                latency: Some(elapsed),
+                success,
+                error: None,
+            }));
+        }
     }
 
     Ok(Json(SiteTestResponse {

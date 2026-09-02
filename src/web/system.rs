@@ -61,16 +61,18 @@ pub async fn get_system_dirs(
 
     let mut subdirs = Vec::new();
     if current_dir.is_dir()
-        && let Ok(entries) = std::fs::read_dir(&current_dir) {
-            for entry in entries.flatten() {
-                if let Ok(file_type) = entry.file_type()
-                    && file_type.is_dir()
-                        && let Some(name) = entry.file_name().to_str()
-                            && (!name.starts_with('.') || name == ".config") {
-                                subdirs.push(entry.path().to_string_lossy().into_owned());
-                            }
+        && let Ok(entries) = std::fs::read_dir(&current_dir)
+    {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_dir()
+                && let Some(name) = entry.file_name().to_str()
+                && (!name.starts_with('.') || name == ".config")
+            {
+                subdirs.push(entry.path().to_string_lossy().into_owned());
             }
         }
+    }
 
     subdirs.sort();
 
