@@ -44,8 +44,8 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
     println!("[Init] Database initialized at: {}", db_path);
 
     // Reset auto_update_last_status to failed if it was left as running due to a crash/restart
-    if let Ok(Some(status)) = db::get_setting(&_conn, "auto_update_last_status") {
-        if status == "running" {
+    if let Ok(Some(status)) = db::get_setting(&_conn, "auto_update_last_status")
+        && status == "running" {
             let _ = db::update_setting(&_conn, "auto_update_last_status", "failed");
             let existing_log = db::get_setting(&_conn, "auto_update_last_log")
                 .unwrap_or_default()
@@ -57,7 +57,6 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             );
             let _ = db::update_setting(&_conn, "auto_update_last_log", &new_log);
         }
-    }
 
     let service_manager = Arc::new(crate::service::SingBoxServiceManager::new());
     service_manager.set_db_path(&db_path).await;
@@ -386,11 +385,10 @@ pub async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Sta
     }
     let token = &auth_str[7..];
     let guard = state.session_token.read().await;
-    if let Some(ref active_token) = *guard {
-        if active_token == token {
+    if let Some(ref active_token) = *guard
+        && active_token == token {
             return Ok(());
         }
-    }
     Err(StatusCode::UNAUTHORIZED)
 }
 

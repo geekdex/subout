@@ -228,17 +228,17 @@ pub async fn run_auto_update_process(
             conn_write.busy_timeout(std::time::Duration::from_secs(5))?;
             let tx = conn_write.transaction()?;
             for (id, tag, latency) in task_results {
-                if latency.is_none() {
-                    tx.execute("DELETE FROM nodes WHERE id = ?", [id])?;
-                    deleted_count += 1;
-                    deleted_tags.push(tag);
-                } else {
+                if let Some(lat) = latency {
                     let now_str_test = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                    let lat_val = latency.unwrap() as i64;
+                    let lat_val = lat as i64;
                     tx.execute(
                         "UPDATE nodes SET last_web_latency = ?, last_tested_at = ?, last_target_url = ? WHERE id = ?",
                         rusqlite::params![lat_val, now_str_test, test_url, id],
                     )?;
+                } else {
+                    tx.execute("DELETE FROM nodes WHERE id = ?", [id])?;
+                    deleted_count += 1;
+                    deleted_tags.push(tag);
                 }
             }
             tx.commit()?;
@@ -523,25 +523,21 @@ pub fn build_updated_outbounds(
     let enabled_nodes = crate::db::get_nodes(conn)?;
     let mut nodes_map = std::collections::HashMap::new();
     for node in enabled_nodes {
-        if node.enabled {
-            if referenced_node_tags.contains(&node.tag) || node.is_custom {
-                if let Ok(mut val) = serde_json::from_str::<Value>(&node.raw_json) {
-                    if let Some(obj) = val.as_object_mut() {
+        if node.enabled
+            && (referenced_node_tags.contains(&node.tag) || node.is_custom)
+                && let Ok(mut val) = serde_json::from_str::<Value>(&node.raw_json)
+                    && let Some(obj) = val.as_object_mut() {
                         obj.insert("tag".to_string(), Value::String(node.tag.clone()));
                         nodes_map.insert(node.tag.clone(), Value::Object(obj.clone()));
                     }
-                }
-            }
-        }
     }
 
     // Preserve any custom node from template that is not in DB and not deleted
     for custom_node in template_custom_nodes {
-        if let Some(tag) = custom_node.get("tag").and_then(|t| t.as_str()) {
-            if !nodes_map.contains_key(tag) && !deleted_set.contains(tag) {
+        if let Some(tag) = custom_node.get("tag").and_then(|t| t.as_str())
+            && !nodes_map.contains_key(tag) && !deleted_set.contains(tag) {
                 nodes_map.insert(tag.to_string(), custom_node);
             }
-        }
     }
 
     // 4. Construct strategy groups list
@@ -644,7 +640,7 @@ pub fn build_updated_outbounds(
             all_valid_tags.insert(t.to_string());
         }
     }
-    for (t, _) in &nodes_map {
+    for t in nodes_map.keys() {
         all_valid_tags.insert(t.clone());
     }
 

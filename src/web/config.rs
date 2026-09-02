@@ -643,11 +643,10 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
     }
 
     let mut msg = clean.trim().to_string();
-    if let Some(pos) = msg.find("decode config at .temp_singbox_val_") {
-        if let Some(end_pos) = msg[pos..].find(".json: ") {
+    if let Some(pos) = msg.find("decode config at .temp_singbox_val_")
+        && let Some(end_pos) = msg[pos..].find(".json: ") {
             msg = format!("{}{}", &msg[..pos], &msg[pos + end_pos + 7..]);
         }
-    }
 
     let msg = msg.trim();
     if let Some(tag_pos) = msg.find("duplicate outbound/endpoint tag: ") {
@@ -660,8 +659,8 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
 
     if let Some(pos) = msg.find("initialize outbound[") {
         let rest = &msg[pos + 20..];
-        if let Some(end_bracket) = rest.find(']') {
-            if let Ok(idx) = rest[..end_bracket].parse::<usize>() {
+        if let Some(end_bracket) = rest.find(']')
+            && let Ok(idx) = rest[..end_bracket].parse::<usize>() {
                 let detail_err = rest[end_bracket + 1..].trim_start_matches(':').trim();
 
                 let outbound_item = config
@@ -688,7 +687,6 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
 
                 return format!("{} 校验失败: {}", tag_desc, detail_cn);
             }
-        }
     }
 
     if let Some(unknown_pos) = msg.find("json: unknown field \"") {
@@ -764,11 +762,10 @@ pub async fn create_history_config(
                 "experimental",
             ];
             for sec in &sections {
-                if let Some(sec_val) = c.get(*sec) {
-                    if let Ok(sec_str) = serde_json::to_string(sec_val) {
+                if let Some(sec_val) = c.get(*sec)
+                    && let Ok(sec_str) = serde_json::to_string(sec_val) {
                         let _ = db::save_base_config_section(&conn, sec, &sec_str);
                     }
-                }
             }
         }
     }
@@ -886,11 +883,10 @@ pub async fn update_history_config(
             "experimental",
         ];
         for sec in &sections {
-            if let Some(sec_val) = payload.content.get(*sec) {
-                if let Ok(sec_str) = serde_json::to_string(sec_val) {
+            if let Some(sec_val) = payload.content.get(*sec)
+                && let Ok(sec_str) = serde_json::to_string(sec_val) {
                     let _ = db::save_base_config_section(&conn, sec, &sec_str);
                 }
-            }
         }
     }
 
@@ -1009,9 +1005,9 @@ pub async fn save_running_config(
         }
 
         // Sync sections to base_config for panel generation compatibility
-        if let Ok(Some(history)) = db::get_config_history_detail(&conn, id) {
-            if let Some(content_str) = history.content {
-                if let Ok(c) = serde_json::from_str::<Value>(&content_str) {
+        if let Ok(Some(history)) = db::get_config_history_detail(&conn, id)
+            && let Some(content_str) = history.content
+                && let Ok(c) = serde_json::from_str::<Value>(&content_str) {
                     let sections = [
                         "log",
                         "dns",
@@ -1021,15 +1017,12 @@ pub async fn save_running_config(
                         "experimental",
                     ];
                     for sec in &sections {
-                        if let Some(sec_val) = c.get(*sec) {
-                            if let Ok(sec_str) = serde_json::to_string(sec_val) {
+                        if let Some(sec_val) = c.get(*sec)
+                            && let Ok(sec_str) = serde_json::to_string(sec_val) {
                                 let _ = db::save_base_config_section(&conn, sec, &sec_str);
                             }
-                        }
                     }
                 }
-            }
-        }
     } else {
         if let Err(e) = db::update_setting(&conn, "running_config_id", "") {
             let err_msg = format!("清除配置ID失败: {}", e);

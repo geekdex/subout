@@ -83,12 +83,11 @@ fn check_dir_newer(dir: &Path, dist_time: std::time::SystemTime) -> bool {
                 if check_dir_newer(&path, dist_time) {
                     return true;
                 }
-            } else if let Ok(meta) = entry.metadata() {
-                if let Ok(mod_time) = meta.modified() {
-                    if mod_time > dist_time {
-                        return true;
-                    }
-                }
+            } else if let Ok(meta) = entry.metadata()
+                && let Ok(mod_time) = meta.modified()
+                && mod_time > dist_time
+            {
+                return true;
             }
         }
     }

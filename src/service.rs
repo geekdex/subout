@@ -45,6 +45,12 @@ pub struct SingBoxServiceManager {
     db_path: Arc<RwLock<Option<String>>>,
 }
 
+impl Default for SingBoxServiceManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SingBoxServiceManager {
     pub fn new() -> Self {
         Self {
@@ -63,16 +69,14 @@ impl SingBoxServiceManager {
     }
 
     pub async fn load_saved_sudo_pass(&self) {
-        if let Some(ref path) = *self.db_path.read().await {
-            if let Ok(conn) = rusqlite::Connection::open(path) {
-                if let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password") {
+        if let Some(ref path) = *self.db_path.read().await
+            && let Ok(conn) = rusqlite::Connection::open(path)
+                && let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password") {
                     let trimmed = pass.trim();
                     if !trimmed.is_empty() {
                         *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
                     }
                 }
-            }
-        }
     }
 
     pub async fn save_sudo_pass(&self, pass: &str) {
@@ -82,20 +86,18 @@ impl SingBoxServiceManager {
             return;
         }
         *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
-        if let Some(ref path) = *self.db_path.read().await {
-            if let Ok(conn) = rusqlite::Connection::open(path) {
+        if let Some(ref path) = *self.db_path.read().await
+            && let Ok(conn) = rusqlite::Connection::open(path) {
                 let _ = crate::db::update_setting(&conn, "sudo_password", trimmed);
             }
-        }
     }
 
     pub async fn clear_saved_sudo_pass(&self) {
         *self.cached_sudo_pass.write().await = None;
-        if let Some(ref path) = *self.db_path.read().await {
-            if let Ok(conn) = rusqlite::Connection::open(path) {
+        if let Some(ref path) = *self.db_path.read().await
+            && let Ok(conn) = rusqlite::Connection::open(path) {
                 let _ = crate::db::delete_setting(&conn, "sudo_password");
             }
-        }
     }
 
     pub async fn has_saved_sudo_pass(&self) -> bool {
@@ -476,11 +478,10 @@ impl SingBoxServiceManager {
                 }
             });
 
-        if let Some(ref out_path) = log_output_file {
-            if let Some(parent) = out_path.parent() {
+        if let Some(ref out_path) = log_output_file
+            && let Some(parent) = out_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-        }
 
         let mut cmd = if use_sudo {
             let mut c = tokio::process::Command::new("sudo");
@@ -527,17 +528,15 @@ impl SingBoxServiceManager {
             }
         };
 
-        if use_sudo {
-            if let Some(ref pass) = effective_sudo_pass {
-                if let Some(mut stdin) = child.stdin.take() {
+        if use_sudo
+            && let Some(ref pass) = effective_sudo_pass
+                && let Some(mut stdin) = child.stdin.take() {
                     use tokio::io::AsyncWriteExt;
                     let pass_bytes = format!("{}\n", pass);
                     let _ = stdin.write_all(pass_bytes.as_bytes()).await;
                     let _ = stdin.flush().await;
                     drop(stdin); // Explicitly close stdin to prevent sudo from waiting for more input
                 }
-            }
-        }
 
         let pid = child.id();
         let now = std::time::SystemTime::now()
@@ -641,10 +640,7 @@ impl SingBoxServiceManager {
                         let still_running = {
                             let mut c = is_running_child.write().await;
                             if let Some(ref mut child) = *c {
-                                match child.try_wait() {
-                                    Ok(None) => true,
-                                    _ => false,
-                                }
+                                matches!(child.try_wait(), Ok(None))
                             } else {
                                 false
                             }
@@ -654,7 +650,7 @@ impl SingBoxServiceManager {
                         loop {
                             line_buf.clear();
                             match reader.read_line(&mut line_buf).await {
-                                Ok(0) => break,
+                                Ok(0) | Err(_) => break,
                                 Ok(_) => {
                                     read_any = true;
                                     let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
@@ -688,7 +684,6 @@ impl SingBoxServiceManager {
                                         l.push_back(formatted);
                                     }
                                 }
-                                Err(_) => break,
                             }
                         }
 
@@ -895,14 +890,12 @@ impl SingBoxServiceManager {
         if let Err(e) = platform
             .stop_external_service_or_process(pid, pass_clean.as_deref())
             .await
-        {
-            if e.to_string().contains("Sudo 密码不正确") {
+            && e.to_string().contains("Sudo 密码不正确") {
                 self.clear_saved_sudo_pass().await;
                 self.append_log(&format!("❌ 终止外部进程失败: {}", e))
                     .await;
                 return Err(e);
             }
-        }
 
         // Verify whether the process has terminated
         let mut is_dead = false;
@@ -992,9 +985,9 @@ pub fn detect_conflicting_singbox_processes(
 }
 
 pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option<String> {
-    if let Ok(content) = std::fs::read_to_string(config_path) {
-        if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
-            if let Some(inbounds) = json_val.get("inbounds").and_then(|v| v.as_array()) {
+    if let Ok(content) = std::fs::read_to_string(config_path)
+        && let Ok(json_val) = serde_json::from_str::<Value>(&content)
+            && let Some(inbounds) = json_val.get("inbounds").and_then(|v| v.as_array()) {
                 let mut summaries = Vec::new();
                 for inb in inbounds {
                     let inb_type = inb.get("type").and_then(|t| t.as_str()).unwrap_or("mixed");
@@ -1044,8 +1037,6 @@ pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option
                     return Some(summaries.join(", "));
                 }
             }
-        }
-    }
     None
 }
 
@@ -1067,11 +1058,10 @@ pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
     if let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) {
         for inbound in inbounds {
             let inbound_type = inbound.get("type").and_then(|t| t.as_str());
-            if matches!(inbound_type, Some("mixed") | Some("http") | Some("socks")) {
-                if let Some(port) = inbound.get("listen_port").and_then(|p| p.as_u64()) {
+            if matches!(inbound_type, Some("mixed") | Some("http") | Some("socks"))
+                && let Some(port) = inbound.get("listen_port").and_then(|p| p.as_u64()) {
                     return Some(port as u16);
                 }
-            }
         }
     }
     None
@@ -1083,12 +1073,11 @@ pub fn get_tun_ip_from_config(config: &Value) -> Option<String> {
             if inbound.get("type").and_then(|t| t.as_str()) == Some("tun") {
                 if let Some(addrs) = inbound.get("address").and_then(|a| a.as_array()) {
                     for addr in addrs {
-                        if let Some(s) = addr.as_str() {
-                            if !s.contains(':') {
+                        if let Some(s) = addr.as_str()
+                            && !s.contains(':') {
                                 let ip = s.split('/').next().unwrap_or(s);
                                 return Some(ip.to_string());
                             }
-                        }
                     }
                 }
                 return Some("172.19.0.1".to_string());
@@ -1102,8 +1091,8 @@ pub fn strip_ansi_codes(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            if let Some(&'[') = chars.peek() {
+        if c == '\x1b'
+            && let Some(&'[') = chars.peek() {
                 chars.next(); // consume '['
                 while let Some(&next_c) = chars.peek() {
                     chars.next();
@@ -1113,7 +1102,6 @@ pub fn strip_ansi_codes(input: &str) -> String {
                 }
                 continue;
             }
-        }
         out.push(c);
     }
     out
@@ -1362,7 +1350,9 @@ mod tests {
         let current_pid = std::process::id();
         assert!(is_pid_alive(current_pid));
         assert!(!is_pid_alive(0));
+        assert!(!is_pid_alive(1));
         assert!(!is_pid_alive(4_000_000_000));
+        assert!(!is_pid_alive(u32::MAX));
     }
 
     #[tokio::test]
@@ -1422,10 +1412,7 @@ mod tests {
                     let still_running = {
                         let mut c = is_running_child.write().await;
                         if let Some(ref mut child) = *c {
-                            match child.try_wait() {
-                                Ok(None) => true,
-                                _ => false,
-                            }
+                            matches!(child.try_wait(), Ok(None))
                         } else {
                             false
                         }
@@ -1435,7 +1422,7 @@ mod tests {
                     loop {
                         line_buf.clear();
                         match reader.read_line(&mut line_buf).await {
-                            Ok(0) => break,
+                            Ok(0) | Err(_) => break,
                             Ok(_) => {
                                 read_any = true;
                                 let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
@@ -1468,7 +1455,6 @@ mod tests {
                                     l.push_back(formatted);
                                 }
                             }
-                            Err(_) => break,
                         }
                     }
 

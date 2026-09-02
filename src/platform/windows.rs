@@ -122,8 +122,7 @@ impl PlatformStrategy for WindowsPlatform {
                 "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or Name = 'singbox.exe' or Name = 'sing-box'\" | Select-Object ProcessId, ParentProcessId, Name, CommandLine, ExecutablePath | ConvertTo-Json -Compress",
             ])
             .output()
-        {
-            if output.status.success() {
+            && output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let items = parse_cim_process_json(&stdout);
                 let filtered = filter_conflicting_processes(items, current_pid, managed_pid, running_config_path);
@@ -133,7 +132,6 @@ impl PlatformStrategy for WindowsPlatform {
                     }
                 }
             }
-        }
 
         // 2. Secondary fallback: tasklist if PowerShell returned nothing or failed
         if results.is_empty() {
@@ -147,16 +145,15 @@ impl PlatformStrategy for WindowsPlatform {
                         "/NH",
                     ])
                     .output()
-                {
-                    if output.status.success() {
+                    && output.status.success() {
                         let stdout = String::from_utf8_lossy(&output.stdout);
                         for line in stdout.lines() {
                             let fields: Vec<String> = line
                                 .split(',')
                                 .map(|s| s.trim_matches('"').trim().to_string())
                                 .collect();
-                            if fields.len() >= 2 {
-                                if let Ok(pid) = fields[1].parse::<u32>() {
+                            if fields.len() >= 2
+                                && let Ok(pid) = fields[1].parse::<u32>() {
                                     if pid == current_pid || Some(pid) == managed_pid || pid <= 4 {
                                         continue;
                                     }
@@ -169,10 +166,8 @@ impl PlatformStrategy for WindowsPlatform {
                                         });
                                     }
                                 }
-                            }
                         }
                     }
-                }
             }
         }
 
@@ -228,8 +223,7 @@ impl PlatformStrategy for WindowsPlatform {
                     "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe' or Name = 'singbox.exe' or Name = 'sing-box'\" | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json -Compress",
                 ])
                 .output()
-            {
-                if output.status.success() {
+                && output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let items = parse_cim_process_json(&stdout);
 
@@ -258,7 +252,6 @@ impl PlatformStrategy for WindowsPlatform {
                         }
                     }
                 }
-            }
 
             for pid in pids_to_kill {
                 let _ = std::process::Command::new("taskkill")
@@ -396,7 +389,7 @@ impl PlatformStrategy for WindowsPlatform {
                 if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
                     let has_ipv6 = addr_arr
                         .iter()
-                        .any(|a| a.as_str().map_or(false, |s| s.contains(':')));
+                        .any(|a| a.as_str().is_some_and(|s| s.contains(':')));
                     if !has_ipv6 {
                         addr_arr.push(json!("fd00::1/126"));
                     }
@@ -495,8 +488,8 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
-        if let Ok(output) = std::process::Command::new("where").arg(cmd_name).output() {
-            if output.status.success() {
+        if let Ok(output) = std::process::Command::new("where").arg(cmd_name).output()
+            && output.status.success() {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 for line in out_str.lines() {
                     let trimmed = line.trim();
@@ -508,7 +501,6 @@ impl PlatformStrategy for WindowsPlatform {
                     }
                 }
             }
-        }
         None
     }
 }
@@ -558,11 +550,10 @@ pub fn filter_conflicting_processes(
             continue;
         }
 
-        if let Some(ppid) = item.parent_process_id {
-            if ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid) {
+        if let Some(ppid) = item.parent_process_id
+            && (ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid)) {
                 continue;
             }
-        }
 
         let name = item.name.unwrap_or_default();
         let name_lower = name.to_lowercase();

@@ -32,12 +32,11 @@ fn parse_args() -> Result<CliArgs, String> {
     let mut portable = false;
 
     // Check if the first argument is a subcommand 'web' or 'server'
-    if let Some(arg) = std::env::args().nth(1) {
-        if arg == "web" || arg == "server" {
+    if let Some(arg) = std::env::args().nth(1)
+        && (arg == "web" || arg == "server") {
             web = true;
             args_iter.next(); // Consume subcommand
         }
-    }
 
     while let Some(arg) = args_iter.next() {
         match arg.as_str() {

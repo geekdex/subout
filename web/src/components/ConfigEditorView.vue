@@ -5343,6 +5343,7 @@ import {
   sessionSudoPassword,
   setSessionSudoPassword,
   systemModeInfo,
+  serviceStatus,
 } from "../store.js";
 import { validateData } from "../validator.js";
 import { filterGroupsByQuery, clearSearchQuery } from "../utils/groupImport.js";
@@ -9175,7 +9176,7 @@ const copyLogConsole = () => {
 };
 
 const openRunningConfigModal = () => {
-  runningConfigForm.config_id = runningConfig.config_id;
+  runningConfigForm.config_id = currentConfigId.value || runningConfig.config_id;
   runningConfigModal.viewMode = "form";
   runningConfigModal.status = "idle";
   runningConfigModal.logs = [];
@@ -9235,6 +9236,7 @@ const triggerUpdateFromDetail = async () => {
   }
 
   openRunningConfigModal();
+  runningConfigForm.config_id = currentConfigId.value || runningConfig.config_id;
   await saveRunningConfigSettings(true);
 };
 
@@ -9260,11 +9262,14 @@ const saveRunningConfigSettings = async (
       ? customSudoPass.trim()
       : sessionSudoPassword.value || null;
 
+  const targetConfigId = runningConfigForm.config_id || currentConfigId.value;
+
   if (executeUpdate) {
-    if (!runningConfigForm.config_id) {
+    if (!targetConfigId) {
       showToast("请先选择要运行的配置模板", "danger");
       return;
     }
+    runningConfigForm.config_id = targetConfigId;
 
     runningConfigModal.viewMode = "log";
     runningConfigModal.saving = true;
@@ -9284,17 +9289,22 @@ const saveRunningConfigSettings = async (
     runningConfigModal.saving = true;
   }
 
-  const hasConflicts =
-    serviceStatus.value?.conflicting_processes &&
-    serviceStatus.value.conflicting_processes.length > 0;
-
   try {
+    const hasConflicts = Boolean(
+      serviceStatus.value?.conflicting_processes &&
+      serviceStatus.value.conflicting_processes.length > 0,
+    );
+
     const res = await fetch(`${API_BASE}/api/config/running`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token.value}`,
       },
+      signal:
+        typeof AbortSignal !== "undefined" && AbortSignal.timeout
+          ? AbortSignal.timeout(60000)
+          : undefined,
       body: JSON.stringify({
         config_id: runningConfigForm.config_id,
         execute_update: executeUpdate,
@@ -9394,17 +9404,23 @@ const saveRunningConfigSettings = async (
   } catch (e) {
     if (executeUpdate) {
       runningConfigModal.logs.push({
-        step: "网络异常",
+        step: "异常错误",
         status: "error",
-        message: `网络连接请求失败: ${e.message || e}`,
+        message: `运行配置更新请求失败: ${e.message || e}`,
         timestamp: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
       });
       runningConfigModal.status = "failed";
-      runningConfigModal.message = "网络请求失败";
-      showToast("网络请求失败", "danger");
+      runningConfigModal.message =
+        e.name === "TimeoutError"
+          ? "更新请求超时，请检查 sing-box 服务状态"
+          : (e.message || "请求处理失败");
+      showToast(
+        e.name === "TimeoutError" ? "运行配置更新请求超时" : "运行配置更新失败",
+        "danger",
+      );
       scrollToLogBottom();
     } else {
-      showToast("网络请求失败", "danger");
+      showToast(`操作失败: ${e.message || e}`, "danger");
     }
   } finally {
     runningConfigModal.saving = false;

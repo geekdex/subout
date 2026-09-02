@@ -278,7 +278,6 @@ pub async fn save_auto_update_settings(
                 let interval_secs = match payload.interval.as_str() {
                     "1h" => 3600,
                     "6h" => 6 * 3600,
-                    "12h" => 12 * 3600,
                     "24h" => 24 * 3600,
                     "48h" => 48 * 3600,
                     _ => 12 * 3600,

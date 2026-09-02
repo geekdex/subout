@@ -950,6 +950,7 @@ import {
   API_BASE,
   token,
   showToast,
+  confirmDialog,
   kernelInfo,
   serviceStatus,
   fetchServiceStatus,

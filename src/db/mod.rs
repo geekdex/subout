@@ -580,6 +580,7 @@ pub fn update_node_ping_result(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn save_node(
     conn: &Connection,
     subscription_id: Option<i64>,
@@ -661,6 +662,7 @@ pub fn get_outbound_groups(conn: &Connection) -> Result<Vec<OutboundGroup>> {
     Ok(groups)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn save_outbound_group(
     conn: &Connection,
     tag: &str,
@@ -706,7 +708,7 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
         .include_keywords
         .as_ref()
         .map(|s| {
-            s.split(|c| c == ',' || c == '，' || c == ' ' || c == '\n' || c == '\t' || c == '\r')
+            s.split([',', '，', ' ', '\n', '\t', '\r'])
                 .map(|x| x.trim().to_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect()
@@ -717,7 +719,7 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
         .exclude_keywords
         .as_ref()
         .map(|s| {
-            s.split(|c| c == ',' || c == '，' || c == ' ' || c == '\n' || c == '\t' || c == '\r')
+            s.split([',', '，', ' ', '\n', '\t', '\r'])
                 .map(|x| x.trim().to_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect()

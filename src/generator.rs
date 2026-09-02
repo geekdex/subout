@@ -41,8 +41,8 @@ pub fn generate_config(conn: &Connection) -> Result<Value> {
 ///
 /// The `conn` parameter is retained for signature stability but unused.
 pub fn sanitize_outbound_value(outbound: &mut Value) {
-    if let Some(obj) = outbound.as_object_mut() {
-        if let Some(outbound_type) = obj.get("type").and_then(|t| t.as_str()) {
+    if let Some(obj) = outbound.as_object_mut()
+        && let Some(outbound_type) = obj.get("type").and_then(|t| t.as_str()) {
             let tls_supported = matches!(
                 outbound_type,
                 "http"
@@ -60,7 +60,6 @@ pub fn sanitize_outbound_value(outbound: &mut Value) {
                 obj.remove("tls");
             }
         }
-    }
 }
 
 pub fn sanitize_inbound_value(inbound: &mut Value) {
@@ -89,14 +88,14 @@ pub fn sanitize_dns_value(dns: &mut Value) {
             || obj
                 .get("strategy")
                 .and_then(|s| s.as_str())
-                .map_or(true, |s| s.trim().is_empty())
+                .is_none_or(|s| s.trim().is_empty())
         {
             obj.insert("strategy".to_string(), json!("prefer_ipv4"));
         }
         if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for server in servers {
-                if let Some(srv_obj) = server.as_object_mut() {
-                    if srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
+                if let Some(srv_obj) = server.as_object_mut()
+                    && srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
                         if !srv_obj.contains_key("inet4_range") {
                             srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
                         }
@@ -104,7 +103,6 @@ pub fn sanitize_dns_value(dns: &mut Value) {
                             srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
                         }
                     }
-                }
             }
         }
     }
@@ -125,7 +123,7 @@ pub fn sanitize_log_value(log: &mut Value) {
             || obj
                 .get("level")
                 .and_then(|s| s.as_str())
-                .map_or(true, |s| s.trim().is_empty())
+                .is_none_or(|s| s.trim().is_empty())
         {
             obj.insert("level".to_string(), json!("info"));
         }
@@ -312,7 +310,7 @@ mod tests {
         });
         sanitize_route_value(&mut route);
         let rules = route.get("rules").unwrap().as_array().unwrap();
-        assert_eq!(rules[0].get("ip_cidr").is_some(), true);
+        assert!(rules[0].get("ip_cidr").is_some());
         assert_eq!(rules[0].get("outbound").unwrap().as_str(), Some("direct"));
         assert_eq!(rules[1].get("action").unwrap().as_str(), Some("sniff"));
         assert_eq!(rules[2].get("action").unwrap().as_str(), Some("hijack-dns"));

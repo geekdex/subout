@@ -41,7 +41,7 @@ impl SubscriptionUserInfo {
 
 pub fn parse_userinfo_str(s: &str) -> SubscriptionUserInfo {
     let mut info = SubscriptionUserInfo::default();
-    for part in s.split(|c| c == ';' || c == '&' || c == '\n') {
+    for part in s.split([';', '&', '\n']) {
         let part = part.trim();
         if let Some((k, v)) = part.split_once('=') {
             let key = k.trim().to_lowercase();
@@ -128,11 +128,9 @@ pub async fn fetch_subscription_with_info(
         .headers()
         .get("subscription-userinfo")
         .or_else(|| response.headers().get("Subscription-Userinfo"))
-    {
-        if let Ok(userinfo_str) = userinfo_val.to_str() {
+        && let Ok(userinfo_str) = userinfo_val.to_str() {
             header_info = parse_userinfo_str(userinfo_str);
         }
-    }
 
     let text = response.text().await?;
     let body_info = parse_userinfo_from_body(&text);
