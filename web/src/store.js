@@ -83,6 +83,9 @@ export const serviceStatus = ref({
   inbounds_summary: null,
   is_tun: false,
   conflicting_processes: [],
+  log_level: "info",
+  log_disabled: false,
+  log_output: null,
 });
 
 export const toast = reactive({

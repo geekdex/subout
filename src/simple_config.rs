@@ -63,8 +63,41 @@ impl Default for SimpleRouteConfig {
     }
 }
 
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SimpleLogConfig {
+    #[serde(default = "default_log_level")]
+    pub level: String, // "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic"
+    #[serde(default = "default_true")]
+    pub timestamp: bool,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub output: String,
+}
+
+impl Default for SimpleLogConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            timestamp: true,
+            disabled: false,
+            output: String::new(),
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SimpleConfig {
+    #[serde(default)]
+    pub log: SimpleLogConfig,
     pub dns: SimpleDnsConfig,
     pub inbound: SimpleInboundConfig,
     pub route: SimpleRouteConfig,
@@ -225,10 +258,23 @@ pub fn build_dns_server(tag: &str, address_str: &str, detour: Option<&str>) -> V
 
 pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> Result<Value> {
     // 1. Log section
-    let log_val = json!({
-        "level": "info",
-        "timestamp": true
-    });
+    let log_level = match cfg.log.level.trim().to_lowercase().as_str() {
+        "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic" => {
+            cfg.log.level.trim().to_lowercase()
+        }
+        _ => "info".to_string(),
+    };
+    let mut log_map = serde_json::Map::new();
+    log_map.insert("level".to_string(), json!(log_level));
+    log_map.insert("timestamp".to_string(), json!(cfg.log.timestamp));
+    if cfg.log.disabled {
+        log_map.insert("disabled".to_string(), json!(true));
+    }
+    let output_trimmed = cfg.log.output.trim();
+    if !output_trimmed.is_empty() {
+        log_map.insert("output".to_string(), json!(output_trimmed));
+    }
+    let log_val = Value::Object(log_map);
 
     // 2. DNS section
     let is_fakeip_mode = cfg.dns.mode == "preset_fakeip"
@@ -876,5 +922,47 @@ mod tests {
             &experimental,
         );
         assert!(res.is_ok(), "Validation failed: {:?}", res.err());
+    }
+
+    #[test]
+    fn test_simple_config_log_level_customization() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        let mut cfg = SimpleConfig::default();
+        assert_eq!(cfg.log.level, "info");
+
+        // Default should output info
+        let generated_default = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_default["log"]["level"].as_str(), Some("info"));
+
+        // Customized level warn
+        cfg.log.level = "warn".to_string();
+        let generated_warn = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_warn["log"]["level"].as_str(), Some("warn"));
+
+        // Customized level error
+        cfg.log.level = "error".to_string();
+        let generated_error = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_error["log"]["level"].as_str(), Some("error"));
+
+        // Case insensitivity & invalid fallback
+        cfg.log.level = "DEBUG".to_string();
+        let generated_debug = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_debug["log"]["level"].as_str(), Some("debug"));
+
+        cfg.log.level = "invalid_level".to_string();
+        let generated_invalid = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_invalid["log"]["level"].as_str(), Some("info"));
+
+        // Timestamp, disabled, and output options
+        cfg.log.timestamp = false;
+        cfg.log.disabled = true;
+        cfg.log.output = "sing-box.log".to_string();
+        let generated_custom = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated_custom["log"]["timestamp"].as_bool(), Some(false));
+        assert_eq!(generated_custom["log"]["disabled"].as_bool(), Some(true));
+        assert_eq!(
+            generated_custom["log"]["output"].as_str(),
+            Some("sing-box.log")
+        );
     }
 }

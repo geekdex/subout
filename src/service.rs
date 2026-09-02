@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -11,6 +11,150 @@ use tokio::sync::RwLock;
 use crate::kernel;
 
 const MAX_LOG_LINES: usize = 1000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SingboxLogLevel {
+    Trace = 10,
+    Debug = 20,
+    Info = 30,
+    Warn = 40,
+    Error = 50,
+    Fatal = 60,
+    Panic = 70,
+}
+
+impl std::str::FromStr for SingboxLogLevel {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "trace" => Ok(Self::Trace),
+            "debug" => Ok(Self::Debug),
+            "info" => Ok(Self::Info),
+            "warn" | "warning" => Ok(Self::Warn),
+            "error" => Ok(Self::Error),
+            "fatal" => Ok(Self::Fatal),
+            "panic" => Ok(Self::Panic),
+            _ => Err(()),
+        }
+    }
+}
+
+impl SingboxLogLevel {
+    pub fn parse(s: &str) -> Option<Self> {
+        s.parse().ok()
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+            Self::Fatal => "fatal",
+            Self::Panic => "panic",
+        }
+    }
+}
+
+pub fn parse_singbox_log_level(line: &str) -> Option<SingboxLogLevel> {
+    if line.is_empty() {
+        return None;
+    }
+    let upper = line.to_ascii_uppercase();
+    if upper.contains("PANIC[")
+        || upper
+            .split_whitespace()
+            .any(|w| w == "PANIC" || w == "PANIC:")
+    {
+        return Some(SingboxLogLevel::Panic);
+    }
+    if upper.contains("FATAL[")
+        || upper
+            .split_whitespace()
+            .any(|w| w == "FATAL" || w == "FATAL:")
+    {
+        return Some(SingboxLogLevel::Fatal);
+    }
+    if upper.contains("ERROR[")
+        || upper
+            .split_whitespace()
+            .any(|w| w == "ERROR" || w == "ERROR:")
+        || upper.contains("❌")
+    {
+        return Some(SingboxLogLevel::Error);
+    }
+    if upper.contains("WARN[")
+        || upper.contains("WARNING[")
+        || upper
+            .split_whitespace()
+            .any(|w| w == "WARN" || w == "WARN:" || w == "WARNING" || w == "WARNING:")
+        || upper.contains("⚠️")
+    {
+        return Some(SingboxLogLevel::Warn);
+    }
+    if upper.contains("INFO[")
+        || upper
+            .split_whitespace()
+            .any(|w| w == "INFO" || w == "INFO:")
+    {
+        return Some(SingboxLogLevel::Info);
+    }
+    if upper.contains("DEBUG[")
+        || upper
+            .split_whitespace()
+            .any(|w| w == "DEBUG" || w == "DEBUG:")
+    {
+        return Some(SingboxLogLevel::Debug);
+    }
+    if upper.contains("TRACE[")
+        || upper
+            .split_whitespace()
+            .any(|w| w == "TRACE" || w == "TRACE:")
+    {
+        return Some(SingboxLogLevel::Trace);
+    }
+    None
+}
+
+pub fn should_record_singbox_line(
+    line: &str,
+    configured_level: SingboxLogLevel,
+    disabled: bool,
+) -> bool {
+    if disabled {
+        return false;
+    }
+    if let Some(lvl) = parse_singbox_log_level(line) {
+        lvl >= configured_level
+    } else if is_actual_singbox_error(line) {
+        true
+    } else {
+        configured_level <= SingboxLogLevel::Info
+    }
+}
+
+pub async fn append_to_file(path: &Path, line: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    if let Ok(metadata) = tokio::fs::metadata(path).await
+        && metadata.len() > 5 * 1024 * 1024
+    {
+        let rotated = path.with_extension("log.1");
+        let _ = tokio::fs::rename(path, rotated).await;
+    }
+    if let Ok(mut file) = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+    {
+        use tokio::io::AsyncWriteExt;
+        let _ = file.write_all(format!("{}\n", line).as_bytes()).await;
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct ConflictingProcessInfo {
@@ -33,6 +177,11 @@ pub struct ServiceStatusInfo {
     pub inbounds_summary: Option<String>,
     pub is_tun: bool,
     pub conflicting_processes: Vec<ConflictingProcessInfo>,
+    pub log_level: Option<String>,
+    #[serde(default)]
+    pub log_disabled: bool,
+    #[serde(default)]
+    pub log_output: Option<String>,
 }
 
 pub struct SingBoxServiceManager {
@@ -43,6 +192,9 @@ pub struct SingBoxServiceManager {
     logs: Arc<RwLock<VecDeque<String>>>,
     cached_sudo_pass: Arc<RwLock<Option<String>>>,
     db_path: Arc<RwLock<Option<String>>>,
+    current_log_level: Arc<RwLock<String>>,
+    current_log_disabled: Arc<RwLock<bool>>,
+    current_log_output: Arc<RwLock<Option<String>>>,
 }
 
 impl Default for SingBoxServiceManager {
@@ -61,6 +213,9 @@ impl SingBoxServiceManager {
             logs: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOG_LINES))),
             cached_sudo_pass: Arc::new(RwLock::new(None)),
             db_path: Arc::new(RwLock::new(None)),
+            current_log_level: Arc::new(RwLock::new("info".to_string())),
+            current_log_disabled: Arc::new(RwLock::new(false)),
+            current_log_output: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -133,11 +288,15 @@ impl SingBoxServiceManager {
     pub async fn append_log(&self, line: &str) {
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let formatted = format!("[{}] {}", timestamp, line.trim_end());
-        let mut logs = self.logs.write().await;
-        if logs.len() >= MAX_LOG_LINES {
-            logs.pop_front();
+        {
+            let mut logs = self.logs.write().await;
+            if logs.len() >= MAX_LOG_LINES {
+                logs.pop_front();
+            }
+            logs.push_back(formatted.clone());
         }
-        logs.push_back(formatted);
+        let log_file = crate::paths::AppPaths::get().log_dir.join("subout.log");
+        append_to_file(&log_file, &formatted).await;
     }
 
     pub async fn get_logs(&self) -> Vec<String> {
@@ -148,6 +307,8 @@ impl SingBoxServiceManager {
     pub async fn clear_logs(&self) {
         let mut logs = self.logs.write().await;
         logs.clear();
+        let log_file = crate::paths::AppPaths::get().log_dir.join("subout.log");
+        let _ = tokio::fs::remove_file(log_file).await;
     }
 
     pub async fn is_running(&self) -> bool {
@@ -261,13 +422,98 @@ impl SingBoxServiceManager {
         let running_config_path_buf = Self::get_running_config_path();
         let config_path = running_config_path_buf.to_string_lossy().to_string();
         let inbounds_summary = get_inbounds_summary_from_config(&running_config_path_buf);
-        let is_tun = is_run
-            && std::fs::read_to_string(&running_config_path_buf)
-                .ok()
-                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                .map(|json| is_tun_mode(&json))
-                .unwrap_or(false);
+        let running_config_content = std::fs::read_to_string(&running_config_path_buf).ok();
+        let config_json = running_config_content
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Value>(s).ok());
+        let is_tun = is_run && config_json.as_ref().map(is_tun_mode).unwrap_or(false);
         let conflicting_processes = detect_conflicting_singbox_processes(pid);
+
+        let (log_level, log_disabled, log_output) = if is_run {
+            (
+                Some(self.current_log_level.read().await.clone()),
+                *self.current_log_disabled.read().await,
+                self.current_log_output.read().await.clone(),
+            )
+        } else if let Some(ref c) = config_json {
+            let level = c
+                .get("log")
+                .and_then(|l| l.get("level"))
+                .and_then(|lv| lv.as_str())
+                .map(|s| s.to_lowercase());
+            let disabled = c
+                .get("log")
+                .and_then(|l| l.get("disabled"))
+                .and_then(|d| d.as_bool())
+                .unwrap_or(false);
+            let output = c
+                .get("log")
+                .and_then(|l| l.get("output"))
+                .and_then(|o| o.as_str())
+                .map(|s| s.to_string());
+            (level.or(Some("info".to_string())), disabled, output)
+        } else if let Some(db_path) = self.db_path.read().await.as_deref()
+            && let Ok(conn) = rusqlite::Connection::open(db_path)
+        {
+            let mode = crate::db::get_setting(&conn, "app_mode")
+                .unwrap_or(None)
+                .unwrap_or_else(|| "simple".to_string());
+            if mode == "simple" {
+                let simple_cfg = crate::simple_config::get_saved_simple_config(&conn);
+                (
+                    Some(simple_cfg.log.level),
+                    simple_cfg.log.disabled,
+                    if simple_cfg.log.output.trim().is_empty() {
+                        None
+                    } else {
+                        Some(simple_cfg.log.output)
+                    },
+                )
+            } else {
+                let running_id_str = crate::db::get_setting(&conn, "running_config_id")
+                    .unwrap_or(None)
+                    .unwrap_or_default();
+                if let Ok(id) = running_id_str.parse::<i64>()
+                    && let Ok(Some(history)) = crate::db::get_config_history_detail(&conn, id)
+                    && let Some(content_str) = history.content
+                    && let Ok(c) = serde_json::from_str::<Value>(&content_str)
+                {
+                    let level = c
+                        .get("log")
+                        .and_then(|l| l.get("level"))
+                        .and_then(|lv| lv.as_str())
+                        .map(|s| s.to_lowercase());
+                    let disabled = c
+                        .get("log")
+                        .and_then(|l| l.get("disabled"))
+                        .and_then(|d| d.as_bool())
+                        .unwrap_or(false);
+                    let output = c
+                        .get("log")
+                        .and_then(|l| l.get("output"))
+                        .and_then(|o| o.as_str())
+                        .map(|s| s.to_string());
+                    (level.or(Some("info".to_string())), disabled, output)
+                } else if let Ok(Some(log_str)) = crate::db::get_base_config_section(&conn, "log")
+                    && let Ok(c) = serde_json::from_str::<Value>(&log_str)
+                {
+                    let level = c
+                        .get("level")
+                        .and_then(|lv| lv.as_str())
+                        .map(|s| s.to_lowercase());
+                    let disabled = c.get("disabled").and_then(|d| d.as_bool()).unwrap_or(false);
+                    let output = c
+                        .get("output")
+                        .and_then(|o| o.as_str())
+                        .map(|s| s.to_string());
+                    (level.or(Some("info".to_string())), disabled, output)
+                } else {
+                    (Some("info".to_string()), false, None)
+                }
+            }
+        } else {
+            (Some("info".to_string()), false, None)
+        };
 
         ServiceStatusInfo {
             running: is_run,
@@ -281,6 +527,9 @@ impl SingBoxServiceManager {
             inbounds_summary,
             is_tun,
             conflicting_processes,
+            log_level,
+            log_disabled,
+            log_output,
         }
     }
 
@@ -392,17 +641,67 @@ impl SingBoxServiceManager {
             }
         }
 
+        let paths = crate::paths::AppPaths::get();
+        let _ = paths.ensure_dirs();
+
+        let log_disabled = config_json
+            .get("log")
+            .and_then(|l| l.get("disabled"))
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false);
+
+        let configured_level_str = config_json
+            .get("log")
+            .and_then(|l| l.get("level"))
+            .and_then(|lv| lv.as_str())
+            .unwrap_or("info");
+        let configured_level =
+            SingboxLogLevel::parse(configured_level_str).unwrap_or(SingboxLogLevel::Info);
+
+        let log_output_file: Option<PathBuf> = config_json
+            .get("log")
+            .and_then(|l| l.get("output"))
+            .and_then(|o| o.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                let path = PathBuf::from(s);
+                if path.is_absolute() {
+                    path
+                } else {
+                    paths.log_dir.join(path)
+                }
+            });
+
+        if let Some(ref out_path) = log_output_file
+            && let Some(parent) = out_path.parent()
+        {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let mut final_config_json = config_json.clone();
+        if let Some(ref out_path) = log_output_file
+            && let Some(log_obj) = final_config_json
+                .get_mut("log")
+                .and_then(|l| l.as_object_mut())
+        {
+            log_obj.insert(
+                "output".to_string(),
+                serde_json::json!(out_path.to_string_lossy()),
+            );
+        }
+
         let config_path = Self::get_running_config_path();
         if let Some(parent) = config_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let config_str = serde_json::to_string_pretty(config_json)?;
+        let config_str = serde_json::to_string_pretty(&final_config_json)?;
 
         // 3. Write config file
         std::fs::write(&config_path, &config_str)
             .map_err(|e| anyhow!("写入 sing-box 运行配置文件失败: {}", e))?;
 
-        let tun_mode = is_tun_mode(config_json);
+        let tun_mode = is_tun_mode(&final_config_json);
         let as_root = is_running_as_root();
 
         let explicit_pass = sudo_pass.and_then(|p| {
@@ -442,9 +741,6 @@ impl SingBoxServiceManager {
             .await;
         }
 
-        let paths = crate::paths::AppPaths::get();
-        let _ = paths.ensure_dirs();
-
         let data_dir = paths.data_dir.clone();
         let abs_data_dir = std::fs::canonicalize(&data_dir).unwrap_or_else(|_| {
             if data_dir.is_absolute() {
@@ -465,27 +761,6 @@ impl SingBoxServiceManager {
                 config_path.clone()
             }
         });
-
-        let log_output_file: Option<PathBuf> = config_json
-            .get("log")
-            .and_then(|l| l.get("output"))
-            .and_then(|o| o.as_str())
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| {
-                let path = PathBuf::from(s);
-                if path.is_absolute() {
-                    path
-                } else {
-                    abs_data_dir.join(path)
-                }
-            });
-
-        if let Some(ref out_path) = log_output_file
-            && let Some(parent) = out_path.parent()
-        {
-            let _ = std::fs::create_dir_all(parent);
-        }
 
         let mut cmd = if use_sudo {
             let mut c = tokio::process::Command::new("sudo");
@@ -552,18 +827,26 @@ impl SingBoxServiceManager {
         *self.started_at.write().await = Some(now);
         *self.ready.write().await = false;
         *self.last_error.write().await = None;
+        *self.current_log_level.write().await = configured_level.as_str().to_string();
+        *self.current_log_disabled.write().await = log_disabled;
+        *self.current_log_output.write().await = log_output_file
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string());
+
+        let min_level = configured_level;
+        let is_disabled = log_disabled;
+        let subout_log_path = paths.log_dir.join("subout.log");
 
         // Pipe stdout
         if let Some(stdout) = child.stdout.take() {
             let logs_clone = self.logs.clone();
             let last_error_clone = self.last_error.clone();
             let ready_clone = self.ready.clone();
+            let subout_log_file = subout_log_path.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
                     let clean = strip_ansi_codes(&line);
-                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                    let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
                     if is_actual_singbox_error(&clean) {
                         *last_error_clone.write().await = Some(clean.clone());
                     } else {
@@ -578,11 +861,20 @@ impl SingBoxServiceManager {
                             *ready_clone.write().await = true;
                         }
                     }
-                    let mut l = logs_clone.write().await;
-                    if l.len() >= MAX_LOG_LINES {
-                        l.pop_front();
+
+                    if should_record_singbox_line(&clean, min_level, is_disabled) {
+                        let timestamp =
+                            chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                        let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
+                        {
+                            let mut l = logs_clone.write().await;
+                            if l.len() >= MAX_LOG_LINES {
+                                l.pop_front();
+                            }
+                            l.push_back(formatted.clone());
+                        }
+                        append_to_file(&subout_log_file, &formatted).await;
                     }
-                    l.push_back(formatted);
                 }
             });
         }
@@ -592,12 +884,11 @@ impl SingBoxServiceManager {
             let logs_clone = self.logs.clone();
             let last_error_clone = self.last_error.clone();
             let ready_clone = self.ready.clone();
+            let subout_log_file = subout_log_path.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
                     let clean = strip_ansi_codes(&line);
-                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                    let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
                     if is_actual_singbox_error(&clean) {
                         *last_error_clone.write().await = Some(clean.clone());
                     } else {
@@ -612,11 +903,20 @@ impl SingBoxServiceManager {
                             *ready_clone.write().await = true;
                         }
                     }
-                    let mut l = logs_clone.write().await;
-                    if l.len() >= MAX_LOG_LINES {
-                        l.pop_front();
+
+                    if should_record_singbox_line(&clean, min_level, is_disabled) {
+                        let timestamp =
+                            chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                        let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
+                        {
+                            let mut l = logs_clone.write().await;
+                            if l.len() >= MAX_LOG_LINES {
+                                l.pop_front();
+                            }
+                            l.push_back(formatted.clone());
+                        }
+                        append_to_file(&subout_log_file, &formatted).await;
                     }
-                    l.push_back(formatted);
                 }
             });
         }
@@ -627,6 +927,7 @@ impl SingBoxServiceManager {
             let last_error_clone = self.last_error.clone();
             let ready_clone = self.ready.clone();
             let is_running_child = self.child.clone();
+            let subout_log_file = subout_log_path.clone();
             tokio::spawn(async move {
                 // Wait up to 5s for sing-box to create the log file
                 let mut file = None;
@@ -661,12 +962,6 @@ impl SingBoxServiceManager {
                                     let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
                                     if !trimmed.is_empty() {
                                         let clean = strip_ansi_codes(trimmed);
-                                        let timestamp = chrono::Local::now()
-                                            .format("%Y-%m-%d %H:%M:%S")
-                                            .to_string();
-                                        let formatted =
-                                            format!("[{}] [sing-box] {}", timestamp, clean);
-
                                         if is_actual_singbox_error(&clean) {
                                             *last_error_clone.write().await = Some(clean.clone());
                                         } else {
@@ -682,11 +977,26 @@ impl SingBoxServiceManager {
                                             }
                                         }
 
-                                        let mut l = logs_clone.write().await;
-                                        if l.len() >= MAX_LOG_LINES {
-                                            l.pop_front();
+                                        if should_record_singbox_line(
+                                            &clean,
+                                            min_level,
+                                            is_disabled,
+                                        ) {
+                                            let timestamp = chrono::Local::now()
+                                                .format("%Y-%m-%d %H:%M:%S")
+                                                .to_string();
+                                            let formatted =
+                                                format!("[{}] [sing-box] {}", timestamp, clean);
+
+                                            {
+                                                let mut l = logs_clone.write().await;
+                                                if l.len() >= MAX_LOG_LINES {
+                                                    l.pop_front();
+                                                }
+                                                l.push_back(formatted.clone());
+                                            }
+                                            append_to_file(&subout_log_file, &formatted).await;
                                         }
-                                        l.push_back(formatted);
                                     }
                                 }
                             }
@@ -1300,12 +1610,131 @@ mod tests {
                 cmdline: Some("sing-box run -c /etc/sing-box/config.json".to_string()),
                 exe_path: Some("/usr/bin/sing-box".to_string()),
             }],
+            log_level: Some("warn".to_string()),
+            log_disabled: false,
+            log_output: Some("sing-box.log".to_string()),
         };
 
         let json_val = serde_json::to_value(&status).unwrap();
         assert_eq!(json_val["conflicting_processes"][0]["pid"], 12345);
         assert_eq!(json_val["conflicting_processes"][0]["name"], "sing-box");
         assert_eq!(json_val["inbounds_summary"], "127.0.0.1:2080 (混合代理)");
+        assert_eq!(json_val["log_level"], "warn");
+        assert_eq!(json_val["log_disabled"], false);
+        assert_eq!(json_val["log_output"], "sing-box.log");
+    }
+
+    #[test]
+    fn test_parse_singbox_log_level() {
+        assert_eq!(
+            parse_singbox_log_level(
+                "+0800 2026-09-02 23:55:23 INFO network: updated default interface"
+            ),
+            Some(SingboxLogLevel::Info)
+        );
+        assert_eq!(
+            parse_singbox_log_level("2026-09-02 23:55:23 WARN dns: response latency 1500ms"),
+            Some(SingboxLogLevel::Warn)
+        );
+        assert_eq!(
+            parse_singbox_log_level("ERROR connection: handshake timeout"),
+            Some(SingboxLogLevel::Error)
+        );
+        assert_eq!(
+            parse_singbox_log_level("FATAL[0000] read config at nonexistent.json"),
+            Some(SingboxLogLevel::Fatal)
+        );
+        assert_eq!(
+            parse_singbox_log_level("PANIC: runtime memory error"),
+            Some(SingboxLogLevel::Panic)
+        );
+        assert_eq!(
+            parse_singbox_log_level("DEBUG inbound/mixed: accept connection"),
+            Some(SingboxLogLevel::Debug)
+        );
+        assert_eq!(
+            parse_singbox_log_level("TRACE router: evaluate rule"),
+            Some(SingboxLogLevel::Trace)
+        );
+        assert_eq!(
+            parse_singbox_log_level("🟢 sing-box 进程已拉起 (PID: 1234)"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_should_record_singbox_line() {
+        let info_line = "+0800 2026-09-02 23:55:23 INFO inbound/mixed: server started";
+        let warn_line = "+0800 2026-09-02 23:55:23 WARN dns: slow query";
+        let error_line = "+0800 2026-09-02 23:55:23 ERROR dial tcp: connection refused";
+
+        // When level is warn: info must not be recorded, warn and error must be recorded
+        assert!(!should_record_singbox_line(
+            info_line,
+            SingboxLogLevel::Warn,
+            false
+        ));
+        assert!(should_record_singbox_line(
+            warn_line,
+            SingboxLogLevel::Warn,
+            false
+        ));
+        assert!(should_record_singbox_line(
+            error_line,
+            SingboxLogLevel::Warn,
+            false
+        ));
+
+        // When level is error: info and warn must not be recorded, error must be recorded
+        assert!(!should_record_singbox_line(
+            info_line,
+            SingboxLogLevel::Error,
+            false
+        ));
+        assert!(!should_record_singbox_line(
+            warn_line,
+            SingboxLogLevel::Error,
+            false
+        ));
+        assert!(should_record_singbox_line(
+            error_line,
+            SingboxLogLevel::Error,
+            false
+        ));
+
+        // When level is info: all are recorded
+        assert!(should_record_singbox_line(
+            info_line,
+            SingboxLogLevel::Info,
+            false
+        ));
+        assert!(should_record_singbox_line(
+            warn_line,
+            SingboxLogLevel::Info,
+            false
+        ));
+        assert!(should_record_singbox_line(
+            error_line,
+            SingboxLogLevel::Info,
+            false
+        ));
+
+        // When disabled: none are recorded
+        assert!(!should_record_singbox_line(
+            info_line,
+            SingboxLogLevel::Info,
+            true
+        ));
+        assert!(!should_record_singbox_line(
+            warn_line,
+            SingboxLogLevel::Info,
+            true
+        ));
+        assert!(!should_record_singbox_line(
+            error_line,
+            SingboxLogLevel::Info,
+            true
+        ));
     }
 
     #[tokio::test]
