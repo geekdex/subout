@@ -32,9 +32,21 @@
         <span
           class="badge"
           :class="logLevelBadgeClass"
-          title="当前运行核心实际配置的日志输出级别"
+          title="当前运行核心实际配置的日志记录与输出级别"
         >
-          📋 核心配置级别: {{ currentLogLevel.toUpperCase() }}
+          {{
+            isLogDisabled
+              ? "🚫 核心记录: 已禁用"
+              : `📋 核心配置级别: ${currentLogLevel.toUpperCase()}`
+          }}
+        </span>
+
+        <span
+          v-if="serviceStatus.log_output"
+          class="badge badge-secondary"
+          :title="`日志输出文件: ${serviceStatus.log_output}`"
+        >
+          📁 {{ serviceStatus.log_output }}
         </span>
 
         <button class="btn btn-secondary btn-sm" @click="fetchLogs">
@@ -62,6 +74,22 @@
           复制日志
         </button>
       </div>
+    </div>
+
+    <!-- Disabled Log Banner -->
+    <div
+      v-if="isLogDisabled"
+      style="
+        margin-bottom: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: var(--radius-sm);
+        background: rgba(234, 179, 8, 0.1);
+        border: 1px solid rgba(234, 179, 8, 0.25);
+        color: #eab308;
+        font-size: 0.82rem;
+      "
+    >
+      ⚠️ 提示：sing-box 核心配置已禁用日志记录 (disabled: true)，核心运行日志不会写入，当前仅记录 Subout 服务启停与管理事件。
     </div>
 
     <!-- Search / Filter bar -->
@@ -264,7 +292,12 @@ const currentLogLevel = computed(() => {
   return (serviceStatus.value.log_level || "info").toLowerCase();
 });
 
+const isLogDisabled = computed(() => {
+  return !!serviceStatus.value.log_disabled;
+});
+
 const logLevelBadgeClass = computed(() => {
+  if (isLogDisabled.value) return "badge-secondary";
   const lvl = currentLogLevel.value;
   if (lvl === "error" || lvl === "fatal" || lvl === "panic") {
     return "badge-danger";

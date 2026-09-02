@@ -890,6 +890,57 @@ describe("SimpleConfigView - Log Level Configuration", () => {
     // Click Error card
     await logCards[2].trigger("click");
     expect(logCards[2].classes()).toContain("active");
+
+    // Check timestamp, disabled switches and output file input
+    expect(wrapper.text()).toContain("在日志中包含精确时间戳");
+    expect(wrapper.text()).toContain("禁用内核日志输出");
+    const logCheckboxes = wrapper.findAll(".log-switches-row input[type='checkbox']");
+    expect(logCheckboxes.length).toBe(2);
+
+    const outputInput = wrapper.find("input[placeholder*='sing-box.log']");
+    expect(outputInput.exists()).toBe(true);
+  });
+
+  it("shows disabled banner and output file badge in ServiceLogsView when configured", async () => {
+    const { default: ServiceLogsView } = await import("./ServiceLogsView.vue");
+    const { serviceStatus } = await import("../store.js");
+
+    serviceStatus.value = {
+      running: true,
+      ready: true,
+      pid: 67890,
+      started_at: 1725200000,
+      uptime_secs: 120,
+      last_error: null,
+      binary_path: "/usr/bin/sing-box",
+      config_path: "/root/.config/subout/sing-box-running.json",
+      inbounds_summary: "127.0.0.1:2080 (混合代理)",
+      is_tun: false,
+      conflicting_processes: [],
+      log_level: "warn",
+      log_disabled: true,
+      log_output: "custom-singbox.log",
+    };
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/service/logs")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              "[2026-09-01 00:00:01] 🟢 sing-box 进程已拉起 (PID: 67890)",
+            ]),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(ServiceLogsView);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(wrapper.text()).toContain("🚫 核心记录: 已禁用");
+    expect(wrapper.text()).toContain("📁 custom-singbox.log");
+    expect(wrapper.text()).toContain("sing-box 核心配置已禁用日志记录");
   });
 });
 
