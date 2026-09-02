@@ -346,6 +346,25 @@ impl PlatformStrategy for MacOsPlatform {
                     .await;
             }
 
+            // Also check launchctl unload for system launchdaemons
+            for plist in &[
+                "/Library/LaunchDaemons/sing-box.plist",
+                "/Library/LaunchDaemons/homebrew.mxcl.sing-box.plist",
+                "/Library/LaunchDaemons/com.sagernet.sing-box.plist",
+            ] {
+                if std::path::Path::new(plist).exists() {
+                    let _ = tokio::process::Command::new("launchctl")
+                        .args(["unload", "-w", plist])
+                        .output()
+                        .await;
+                    if !as_root {
+                        let _ = self
+                            .run_sudo_command("launchctl", &["unload", "-w", plist], sudo_pass)
+                            .await;
+                    }
+                }
+            }
+
             // 2. Direct SIGTERM signal
             self.kill_process(pid, sudo_pass, 15).await;
 
@@ -362,12 +381,12 @@ impl PlatformStrategy for MacOsPlatform {
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String {
         if !has_sudo_pass && !self.is_running_as_root() {
             format!(
-                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码进行授权终止，或在终端执行 sudo kill -9 {}",
+                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在终端执行 brew services stop sing-box / sudo kill -9 {}",
                 pid, pid
             )
         } else {
             format!(
-                "终止外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo kill -9 {}",
+                "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 brew services stop sing-box / sudo kill -9 {}",
                 pid, pid
             )
         }

@@ -924,6 +924,7 @@ pub struct SaveRunningConfigRequest {
     pub config_id: Option<i64>,
     pub execute_update: bool,
     pub sudo_pass: Option<String>,
+    pub takeover: Option<bool>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -1272,10 +1273,11 @@ pub async fn save_running_config(
         });
 
         let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
+        let takeover = payload.takeover.unwrap_or(false);
 
         match state
             .service_manager
-            .restart_with_sudo(&generated, sudo_pass.as_deref())
+            .restart_with_sudo_and_takeover(&generated, sudo_pass.as_deref(), takeover)
             .await
         {
             Ok(_) => {

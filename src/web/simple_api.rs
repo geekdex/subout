@@ -21,6 +21,7 @@ pub struct SaveSimpleConfigRequest {
     pub config: SimpleConfig,
     pub apply: Option<bool>,
     pub sudo_pass: Option<String>,
+    pub takeover: Option<bool>,
 }
 
 pub async fn get_simple_config(
@@ -96,9 +97,10 @@ pub async fn save_simple_config(
 
     if payload.apply.unwrap_or(false) {
         let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
+        let takeover = payload.takeover.unwrap_or(false);
         if let Err(e) = state
             .service_manager
-            .restart_with_sudo(&generated, sudo_pass.as_deref())
+            .restart_with_sudo_and_takeover(&generated, sudo_pass.as_deref(), takeover)
             .await
         {
             return Err((

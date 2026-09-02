@@ -288,6 +288,57 @@ impl SingBoxServiceManager {
         config_json: &Value,
         sudo_pass: Option<&str>,
     ) -> Result<()> {
+        self.start_with_sudo_and_takeover(config_json, sudo_pass, false)
+            .await
+    }
+
+    pub async fn takeover_and_start(
+        &self,
+        config_json: &Value,
+        sudo_pass: Option<&str>,
+    ) -> Result<()> {
+        self.start_with_sudo_and_takeover(config_json, sudo_pass, true)
+            .await
+    }
+
+    pub async fn takeover_external_processes(&self, sudo_pass: Option<&str>) -> Result<()> {
+        let conflicts = self.find_external_singbox_processes().await;
+        if conflicts.is_empty() {
+            return Ok(());
+        }
+
+        self.append_log(&format!(
+            "正在执行一键接管，正在终止/禁用外部 sing-box 进程 (共 {} 个)...",
+            conflicts.len()
+        ))
+        .await;
+
+        for proc in conflicts {
+            self.kill_external_process(proc.pid, sudo_pass).await?;
+        }
+
+        let remaining = self.find_external_singbox_processes().await;
+        if !remaining.is_empty() {
+            let pids: Vec<String> = remaining.iter().map(|c| c.pid.to_string()).collect();
+            let msg = format!(
+                "接管未完全成功：仍有外部 sing-box 进程在运行 (PID: {})",
+                pids.join(", ")
+            );
+            self.append_log(&format!("❌ {}", msg)).await;
+            return Err(anyhow!(msg));
+        }
+
+        self.append_log("🟢 已成功接管外部服务并禁用系统开机争抢")
+            .await;
+        Ok(())
+    }
+
+    pub async fn start_with_sudo_and_takeover(
+        &self,
+        config_json: &Value,
+        sudo_pass: Option<&str>,
+        takeover: bool,
+    ) -> Result<()> {
         let singbox_bin = kernel::get_singbox_executable()
             .ok_or_else(|| anyhow!("未找到 sing-box 可执行文件，请先在面板下载集成内核"))?;
 
@@ -307,29 +358,33 @@ impl SingBoxServiceManager {
         // 1. Stop any existing Subout-managed processes and lingering instances first
         self.stop().await?;
 
-        // 2. Check for conflicting external sing-box processes
-        let conflicts = self.find_external_singbox_processes().await;
-        if !conflicts.is_empty() {
-            let pids: Vec<String> = conflicts.iter().map(|c| c.pid.to_string()).collect();
-            let details = conflicts
-                .iter()
-                .map(|c| {
-                    format!(
-                        "PID: {} ({})",
-                        c.pid,
-                        c.cmdline.as_deref().unwrap_or(&c.name)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("; ");
-            let err_msg = format!(
-                "检测到系统中已有外部独立的 sing-box 服务正在运行 [{}]。请先在系统终端中关闭现有外部服务（如 sudo systemctl stop sing-box 或 kill {}）后再使用 Subout 启动服务，以避免网络与端口冲突。",
-                details,
-                pids.join(" ")
-            );
-            self.append_log(&format!("❌ {}", err_msg)).await;
-            *self.last_error.write().await = Some(err_msg.clone());
-            return Err(anyhow!(err_msg));
+        // 2. Handle conflicting external sing-box processes
+        if takeover {
+            self.takeover_external_processes(sudo_pass).await?;
+        } else {
+            let conflicts = self.find_external_singbox_processes().await;
+            if !conflicts.is_empty() {
+                let pids: Vec<String> = conflicts.iter().map(|c| c.pid.to_string()).collect();
+                let details = conflicts
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "PID: {} ({})",
+                            c.pid,
+                            c.cmdline.as_deref().unwrap_or(&c.name)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let err_msg = format!(
+                    "检测到系统中已有外部独立的 sing-box 服务正在运行 [{}]。请先在系统终端中关闭现有外部服务（如 sudo systemctl stop sing-box && sudo systemctl disable sing-box 或 kill {}），或点击【一键接管】由 Subout 托管启动服务。",
+                    details,
+                    pids.join(" ")
+                );
+                self.append_log(&format!("❌ {}", err_msg)).await;
+                *self.last_error.write().await = Some(err_msg.clone());
+                return Err(anyhow!(err_msg));
+            }
         }
 
         let config_path = Self::get_running_config_path();
@@ -883,8 +938,19 @@ impl SingBoxServiceManager {
         config_json: &Value,
         sudo_pass: Option<&str>,
     ) -> Result<()> {
+        self.restart_with_sudo_and_takeover(config_json, sudo_pass, false)
+            .await
+    }
+
+    pub async fn restart_with_sudo_and_takeover(
+        &self,
+        config_json: &Value,
+        sudo_pass: Option<&str>,
+        takeover: bool,
+    ) -> Result<()> {
         self.stop().await?;
-        self.start_with_sudo(config_json, sudo_pass).await
+        self.start_with_sudo_and_takeover(config_json, sudo_pass, takeover)
+            .await
     }
 }
 
@@ -1429,5 +1495,23 @@ mod tests {
         assert!(captured[0].contains("router: started"));
         assert!(captured[1].contains("inbound/mixed: started"));
         assert!(*ready.read().await);
+    }
+
+    #[tokio::test]
+    async fn test_takeover_external_processes_when_none_running() {
+        let mgr = SingBoxServiceManager::new();
+        let conflicts = mgr.find_external_singbox_processes().await;
+        if conflicts.is_empty() {
+            // Should succeed immediately without errors when no conflicting external processes exist
+            let res = mgr.takeover_external_processes(None).await;
+            assert!(res.is_ok());
+        } else {
+            // In a live environment with root-owned sing-box, unprivileged test won't kill it without sudo pass
+            println!(
+                "Live external sing-box detected in test environment ({} processes): {:?}",
+                conflicts.len(),
+                conflicts
+            );
+        }
     }
 }

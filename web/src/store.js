@@ -238,6 +238,66 @@ export async function killExternalProcess(pid, sudoPass = "") {
   }
 }
 
+export async function takeoverService(
+  sudoPass = "",
+  startAfterTakeover = true,
+) {
+  if (!token.value) return false;
+  const passStr =
+    typeof sudoPass === "string"
+      ? sudoPass.trim()
+      : sessionSudoPassword.value || "";
+  try {
+    const res = await fetch(`${API_BASE}/api/service/takeover`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({
+        sudo_pass: passStr || null,
+        start_after_takeover: startAfterTakeover,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.ok) {
+      if (passStr) {
+        setSessionSudoPassword(passStr);
+      }
+      showToast(
+        startAfterTakeover
+          ? "已成功接管外部服务并启动 Subout 代理"
+          : "已成功接管外部服务",
+      );
+      await fetchServiceStatus();
+      return true;
+    } else {
+      let err = await res.text();
+      try {
+        const json = JSON.parse(err);
+        if (json.message) err = json.message;
+      } catch {}
+      if (
+        err.includes("密码不正确") ||
+        err.toLowerCase().includes("incorrect password")
+      ) {
+        setSessionSudoPassword("");
+      }
+      const errMsg =
+        err.startsWith("一键接管并启动服务失败:") ||
+        err.startsWith("接管外部进程失败:")
+          ? err
+          : `一键接管失败: ${err}`;
+      showToast(errMsg, "danger");
+      await fetchServiceStatus();
+      return false;
+    }
+  } catch (e) {
+    showToast(`一键接管请求出错: ${e.message || e}`, "danger");
+    return false;
+  }
+}
+
 export async function stopService() {
   if (!token.value) return false;
   try {

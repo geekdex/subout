@@ -276,7 +276,12 @@ impl PlatformStrategy for WindowsPlatform {
         Box::pin(async move {
             let pid_str = pid.to_string();
             let _ = tokio::process::Command::new("powershell")
-                .args(["-NoProfile", "-NonInteractive", "-Command", "Stop-Service sing-box -ErrorAction SilentlyContinue; Stop-Service singbox -ErrorAction SilentlyContinue"])
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Stop-Service sing-box -ErrorAction SilentlyContinue; Stop-Service singbox -ErrorAction SilentlyContinue; Set-Service sing-box -StartupType Disabled -ErrorAction SilentlyContinue; Set-Service singbox -StartupType Disabled -ErrorAction SilentlyContinue",
+                ])
                 .output()
                 .await;
             let _ = tokio::process::Command::new("taskkill")
@@ -289,7 +294,7 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn external_process_stop_failed_message(&self, pid: u32, _has_sudo_pass: bool) -> String {
         format!(
-            "终止外部进程 (PID: {}) 失败：进程仍在运行。请以管理员身份运行 Subout，或在任务管理器 / 终端中执行 taskkill /F /PID {} 终止该进程",
+            "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请以管理员身份运行 Subout，或在 PowerShell (管理员) 中执行 Stop-Service sing-box; Set-Service sing-box -StartupType Disabled / taskkill /F /PID {} 终止该进程",
             pid, pid
         )
     }

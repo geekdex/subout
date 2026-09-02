@@ -437,12 +437,28 @@
             📋 复制关闭命令
           </button>
           <button
-            class="btn btn-danger"
-            style="font-size: 0.75rem; padding: 0.3rem 0.65rem"
-            :disabled="isKillingAll"
+            class="btn btn-secondary"
+            style="
+              font-size: 0.75rem;
+              padding: 0.3rem 0.65rem;
+              color: var(--danger);
+            "
+            :disabled="isKillingAll || isTakingOver"
             @click="handleKillExternalAll"
           >
-            {{ isKillingAll ? "⏳ 正在终止..." : "🛑 终止外部进程" }}
+            {{ isKillingAll ? "⏳ 正在终止..." : "🛑 仅终止进程" }}
+          </button>
+          <button
+            class="btn btn-primary"
+            style="
+              font-size: 0.75rem;
+              padding: 0.3rem 0.75rem;
+              font-weight: 600;
+            "
+            :disabled="isKillingAll || isTakingOver"
+            @click="handleTakeoverExternalAll"
+          >
+            {{ isTakingOver ? "⏳ 正在接管..." : "🚀 一键接管并启动" }}
           </button>
         </div>
       </div>
@@ -573,6 +589,7 @@ import {
   sessionSudoPassword,
   setSessionSudoPassword,
   killExternalProcess,
+  takeoverService,
 } from "./store.js";
 import { initAjv } from "./validator.js";
 
@@ -590,6 +607,7 @@ import SettingsView from "./components/SettingsView.vue";
 import LoginBackground from "./components/LoginBackground.vue";
 
 const isKillingAll = ref(false);
+const isTakingOver = ref(false);
 const conflictingProcesses = computed(
   () => serviceStatus.value.conflicting_processes || [],
 );
@@ -615,6 +633,50 @@ const copyStopCommand = () => {
   }
   navigator.clipboard.writeText(cmd);
   showToast(`已复制关闭命令: ${cmd}`);
+};
+
+const handleTakeoverExternalAll = async () => {
+  const procs = conflictingProcesses.value;
+  if (!procs.length) return;
+  const pids = procs.map((p) => p.pid).join(", ");
+  const isWindows = systemModeInfo.value?.os === "windows";
+  const isRoot = systemModeInfo.value?.is_root;
+  const hasSaved =
+    !!sessionSudoPassword.value || !!systemModeInfo.value?.has_saved_sudo;
+
+  let sudoPass = sessionSudoPassword.value || "";
+
+  if (isWindows || isRoot || hasSaved) {
+    const ok = await confirmDialog(
+      `确定要一键接管外部 sing-box 进程 (PID: ${pids}) 并由 Subout 启动代理服务吗？\n\n💡 提示：Subout 将自动终止并禁用外部系统服务（防止系统重启再次冲突），并加载当前配置启动代理。`,
+      {
+        title: "一键接管并启动",
+        confirmText: "一键接管并启动",
+      },
+    );
+    if (!ok) return;
+  } else {
+    const entered = await promptDialog(
+      `一键接管外部 sing-box 进程 (PID: ${pids})\n\n💡 外部进程通常由系统服务 (sing-box.service / root) 托管。请输入系统管理员 Sudo 密码以授权接管（密码将被保存以实现免密管理）：`,
+      "",
+      {
+        title: "一键接管并启动",
+        confirmText: "授权并接管",
+        inputType: "password",
+        inputPlaceholder: "输入系统 Sudo 密码",
+      },
+    );
+    if (entered === null) return;
+    sudoPass = entered.trim();
+    setSessionSudoPassword(sudoPass);
+  }
+
+  isTakingOver.value = true;
+  try {
+    await takeoverService(sudoPass, true);
+  } finally {
+    isTakingOver.value = false;
+  }
 };
 
 const handleKillExternalAll = async () => {

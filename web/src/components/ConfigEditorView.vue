@@ -9284,6 +9284,10 @@ const saveRunningConfigSettings = async (
     runningConfigModal.saving = true;
   }
 
+  const hasConflicts =
+    serviceStatus.value?.conflicting_processes &&
+    serviceStatus.value.conflicting_processes.length > 0;
+
   try {
     const res = await fetch(`${API_BASE}/api/config/running`, {
       method: "POST",
@@ -9295,6 +9299,7 @@ const saveRunningConfigSettings = async (
         config_id: runningConfigForm.config_id,
         execute_update: executeUpdate,
         sudo_pass: sudoPass,
+        takeover: !!hasConflicts,
       }),
     });
 

@@ -499,8 +499,25 @@ impl PlatformStrategy for LinuxPlatform {
         Box::pin(async move {
             let as_root = self.is_running_as_root();
 
-            // 1. Try systemctl stop
+            // 1. Try systemctl disable & stop to prevent competing auto-start on next boot
             if as_root {
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "sing-box"])
+                    .output()
+                    .await;
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "sing-box.service"])
+                    .output()
+                    .await;
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "singbox"])
+                    .output()
+                    .await;
+                let _ = tokio::process::Command::new("systemctl")
+                    .args(["disable", "singbox.service"])
+                    .output()
+                    .await;
+
                 let _ = tokio::process::Command::new("systemctl")
                     .args(["stop", "sing-box"])
                     .output()
@@ -518,6 +535,19 @@ impl PlatformStrategy for LinuxPlatform {
                     .output()
                     .await;
             } else if let Some(pass) = sudo_pass {
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box"], Some(pass))
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box.service"], Some(pass))
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "singbox"], Some(pass))
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "singbox.service"], Some(pass))
+                    .await;
+
                 if let Err(e) = self
                     .run_sudo_command("systemctl", &["stop", "sing-box"], Some(pass))
                     .await
@@ -536,6 +566,12 @@ impl PlatformStrategy for LinuxPlatform {
                     .run_sudo_command("systemctl", &["stop", "singbox.service"], Some(pass))
                     .await;
             } else {
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box"], None)
+                    .await;
+                let _ = self
+                    .run_sudo_command("systemctl", &["disable", "sing-box.service"], None)
+                    .await;
                 let _ = self
                     .run_sudo_command("systemctl", &["stop", "sing-box"], None)
                     .await;
@@ -560,12 +596,12 @@ impl PlatformStrategy for LinuxPlatform {
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String {
         if !has_sudo_pass && !self.is_running_as_root() {
             format!(
-                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码进行授权终止，或在终端执行 sudo systemctl stop sing-box",
+                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未获权限终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在系统终端中执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box",
                 pid
             )
         } else {
             format!(
-                "终止外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box / sudo kill -9 {}",
+                "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box / sudo kill -9 {}",
                 pid, pid
             )
         }

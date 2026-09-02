@@ -218,6 +218,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route("/api/service/start", post(service_api::start_service))
         .route("/api/service/stop", post(service_api::stop_service))
         .route("/api/service/restart", post(service_api::restart_service))
+        .route("/api/service/takeover", post(service_api::takeover_service))
         .route(
             "/api/service/kill-external",
             post(service_api::kill_external_service),
