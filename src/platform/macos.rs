@@ -249,8 +249,12 @@ impl PlatformStrategy for MacOsPlatform {
                 }
                 if let Some(pass) = sudo_pass {
                     let sig_arg = format!("-{}", sig);
+                    let pgid_arg = format!("-{}", pid);
                     let _ = self
-                        .run_sudo_command("kill", &[&sig_arg, &pid.to_string()], Some(pass))
+                        .run_sudo_command("kill", &[&sig_arg, "--", &pgid_arg], Some(pass))
+                        .await;
+                    let _ = self
+                        .run_sudo_command("kill", &[&sig_arg, "--", &pid.to_string()], Some(pass))
                         .await;
                 }
             }
@@ -309,7 +313,16 @@ impl PlatformStrategy for MacOsPlatform {
                     self.kill_process(pid, sudo_pass, 15).await;
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                // 轮询检查最多等待 2500ms，每 50ms 检测一次，若所有进程已退出则提前返回
+                let max_wait = tokio::time::Duration::from_millis(2500);
+                let start_time = tokio::time::Instant::now();
+                while start_time.elapsed() < max_wait {
+                    let any_alive = pids_to_kill.iter().any(|&p| self.is_pid_alive(p));
+                    if !any_alive {
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
 
                 for &pid in &pids_to_kill {
                     if self.is_pid_alive(pid) {
