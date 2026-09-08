@@ -1132,23 +1132,51 @@ impl SingBoxServiceManager {
             pid_opt = child.id();
             self.append_log("正在停止 sing-box 服务...").await;
 
-            let _ = child.start_kill();
-
             let cached_pass = self.cached_sudo_pass.read().await.clone();
 
+            // 1. 发送优雅终止信号 SIGTERM (15)，给 sing-box 充足时间清理 TUN 网卡、系统路由表与 DNS
             if let Some(pid) = pid_opt {
                 platform.kill_process(pid, cached_pass.as_deref(), 15).await;
             }
 
-            // Wait up to 500ms for graceful stop, otherwise force SIGKILL
-            if (tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await)
-                .is_err()
-            {
+            // 2. 轮询检查子进程退出状态（最多等待 4000ms，每 50ms 检查一次）
+            // 进程一旦正常退出立即返回，不浪费任何时间
+            let mut exited = false;
+            let wait_timeout = std::time::Duration::from_millis(4000);
+            let start_time = std::time::Instant::now();
+
+            while start_time.elapsed() < wait_timeout {
+                match child.try_wait() {
+                    Ok(Some(_status)) => {
+                        exited = true;
+                        break;
+                    }
+                    Ok(None) => {
+                        if let Some(pid) = pid_opt
+                            && !platform.is_pid_alive(pid)
+                        {
+                            exited = true;
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        exited = true;
+                        break;
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+
+            // 3. 超时兜底：若 4 秒后仍未退出，升级为 SIGKILL 强行终止
+            if !exited {
+                self.append_log("⚠️ sing-box 未能在超时时间内正常退出，正在强制终止进程...")
+                    .await;
                 if let Some(pid) = pid_opt {
                     platform.kill_process(pid, cached_pass.as_deref(), 9).await;
                 }
+                let _ = child.start_kill();
                 let _ =
-                    tokio::time::timeout(std::time::Duration::from_millis(200), child.wait()).await;
+                    tokio::time::timeout(std::time::Duration::from_millis(300), child.wait()).await;
             }
         }
 
@@ -1164,9 +1192,7 @@ impl SingBoxServiceManager {
 
         platform.disable_system_proxy(cached_pass.as_deref());
         platform.disable_tun_dns(cached_pass.as_deref());
-        if platform.is_macos() || platform.is_windows() {
-            self.append_log("🌐 已恢复系统原始网络代理设置").await;
-        }
+        self.append_log("🌐 已恢复系统原始网络代理与路由设置").await;
 
         if had_child {
             self.append_log("⏹️ sing-box 服务已停止").await;
@@ -1938,5 +1964,17 @@ mod tests {
                 conflicts
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_service_manager_stop_gracefully_when_not_started() {
+        let mgr = SingBoxServiceManager::new();
+        assert!(!mgr.is_running().await);
+        let res = mgr.stop().await;
+        assert!(res.is_ok());
+        let st = mgr.get_status().await;
+        assert!(!st.running);
+        assert!(!st.ready);
+        assert!(st.pid.is_none());
     }
 }

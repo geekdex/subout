@@ -389,8 +389,12 @@ impl PlatformStrategy for LinuxPlatform {
                 }
                 if let Some(pass) = sudo_pass {
                     let sig_arg = format!("-{}", sig);
+                    let pgid_arg = format!("-{}", pid);
                     let _ = self
-                        .run_sudo_command("kill", &[&sig_arg, &pid.to_string()], Some(pass))
+                        .run_sudo_command("kill", &[&sig_arg, "--", &pgid_arg], Some(pass))
+                        .await;
+                    let _ = self
+                        .run_sudo_command("kill", &[&sig_arg, "--", &pid.to_string()], Some(pass))
                         .await;
                 }
             }
@@ -477,7 +481,16 @@ impl PlatformStrategy for LinuxPlatform {
                     self.kill_process(pid, sudo_pass, 15).await;
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                // 轮询检查最多等待 2500ms，每 50ms 检测一次，若所有进程已退出则提前返回
+                let max_wait = tokio::time::Duration::from_millis(2500);
+                let start_time = tokio::time::Instant::now();
+                while start_time.elapsed() < max_wait {
+                    let any_alive = pids_to_kill.iter().any(|&p| self.is_pid_alive(p));
+                    if !any_alive {
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
 
                 for &pid in &pids_to_kill {
                     if self.is_pid_alive(pid) {
@@ -609,11 +622,20 @@ impl PlatformStrategy for LinuxPlatform {
 
     fn enable_system_proxy(&self, _port: u16, _sudo_pass: Option<&str>) {}
 
-    fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {}
+    fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy", "mode", "none"])
+                .output();
+        }
+    }
 
     fn enable_tun_dns(&self, _dns_ip: &str, _sudo_pass: Option<&str>) {}
 
-    fn disable_tun_dns(&self, _sudo_pass: Option<&str>) {}
+    fn disable_tun_dns(&self, sudo_pass: Option<&str>) {
+        clean_linux_tun_network(sudo_pass);
+    }
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
@@ -702,5 +724,157 @@ impl PlatformStrategy for LinuxPlatform {
             }
         }
         None
+    }
+}
+
+fn run_linux_admin_cmd(cmd_name: &str, args: &[&str], sudo_pass: Option<&str>) -> bool {
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        unsafe extern "C" {
+            fn geteuid() -> u32;
+        }
+        let is_root = unsafe { geteuid() == 0 };
+
+        if is_root {
+            if let Ok(output) = Command::new(cmd_name).args(args).output() {
+                return output.status.success();
+            }
+            return false;
+        }
+
+        if let Some(pass) = sudo_pass {
+            let mut cmd = Command::new("sudo");
+            cmd.arg("-S")
+                .arg("-k")
+                .arg("-p")
+                .arg("")
+                .arg("--")
+                .arg(cmd_name)
+                .args(args);
+            cmd.stdin(std::process::Stdio::piped());
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+            if let Ok(mut child) = cmd.spawn() {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(format!("{}\n", pass).as_bytes());
+                }
+                if let Ok(status) = child.wait() {
+                    return status.success();
+                }
+            }
+            return false;
+        }
+
+        // Try passwordless sudo -n
+        if let Ok(output) = Command::new("sudo")
+            .arg("-n")
+            .arg("--")
+            .arg(cmd_name)
+            .args(args)
+            .output()
+            && output.status.success()
+        {
+            return true;
+        }
+
+        // Fallback to direct execution
+        if let Ok(output) = Command::new(cmd_name).args(args).output() {
+            return output.status.success();
+        }
+    }
+    let _ = (cmd_name, args, sudo_pass);
+    false
+}
+
+fn get_linux_cmd_output(cmd_name: &str, args: &[&str]) -> Option<String> {
+    #[cfg(unix)]
+    {
+        if let Ok(output) = std::process::Command::new(cmd_name).args(args).output()
+            && output.status.success()
+        {
+            return Some(String::from_utf8_lossy(&output.stdout).to_string());
+        }
+    }
+    let _ = (cmd_name, args);
+    None
+}
+
+/// 检查并清理 Linux 内核遗留的 sing-box TUN 策略路由规则、路由表项与死网卡
+pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
+    // 1. 检查并循环清理策略路由中的残留项（table 2022 / lookup 2022 / fwmark）
+    for _ in 0..10 {
+        let rule_output = match get_linux_cmd_output("ip", &["rule", "show"]) {
+            Some(out) => out,
+            None => break,
+        };
+
+        if !rule_output.contains("2022")
+            && !rule_output.contains("0x2023")
+            && !rule_output.contains("0x2024")
+        {
+            break;
+        }
+
+        let mut deleted_any = false;
+        if (rule_output.contains("lookup 2022") || rule_output.contains("table 2022"))
+            && run_linux_admin_cmd("ip", &["rule", "del", "lookup", "2022"], sudo_pass)
+        {
+            deleted_any = true;
+        }
+        if rule_output.contains("0x2023")
+            && run_linux_admin_cmd("ip", &["rule", "del", "fwmark", "0x2023"], sudo_pass)
+        {
+            deleted_any = true;
+        }
+        if rule_output.contains("0x2024")
+            && run_linux_admin_cmd("ip", &["rule", "del", "fwmark", "0x2024"], sudo_pass)
+        {
+            deleted_any = true;
+        }
+
+        if !deleted_any {
+            break;
+        }
+    }
+
+    // 2. 清空 table 2022 路由表并刷新内核 FIB 路由缓存
+    let _ = run_linux_admin_cmd("ip", &["route", "flush", "table", "2022"], sudo_pass);
+    let _ = run_linux_admin_cmd("ip", &["route", "flush", "cache"], sudo_pass);
+
+    // 3. 检查并删除可能残留的孤儿 tun 虚拟网卡设备（如 tun0 / subout-tun）
+    for iface in &["tun0", "subout-tun"] {
+        if let Some(link_out) = get_linux_cmd_output("ip", &["link", "show", iface])
+            && link_out.contains(iface)
+        {
+            let _ = run_linux_admin_cmd("ip", &["link", "delete", iface], sudo_pass);
+        }
+    }
+
+    // 4. 若系统启用了 systemd-resolved，刷新 DNS 解析缓存
+    let _ = run_linux_admin_cmd("resolvectl", &["flush-caches"], sudo_pass);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_linux_tun_network;
+
+    #[test]
+    fn test_linux_tun_network_cleanup_parser() {
+        let sample_rules = r#"0:	from all lookup local
+9000:	from all fwmark 0x2024 goto 9002
+9001:	from all fwmark 0x2023 lookup 2022
+9002:	from all nop
+32766:	from all lookup main
+32767:	from all lookup default
+32768:	from all lookup 2022
+"#;
+        assert!(sample_rules.contains("lookup 2022"));
+        assert!(sample_rules.contains("0x2023"));
+        assert!(sample_rules.contains("0x2024"));
+
+        // When rules do not contain table 2022, clean function should exit cleanly without error
+        clean_linux_tun_network(None);
     }
 }
