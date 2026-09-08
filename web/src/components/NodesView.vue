@@ -34,6 +34,78 @@
 
     <div class="view-body">
       <div class="panel fill-height">
+        <!-- Speed Test Summary Banner -->
+        <div
+          v-if="pingModal.isTesting"
+          class="speed-test-banner is-testing"
+        >
+          <div class="banner-left">
+            <span class="ping-dot"></span>
+            <span>正在执行节点测速 ({{ pingModal.progress }} / {{ pingModal.total }})</span>
+            <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #22d3ee; margin-left: 0.25rem">
+              {{ Math.round((pingModal.progress / (pingModal.total || 1)) * 100) }}%
+            </span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            @click="pingModal.show = true"
+          >
+            查看实时进度
+          </button>
+        </div>
+
+        <div
+          v-else-if="lastSpeedTestSummary && showSummaryBanner"
+          class="speed-test-banner"
+        >
+          <div class="banner-left">
+            <span class="banner-badge">📊 测速汇总</span>
+            <span class="banner-time">{{ lastSpeedTestSummary.time }}</span>
+            <span class="banner-stat">
+              共测 <strong>{{ lastSpeedTestSummary.total }}</strong> 个
+            </span>
+            <span class="banner-stat">
+              可用 <strong style="color: var(--success)">{{ lastSpeedTestSummary.successCount }}</strong> 个 ({{ lastSpeedTestSummary.successRate }}%)
+            </span>
+            <span v-if="lastSpeedTestSummary.failedCount > 0" class="banner-stat">
+              超时 <strong style="color: var(--danger)">{{ lastSpeedTestSummary.failedCount }}</strong> 个
+            </span>
+            <span v-if="lastSpeedTestSummary.avgLatency" class="banner-stat">
+              平均延迟 <strong>{{ lastSpeedTestSummary.avgLatency }} ms</strong>
+            </span>
+            <span v-if="lastSpeedTestSummary.fastest" class="banner-stat">
+              最优: <strong>{{ lastSpeedTestSummary.fastest.tag }}</strong> ({{ lastSpeedTestSummary.fastest.latency || lastSpeedTestSummary.fastest.effectiveLatency }} ms)
+            </span>
+          </div>
+          <div class="banner-actions">
+            <button
+              v-if="lastSpeedTestSummary.failedCount > 0"
+              type="button"
+              class="btn btn-secondary btn-sm"
+              title="勾选所有超时的节点，以便批量删除或禁用"
+              @click="batchSelectFailedNodes"
+            >
+              勾选超时节点 ({{ lastSpeedTestSummary.failedCount }})
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              @click="openPingModalWithSummary"
+            >
+              查看完整报告
+            </button>
+            <button
+              type="button"
+              class="banner-close-btn"
+              title="关闭横幅"
+              @click="showSummaryBanner = false"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+
         <div
           class="panel-title"
           style="
@@ -183,25 +255,27 @@
             <select
               v-model="tcpFilter"
               class="input-control"
-              style="width: 145px; padding: 0.4rem"
+              style="width: 172px; padding: 0.4rem"
+              title="按 TCP 握手连通性延迟筛选（TCP 握手探测超时阈值为 2000ms）"
             >
               <option value="all">TCP: 全部</option>
               <option value="success">🚀 高速 (&lt;100ms)</option>
               <option value="info">⚡ 中等 (100-300ms)</option>
-              <option value="warn">🐢 高延迟 (&gt;300ms)</option>
-              <option value="danger">❌ 异常 (超时)</option>
+              <option value="warn">🐢 高延迟 (300-2000ms)</option>
+              <option value="danger">❌ 超时 (&gt;2000ms)</option>
               <option value="untested">⚪ 未测试</option>
             </select>
             <select
               v-model="webFilter"
               class="input-control"
-              style="width: 145px; padding: 0.4rem"
+              style="width: 172px; padding: 0.4rem"
+              title="按网页访问延迟筛选（HTTP 代理测速超时阈值为 5000ms）"
             >
               <option value="all">网页: 全部</option>
               <option value="success">🚀 高速 (&lt;100ms)</option>
               <option value="info">⚡ 中等 (100-300ms)</option>
-              <option value="warn">🐢 高延迟 (&gt;300ms)</option>
-              <option value="danger">❌ 异常 (超时)</option>
+              <option value="warn">🐢 高延迟 (300-5000ms)</option>
+              <option value="danger">❌ 超时 (&gt;5000ms)</option>
               <option value="untested">⚪ 未测试</option>
             </select>
             <input
@@ -349,8 +423,9 @@
                       v-else-if="latencyMap[node.id].tcp === null"
                       class="badge latency-failed"
                       style="font-size: 0.75rem; padding: 0.15rem 0.4rem"
+                      title="TCP 握手探测超时 (>2000ms)"
                     >
-                      TCP: 超时
+                      TCP: 超时 (>2s)
                     </span>
 
                     <!-- Web/HTTP Latency Badge -->
@@ -371,8 +446,9 @@
                       v-else-if="latencyMap[node.id].web === null"
                       class="badge latency-failed"
                       style="font-size: 0.75rem; padding: 0.15rem 0.4rem"
+                      title="网页代理测速超时 (>5000ms)"
                     >
-                      网页: 超时
+                      网页: 超时 (>5s)
                     </span>
                   </div>
                   <div
@@ -1104,9 +1180,21 @@
 
     <!-- Latency Test Modal -->
     <div class="modal" :class="{ active: pingModal.show }">
-      <div class="modal-card" style="max-width: 550px; width: 90%">
+      <div class="modal-card" style="max-width: 680px; width: 92%">
         <div class="modal-header">
-          <span>节点延迟测试</span>
+          <div style="display: flex; align-items: center; gap: 0.5rem">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+            <span>节点延迟测试</span>
+          </div>
           <svg
             style="cursor: pointer"
             width="20"
@@ -1121,195 +1209,231 @@
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </div>
-        <div class="modal-body">
-          <div class="form-group" style="margin-bottom: 1.25rem">
-            <label
+        <div class="modal-body" style="max-height: 80vh; overflow-y: auto">
+          <!-- Parameter Configuration (Collapsible if results exist) -->
+          <details
+            :open="!pingModal.isTesting && pingModal.results.length === 0"
+            style="
+              margin-bottom: 1.25rem;
+              border: 1px solid var(--border-color);
+              border-radius: 8px;
+              padding: 0.75rem 1rem;
+              background: rgba(255, 255, 255, 0.02);
+            "
+          >
+            <summary
               style="
-                display: block;
+                cursor: pointer;
                 font-weight: 500;
-                margin-bottom: 0.5rem;
-                color: var(--text-color);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                user-select: none;
               "
-              >测试范围</label
             >
-            <div style="display: flex; gap: 1.25rem; align-items: center">
-              <label
-                v-if="selectedNodeIds.length > 0"
+              <span>⚙️ 测速参数设置</span>
+              <span style="font-size: 0.8rem; color: var(--text-muted)">
+                {{ pingModal.testRange === "selected" ? ("已选 " + selectedNodeIds.length + " 个") : "全部节点" }} ·
+                {{ pingModal.testType === "both" ? "TCP + 网页延迟" : pingModal.testType === "web" ? "仅网页延迟" : "仅TCP连通性" }}
+              </span>
+            </summary>
+            <div style="margin-top: 1rem">
+              <div class="form-group" style="margin-bottom: 1.25rem">
+                <label
+                  style="
+                    display: block;
+                    font-weight: 500;
+                    margin-bottom: 0.5rem;
+                    color: var(--text-color);
+                  "
+                  >测试范围</label
+                >
+                <div style="display: flex; gap: 1.25rem; align-items: center">
+                  <label
+                    v-if="selectedNodeIds.length > 0"
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 0.35rem;
+                      cursor: pointer;
+                      color: var(--text-color);
+                    "
+                  >
+                    <input
+                      v-model="pingModal.testRange"
+                      type="radio"
+                      value="selected"
+                    />
+                    已选节点 ({{ selectedNodeIds.length }})
+                  </label>
+                  <label
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 0.35rem;
+                      cursor: pointer;
+                      color: var(--text-color);
+                    "
+                  >
+                    <input v-model="pingModal.testRange" type="radio" value="all" />
+                    所有节点 ({{ totalNodes }})
+                  </label>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 1.25rem">
+                <label
+                  style="
+                    display: block;
+                    font-weight: 500;
+                    margin-bottom: 0.5rem;
+                    color: var(--text-color);
+                  "
+                  >测试方式</label
+                >
+                <select
+                  v-model="pingModal.testType"
+                  class="form-control"
+                  style="
+                    width: 100%;
+                    padding: 0.5rem;
+                    border-radius: 6px;
+                    background: var(--bg-card);
+                    border: 1px solid var(--border-color);
+                    color: var(--text-color);
+                  "
+                >
+                  <option value="both">全部 (先测 TCP 再测网页)</option>
+                  <option value="tcp">TCP 连通性测试 (快速)</option>
+                  <option value="web">网页延迟测试 (代理)</option>
+                </select>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem">
+                  ⏱️ 默认超时判定：TCP 握手 2000ms (2s)，网页代理请求 5000ms (5s)。超过该阈值未响应即判定为超时。
+                </div>
+              </div>
+
+              <div
+                v-if="isTunActive()"
                 style="
+                  margin-bottom: 1.25rem;
+                  padding: 0.75rem 1rem;
+                  border-radius: 6px;
+                  background: rgba(234, 179, 8, 0.12);
+                  border: 1px solid rgba(234, 179, 8, 0.35);
+                  color: #eab308;
+                  font-size: 0.85rem;
+                  line-height: 1.5;
                   display: flex;
+                  justify-content: space-between;
                   align-items: center;
-                  gap: 0.35rem;
-                  cursor: pointer;
-                  color: var(--text-color);
+                  gap: 0.75rem;
+                  flex-wrap: wrap;
                 "
               >
+                <div>
+                  ⚠️
+                  <strong>TUN 代理运行中：</strong
+                  >全局流量正被接管，测速可能存在节点叠加。建议关闭代理后再测速。
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  style="
+                    padding: 0.25rem 0.65rem;
+                    font-size: 0.8rem;
+                    white-space: nowrap;
+                    border-color: rgba(234, 179, 8, 0.5);
+                    color: #eab308;
+                  "
+                  @click="quickStopServiceInPingModal"
+                >
+                  一键关闭代理
+                </button>
+              </div>
+
+              <div
+                v-if="
+                  !systemModeInfo.kernel_installed &&
+                  ['web', 'both'].includes(pingModal.testType)
+                "
+                style="
+                  margin-bottom: 1.25rem;
+                  padding: 0.75rem 1rem;
+                  border-radius: 6px;
+                  background: rgba(234, 179, 8, 0.12);
+                  border: 1px solid rgba(234, 179, 8, 0.35);
+                  color: #eab308;
+                  font-size: 0.85rem;
+                  line-height: 1.5;
+                "
+              >
+                ⚠️ <strong>提示：</strong>当前系统未检测到
+                <code>sing-box</code>
+                内核。无法启动本地代理测试通道（网页测速将被跳过，仅执行传输层
+                TCP/UDP
+                连通性测试）。如需测试真实网页访问速度，请先前往【内核管理】一键下载安装内核。
+              </div>
+
+              <div
+                v-if="['web', 'both'].includes(pingModal.testType)"
+                class="form-group"
+                style="margin-bottom: 1.25rem"
+              >
+                <label
+                  style="
+                    display: block;
+                    font-weight: 500;
+                    margin-bottom: 0.5rem;
+                    color: var(--text-color);
+                  "
+                  >测试目标网址</label
+                >
+                <select
+                  v-model="pingModal.targetUrlSelect"
+                  class="form-control"
+                  style="
+                    width: 100%;
+                    padding: 0.5rem;
+                    border-radius: 6px;
+                    background: var(--bg-card);
+                    border: 1px solid var(--border-color);
+                    color: var(--text-color);
+                  "
+                >
+                  <option
+                    v-for="opt in TARGET_URL_OPTIONS"
+                    :key="opt.url"
+                    :value="opt.url"
+                  >
+                    {{ opt.label }} ({{ opt.url }})
+                  </option>
+                  <option value="custom">自定义网址...</option>
+                </select>
                 <input
-                  v-model="pingModal.testRange"
-                  type="radio"
-                  value="selected"
+                  v-if="pingModal.targetUrlSelect === 'custom'"
+                  v-model="pingModal.customTargetUrl"
+                  type="text"
+                  class="form-control"
+                  placeholder="请输入自定义 HTTP(S) 测试目标网址"
+                  style="
+                    width: 100%;
+                    margin-top: 0.5rem;
+                    padding: 0.5rem;
+                    border-radius: 6px;
+                    background: var(--bg-card);
+                    border: 1px solid var(--border-color);
+                    color: var(--text-color);
+                  "
                 />
-                已选节点 ({{ selectedNodeIds.length }})
-              </label>
-              <label
-                style="
-                  display: flex;
-                  align-items: center;
-                  gap: 0.35rem;
-                  cursor: pointer;
-                  color: var(--text-color);
-                "
-              >
-                <input v-model="pingModal.testRange" type="radio" value="all" />
-                所有节点 ({{ totalNodes }})
-              </label>
+              </div>
             </div>
-          </div>
-
-          <div class="form-group" style="margin-bottom: 1.25rem">
-            <label
-              style="
-                display: block;
-                font-weight: 500;
-                margin-bottom: 0.5rem;
-                color: var(--text-color);
-              "
-              >测试方式</label
-            >
-            <select
-              v-model="pingModal.testType"
-              class="form-control"
-              style="
-                width: 100%;
-                padding: 0.5rem;
-                border-radius: 6px;
-                background: var(--bg-card);
-                border: 1px solid var(--border-color);
-                color: var(--text-color);
-              "
-            >
-              <option value="both">全部 (先测 TCP 再测网页)</option>
-              <option value="tcp">TCP 连通性测试 (快速)</option>
-              <option value="web">网页延迟测试 (代理)</option>
-            </select>
-          </div>
-
-          <div
-            v-if="isTunActive()"
-            style="
-              margin-bottom: 1.25rem;
-              padding: 0.75rem 1rem;
-              border-radius: 6px;
-              background: rgba(234, 179, 8, 0.12);
-              border: 1px solid rgba(234, 179, 8, 0.35);
-              color: #eab308;
-              font-size: 0.85rem;
-              line-height: 1.5;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              gap: 0.75rem;
-              flex-wrap: wrap;
-            "
-          >
-            <div>
-              ⚠️
-              <strong>TUN 代理运行中：</strong
-              >全局流量正被接管，测速可能存在节点叠加。建议关闭代理后再测速。
-            </div>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              style="
-                padding: 0.25rem 0.65rem;
-                font-size: 0.8rem;
-                white-space: nowrap;
-                border-color: rgba(234, 179, 8, 0.5);
-                color: #eab308;
-              "
-              @click="quickStopServiceInPingModal"
-            >
-              一键关闭代理
-            </button>
-          </div>
-
-          <div
-            v-if="
-              !systemModeInfo.kernel_installed &&
-              ['web', 'both'].includes(pingModal.testType)
-            "
-            style="
-              margin-bottom: 1.25rem;
-              padding: 0.75rem 1rem;
-              border-radius: 6px;
-              background: rgba(234, 179, 8, 0.12);
-              border: 1px solid rgba(234, 179, 8, 0.35);
-              color: #eab308;
-              font-size: 0.85rem;
-              line-height: 1.5;
-            "
-          >
-            ⚠️ <strong>提示：</strong>当前系统未检测到
-            <code>sing-box</code>
-            内核。无法启动本地代理测试通道（网页测速将被跳过，仅执行传输层
-            TCP/UDP
-            连通性测试）。如需测试真实网页访问速度，请先前往【内核管理】一键下载安装内核。
-          </div>
-
-          <div
-            v-if="['web', 'both'].includes(pingModal.testType)"
-            class="form-group"
-            style="margin-bottom: 1.25rem"
-          >
-            <label
-              style="
-                display: block;
-                font-weight: 500;
-                margin-bottom: 0.5rem;
-                color: var(--text-color);
-              "
-              >测试目标网址</label
-            >
-            <select
-              v-model="pingModal.targetUrlSelect"
-              class="form-control"
-              style="
-                width: 100%;
-                padding: 0.5rem;
-                border-radius: 6px;
-                background: var(--bg-card);
-                border: 1px solid var(--border-color);
-                color: var(--text-color);
-              "
-            >
-              <option
-                v-for="opt in TARGET_URL_OPTIONS"
-                :key="opt.url"
-                :value="opt.url"
-              >
-                {{ opt.label }} ({{ opt.url }})
-              </option>
-              <option value="custom">自定义网址...</option>
-            </select>
-            <input
-              v-if="pingModal.targetUrlSelect === 'custom'"
-              v-model="pingModal.customTargetUrl"
-              type="text"
-              class="form-control"
-              placeholder="请输入自定义 HTTP(S) 测试目标网址"
-              style="
-                width: 100%;
-                margin-top: 0.5rem;
-                padding: 0.5rem;
-                border-radius: 6px;
-                background: var(--bg-card);
-                border: 1px solid var(--border-color);
-                color: var(--text-color);
-              "
-            />
-          </div>
+          </details>
 
           <!-- Progress bar -->
-          <div v-if="pingModal.isTesting" style="margin-bottom: 1.25rem">
+          <div
+            v-if="pingModal.isTesting || (pingModal.total > 0 && pingModal.progress === pingModal.total)"
+            style="margin-bottom: 1.25rem"
+          >
             <div
               style="
                 display: flex;
@@ -1319,15 +1443,13 @@
                 color: var(--text-muted);
               "
             >
-              <span
-                >测试进度: {{ pingModal.progress }} /
-                {{ pingModal.total }}</span
-              >
-              <span
-                >{{
-                  Math.round((pingModal.progress / pingModal.total) * 100)
-                }}%</span
-              >
+              <span>
+                {{ pingModal.isTesting ? "测试进度:" : "测试已完成:" }}
+                {{ pingModal.progress }} / {{ pingModal.total }}
+              </span>
+              <span>
+                {{ Math.round((pingModal.progress / (pingModal.total || 1)) * 100) }}%
+              </span>
             </div>
             <div
               style="
@@ -1339,28 +1461,356 @@
             >
               <div
                 :style="{
-                  width: (pingModal.progress / pingModal.total) * 100 + '%',
+                  width: (pingModal.progress / (pingModal.total || 1)) * 100 + '%',
+                  background: pingModal.isTesting ? 'var(--primary)' : 'var(--success)',
                 }"
-                style="
-                  height: 100%;
-                  background: var(--primary);
-                  transition: width 0.2s;
-                "
+                style="height: 100%; transition: width 0.2s;"
               ></div>
             </div>
           </div>
 
-          <!-- Logs Output Console -->
-          <div v-if="pingModal.logs.length > 0" style="margin-top: 1.25rem">
-            <label
-              style="
-                display: block;
-                font-weight: 500;
-                margin-bottom: 0.5rem;
-                color: var(--text-color);
-              "
-              >测试日志</label
+          <!-- Tab Switcher: Summary vs Logs -->
+          <div
+            v-if="pingModal.results.length > 0 || pingModal.logs.length > 0"
+            class="ping-tabs-bar"
+          >
+            <button
+              type="button"
+              class="ping-tab-btn"
+              :class="{ active: pingModal.activeTab === 'summary' }"
+              @click="pingModal.activeTab = 'summary'"
             >
+              📊 结果汇总
+              <span v-if="pingModal.results.length > 0" class="tab-badge">
+                {{ pingModal.results.length }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="ping-tab-btn"
+              :class="{ active: pingModal.activeTab === 'logs' }"
+              @click="pingModal.activeTab = 'logs'"
+            >
+              📜 运行日志
+              <span v-if="pingModal.isTesting" class="ping-dot" style="margin-left: 0.35rem"></span>
+            </button>
+          </div>
+
+          <!-- TAB 1: Summary Panel -->
+          <div v-if="pingModal.activeTab === 'summary' && pingSummaryStats" class="summary-section">
+            <!-- Metric Cards -->
+            <div class="metric-cards-grid">
+              <div class="metric-card">
+                <div class="metric-label">已测总数</div>
+                <div class="metric-value">{{ pingSummaryStats.total }}</div>
+                <div class="metric-sub">{{ pingModal.testRange === 'selected' ? '已选节点' : '全部节点' }}</div>
+              </div>
+              <div class="metric-card success">
+                <div class="metric-label">可用节点</div>
+                <div class="metric-value text-success">{{ pingSummaryStats.successCount }}</div>
+                <div class="metric-sub">连通率 {{ pingSummaryStats.successRate }}%</div>
+              </div>
+              <div class="metric-card danger">
+                <div class="metric-label">超时 / 异常</div>
+                <div class="metric-value" :class="pingSummaryStats.failedCount > 0 ? 'text-danger' : ''">
+                  {{ pingSummaryStats.failedCount }}
+                </div>
+                <div class="metric-sub">
+                  {{ pingSummaryStats.failedCount > 0 ? (pingModal.testType === 'tcp' ? '超时 (>2000ms)' : pingModal.testType === 'web' ? '超时 (>5000ms)' : '超时 (>2s/5s)') : '无异常' }}
+                </div>
+              </div>
+              <div class="metric-card info">
+                <div class="metric-label">平均延迟</div>
+                <div class="metric-value text-info">
+                  {{ pingSummaryStats.avgLatency ? pingSummaryStats.avgLatency + ' ms' : '--' }}
+                </div>
+                <div class="metric-sub">{{ pingModal.testType === 'web' ? '真实网页' : '综合探测' }}</div>
+              </div>
+              <div class="metric-card primary">
+                <div class="metric-label">最优节点</div>
+                <div
+                  class="metric-value text-primary"
+                  style="font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  :title="pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : ''"
+                >
+                  {{ pingSummaryStats.fastest ? (pingSummaryStats.fastest.latency || pingSummaryStats.fastest.effectiveLatency) + ' ms' : '--' }}
+                </div>
+                <div
+                  class="metric-sub"
+                  style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  :title="pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : ''"
+                >
+                  {{ pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : '暂无数据' }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Distribution Visual Bar -->
+            <div class="distribution-container">
+              <div class="distribution-bar">
+                <div
+                  v-if="pingSummaryStats.tiers.fast > 0"
+                  class="dist-seg seg-fast"
+                  :style="{ width: (pingSummaryStats.tiers.fast / pingSummaryStats.total) * 100 + '%' }"
+                  :title="`极速: ${pingSummaryStats.tiers.fast} 个`"
+                ></div>
+                <div
+                  v-if="pingSummaryStats.tiers.medium > 0"
+                  class="dist-seg seg-medium"
+                  :style="{ width: (pingSummaryStats.tiers.medium / pingSummaryStats.total) * 100 + '%' }"
+                  :title="`良好: ${pingSummaryStats.tiers.medium} 个`"
+                ></div>
+                <div
+                  v-if="pingSummaryStats.tiers.slow > 0"
+                  class="dist-seg seg-slow"
+                  :style="{ width: (pingSummaryStats.tiers.slow / pingSummaryStats.total) * 100 + '%' }"
+                  :title="`较慢: ${pingSummaryStats.tiers.slow} 个`"
+                ></div>
+                <div
+                  v-if="pingSummaryStats.tiers.failed > 0"
+                  class="dist-seg seg-failed"
+                  :style="{ width: (pingSummaryStats.tiers.failed / pingSummaryStats.total) * 100 + '%' }"
+                  :title="`超时: ${pingSummaryStats.tiers.failed} 个`"
+                ></div>
+              </div>
+
+              <!-- Filter chips below distribution bar -->
+              <div class="tier-filter-chips">
+                <button
+                  type="button"
+                  class="tier-chip"
+                  :class="{ active: pingModal.filterTier === 'all' }"
+                  @click="pingModal.filterTier = 'all'"
+                >
+                  全部 ({{ pingSummaryStats.total }})
+                </button>
+                <button
+                  type="button"
+                  class="tier-chip"
+                  :class="{ active: pingModal.filterTier === 'success' }"
+                  @click="pingModal.filterTier = 'success'"
+                >
+                  仅可用 ({{ pingSummaryStats.successCount }})
+                </button>
+                <button
+                  type="button"
+                  class="tier-chip chip-fast"
+                  :class="{ active: pingModal.filterTier === 'fast' }"
+                  @click="pingModal.filterTier = 'fast'"
+                >
+                  🚀 极速 &lt;100ms ({{ pingSummaryStats.tiers.fast }})
+                </button>
+                <button
+                  type="button"
+                  class="tier-chip chip-medium"
+                  :class="{ active: pingModal.filterTier === 'medium' }"
+                  @click="pingModal.filterTier = 'medium'"
+                >
+                  ⚡ 良好 100-300ms ({{ pingSummaryStats.tiers.medium }})
+                </button>
+                <button
+                  type="button"
+                  class="tier-chip chip-slow"
+                  :class="{ active: pingModal.filterTier === 'slow' }"
+                  :title="pingModal.testType === 'tcp' ? '延迟 300~2000ms' : '延迟 300~5000ms'"
+                  @click="pingModal.filterTier = 'slow'"
+                >
+                  🐢 较慢 (300ms~超时) ({{ pingSummaryStats.tiers.slow }})
+                </button>
+                <button
+                  type="button"
+                  class="tier-chip chip-failed"
+                  :class="{ active: pingModal.filterTier === 'failed' }"
+                  :title="pingModal.testType === 'tcp' ? 'TCP 握手超时 (>2000ms)' : pingModal.testType === 'web' ? '网页测速超时 (>5000ms)' : '探测超时 (TCP>2000ms / Web>5000ms)'"
+                  @click="pingModal.filterTier = 'failed'"
+                >
+                  ❌ 超时 ({{ pingModal.testType === 'tcp' ? '>2s' : pingModal.testType === 'web' ? '>5s' : '>2s/5s' }}) ({{ pingSummaryStats.tiers.failed }})
+                </button>
+              </div>
+            </div>
+
+            <!-- Action buttons bar -->
+            <div class="summary-actions-bar">
+              <button
+                v-if="pingSummaryStats.failedCount > 0"
+                type="button"
+                class="btn btn-secondary btn-sm"
+                title="勾选所有超时节点，关闭弹窗后可批量删除或禁用"
+                @click="batchSelectFailedNodes"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="9 11 12 14 22 4" />
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+                勾选超时节点 ({{ pingSummaryStats.failedCount }})
+              </button>
+              <button
+                v-if="pingSummaryStats.failedCount > 0 && !pingModal.isTesting"
+                type="button"
+                class="btn btn-secondary btn-sm"
+                title="仅重新测试未通过/超时的节点"
+                @click="retryFailedNodes"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M23 4v6h-6" />
+                  <path d="M1 20v-6h6" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+                仅重测超时节点 ({{ pingSummaryStats.failedCount }})
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                title="复制测速报告文本到剪贴板"
+                @click="copySpeedTestReport"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                复制测速报告
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                title="导出 CSV 格式测速结果"
+                @click="exportSpeedTestCsv"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                导出 CSV
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                title="在主节点列表中仅显示可用节点"
+                @click="filterAvailableInTable"
+              >
+                在列表中仅看可用
+              </button>
+            </div>
+
+            <!-- Ranked Results Table -->
+            <div class="ranked-results-section">
+              <div class="ranked-header">
+                <span style="font-weight: 500; font-size: 0.9rem">节点排行列表 ({{ filteredPingResults.length }})</span>
+                <input
+                  v-model="pingModal.searchQuery"
+                  type="text"
+                  class="input-control"
+                  style="padding: 0.25rem 0.6rem; font-size: 0.8rem; width: 170px"
+                  placeholder="搜索节点名称/地址..."
+                />
+              </div>
+              <div class="ranked-table-wrapper">
+                <table class="ranked-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 44px; text-align: center">排名</th>
+                      <th>节点名称 (Tag)</th>
+                      <th style="width: 70px">协议</th>
+                      <th style="width: 90px">TCP 延迟</th>
+                      <th style="width: 90px">网页延迟</th>
+                      <th style="width: 80px; text-align: center">状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="filteredPingResults.length === 0">
+                      <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1rem">
+                        暂无符合条件的测速结果
+                      </td>
+                    </tr>
+                    <tr v-for="(res, idx) in filteredPingResults" :key="res.id">
+                      <td style="text-align: center; font-family: var(--font-mono); font-size: 0.85rem">
+                        <span v-if="idx === 0 && res.effectiveLatency !== null" style="color: #f59e0b">🥇</span>
+                        <span v-else-if="idx === 1 && res.effectiveLatency !== null" style="color: #94a3b8">🥈</span>
+                        <span v-else-if="idx === 2 && res.effectiveLatency !== null" style="color: #b45309">🥉</span>
+                        <span v-else>#{{ idx + 1 }}</span>
+                      </td>
+                      <td>
+                        <strong>{{ res.tag }}</strong>
+                      </td>
+                      <td>
+                        <span class="badge" style="font-size: 0.75rem; background: rgba(99, 102, 241, 0.15); color: var(--primary);">
+                          {{ res.node_type }}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          v-if="res.tcp !== null && res.tcp !== undefined"
+                          :class="['badge', getLatencyClass(res.tcp)]"
+                          style="font-size: 0.75rem"
+                        >
+                          {{ res.tcp }} ms
+                        </span>
+                        <span
+                          v-else-if="res.tcp === null"
+                          class="badge latency-failed"
+                          style="font-size: 0.75rem"
+                          title="TCP 握手探测超时 (>2000ms)"
+                        >
+                          超时 (&gt;2s)
+                        </span>
+                        <span v-else style="color: var(--text-muted); font-size: 0.75rem">-</span>
+                      </td>
+                      <td>
+                        <span
+                          v-if="res.web !== null && res.web !== undefined"
+                          :class="['badge', getLatencyClass(res.web)]"
+                          style="font-size: 0.75rem"
+                        >
+                          {{ res.web }} ms
+                        </span>
+                        <span
+                          v-else-if="res.web === null"
+                          class="badge latency-failed"
+                          style="font-size: 0.75rem"
+                          title="网页代理测速超时 (>5000ms)"
+                        >
+                          超时 (&gt;5s)
+                        </span>
+                        <span v-else style="color: var(--text-muted); font-size: 0.75rem">-</span>
+                      </td>
+                      <td style="text-align: center">
+                        <span
+                          class="badge"
+                          :class="res.status === 'fast' ? 'badge-success' : res.status === 'medium' ? 'badge-info' : res.status === 'slow' ? 'badge-warning' : 'badge-danger'"
+                          style="font-size: 0.75rem"
+                        >
+                          {{ res.status === 'fast' ? '极速' : res.status === 'medium' ? '良好' : res.status === 'slow' ? '较慢' : '超时' }}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: Logs Output Console -->
+          <div v-show="pingModal.activeTab === 'logs' || (!pingSummaryStats && pingModal.logs.length > 0)" style="margin-top: 1rem">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem">
+              <label
+                style="
+                  display: block;
+                  font-weight: 500;
+                  color: var(--text-color);
+                  margin: 0;
+                "
+                >测试运行日志</label
+              >
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                style="padding: 0.15rem 0.5rem; font-size: 0.75rem"
+                @click="pingModal.logs = []"
+              >
+                清空日志
+              </button>
+            </div>
             <div
               ref="logsConsole"
               style="
@@ -1370,7 +1820,7 @@
                 font-size: 0.85rem;
                 padding: 0.75rem;
                 border-radius: 6px;
-                height: 180px;
+                height: 220px;
                 overflow-y: auto;
                 white-space: pre-wrap;
                 word-break: break-all;
@@ -2359,7 +2809,356 @@ const pingModal = reactive({
   total: 0,
   logs: [],
   statusMap: {},
+  results: [],
+  activeTab: "summary",
+  filterTier: "all",
+  searchQuery: "",
+  completedAt: null,
 });
+
+const lastSpeedTestSummary = ref(null);
+const showSummaryBanner = ref(true);
+
+const pingSummaryStats = computed(() => {
+  const list = pingModal.results;
+  const total = list.length;
+  if (total === 0) return null;
+
+  let successCount = 0;
+  let failedCount = 0;
+  let totalLatency = 0;
+  let fastest = null;
+  let slowest = null;
+
+  const tiers = {
+    fast: 0,
+    medium: 0,
+    slow: 0,
+    failed: 0,
+  };
+
+  list.forEach((item) => {
+    if (item.effectiveLatency !== null && item.effectiveLatency !== undefined) {
+      successCount++;
+      totalLatency += item.effectiveLatency;
+
+      const currLat = item.effectiveLatency;
+      if (
+        !fastest ||
+        currLat < (fastest.latency || fastest.effectiveLatency)
+      ) {
+        fastest = item;
+      }
+      if (
+        !slowest ||
+        currLat > (slowest.latency || slowest.effectiveLatency)
+      ) {
+        slowest = item;
+      }
+
+      if (currLat < 100) tiers.fast++;
+      else if (currLat <= 300) tiers.medium++;
+      else tiers.slow++;
+    } else {
+      failedCount++;
+      tiers.failed++;
+    }
+  });
+
+  const avgLatency =
+    successCount > 0 ? Math.round(totalLatency / successCount) : 0;
+  const successRate =
+    total > 0 ? ((successCount / total) * 100).toFixed(1) : "0.0";
+
+  return {
+    total,
+    successCount,
+    failedCount,
+    successRate,
+    avgLatency,
+    fastest,
+    slowest,
+    tiers,
+  };
+});
+
+const filteredPingResults = computed(() => {
+  let list = [...pingModal.results];
+
+  if (pingModal.filterTier === "success") {
+    list = list.filter(
+      (n) => n.effectiveLatency !== null && n.effectiveLatency !== undefined,
+    );
+  } else if (pingModal.filterTier === "failed") {
+    list = list.filter(
+      (n) => n.effectiveLatency === null || n.effectiveLatency === undefined,
+    );
+  } else if (["fast", "medium", "slow"].includes(pingModal.filterTier)) {
+    list = list.filter((n) => n.status === pingModal.filterTier);
+  }
+
+  if (pingModal.searchQuery && pingModal.searchQuery.trim()) {
+    const q = pingModal.searchQuery.trim().toLowerCase();
+    list = list.filter(
+      (n) =>
+        (n.tag && n.tag.toLowerCase().includes(q)) ||
+        (n.server && n.server.toLowerCase().includes(q)) ||
+        (n.node_type && n.node_type.toLowerCase().includes(q)),
+    );
+  }
+
+  list.sort((a, b) => {
+    if (a.effectiveLatency === null && b.effectiveLatency === null) return 0;
+    if (a.effectiveLatency === null) return 1;
+    if (b.effectiveLatency === null) return -1;
+    return a.effectiveLatency - b.effectiveLatency;
+  });
+
+  return list;
+});
+
+const batchSelectFailedNodes = () => {
+  const source =
+    pingModal.results.length > 0
+      ? pingModal.results
+      : lastSpeedTestSummary.value?.results || [];
+  const failedIds = source
+    .filter(
+      (n) => n.effectiveLatency === null || n.effectiveLatency === undefined,
+    )
+    .map((n) => n.id);
+
+  if (failedIds.length === 0) {
+    showToast("未检测到超时节点", "info");
+    return;
+  }
+
+  selectedNodeIds.value = Array.from(
+    new Set([...selectedNodeIds.value, ...failedIds]),
+  );
+  showToast(
+    `已勾选 ${failedIds.length} 个超时节点，可直接执行批量删除或禁用`,
+    "success",
+  );
+};
+
+const retryFailedNodes = () => {
+  if (pingModal.isTesting) return;
+  const failedItems = pingModal.results.filter(
+    (n) => n.effectiveLatency === null || n.effectiveLatency === undefined,
+  );
+  if (failedItems.length === 0) {
+    showToast("当前没有失败或超时的节点", "info");
+    return;
+  }
+  const failedIds = failedItems.map((n) => n.id);
+  selectedNodeIds.value = [...failedIds];
+  pingModal.testRange = "selected";
+  startPingTests(true);
+};
+
+const copySpeedTestReport = async () => {
+  const stats = pingSummaryStats.value || lastSpeedTestSummary.value;
+  if (!stats) {
+    showToast("暂无测速数据可生成报告", "warning");
+    return;
+  }
+
+  const results =
+    pingModal.results.length > 0
+      ? pingModal.results
+      : lastSpeedTestSummary.value?.results || [];
+  const sorted = [...results].sort((a, b) => {
+    if (a.effectiveLatency === null && b.effectiveLatency === null) return 0;
+    if (a.effectiveLatency === null) return 1;
+    if (b.effectiveLatency === null) return -1;
+    return a.effectiveLatency - b.effectiveLatency;
+  });
+
+  const lines = [
+    "================【Subout 节点测速报告】================",
+    `测试时间: ${stats.time || new Date().toLocaleString()}`,
+    `目标网址: ${getEffectiveTargetUrl()}`,
+    `测试类型: ${
+      pingModal.testType === "web"
+        ? "网页延迟"
+        : pingModal.testType === "tcp"
+          ? "TCP 连通性"
+          : "TCP + 网页延迟"
+    }`,
+    `测试总数: ${stats.total} 个`,
+    `可用节点: ${stats.successCount} 个 (连通率: ${stats.successRate}%)`,
+    `超时节点: ${stats.failedCount} 个`,
+    `平均延迟: ${stats.avgLatency} ms`,
+    stats.fastest
+      ? `最优节点: ${stats.fastest.tag} (${
+          stats.fastest.latency || stats.fastest.effectiveLatency
+        } ms)`
+      : null,
+    "------------------ 延迟分布 ------------------",
+    `🚀 极速 (<100ms): ${stats.tiers.fast} 个`,
+    `⚡ 良好 (100-300ms): ${stats.tiers.medium} 个`,
+    `🐢 较慢 (300ms~超时阈值): ${stats.tiers.slow} 个`,
+    `❌ 超时 / 异常 (${
+      pingModal.testType === "tcp"
+        ? ">2000ms"
+        : pingModal.testType === "web"
+          ? ">5000ms"
+          : "TCP>2s / Web>5s"
+    }): ${stats.tiers.failed} 个`,
+    "------------------ 节点排行明细 ------------------",
+  ].filter(Boolean);
+
+  sorted.forEach((item, idx) => {
+    let latInfo = "";
+    if (item.web !== null && item.web !== undefined)
+      latInfo += `Web: ${item.web}ms`;
+    if (item.tcp !== null && item.tcp !== undefined) {
+      if (latInfo) latInfo += ", ";
+      latInfo += `TCP: ${item.tcp}ms`;
+    }
+    if (!latInfo) latInfo = "连接超时";
+    lines.push(`${idx + 1}. [${item.tag}] (${item.node_type}) - ${latInfo}`);
+  });
+  lines.push("=================================================");
+
+  const reportText = lines.join("\n");
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(reportText);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = reportText;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    showToast("测速报告已成功复制到剪贴板", "success");
+  } catch {
+    showToast("复制测速报告失败，请重试", "danger");
+  }
+};
+
+const exportSpeedTestCsv = () => {
+  const results =
+    pingModal.results.length > 0
+      ? pingModal.results
+      : lastSpeedTestSummary.value?.results || [];
+  if (results.length === 0) {
+    showToast("暂无可导出的测速结果", "warning");
+    return;
+  }
+
+  const sorted = [...results].sort((a, b) => {
+    if (a.effectiveLatency === null && b.effectiveLatency === null) return 0;
+    if (a.effectiveLatency === null) return 1;
+    if (b.effectiveLatency === null) return -1;
+    return a.effectiveLatency - b.effectiveLatency;
+  });
+
+  const headers = [
+    "排名",
+    "节点名称",
+    "协议",
+    "服务器",
+    "端口",
+    "TCP延迟(ms)",
+    "网页延迟(ms)",
+    "状态",
+  ];
+  const csvRows = [headers.join(",")];
+
+  sorted.forEach((item, idx) => {
+    const tcpStr =
+      item.tcp !== null && item.tcp !== undefined ? item.tcp : "超时(>2s)";
+    const webStr =
+      item.web !== null && item.web !== undefined ? item.web : "超时(>5s)";
+    let statusStr = "超时";
+    if (item.status === "fast") statusStr = "极速(<100ms)";
+    else if (item.status === "medium") statusStr = "良好(100-300ms)";
+    else if (item.status === "slow") statusStr = "较慢(300ms~超时)";
+    else statusStr = item.effectiveLatency === null ? "超时" : "异常";
+
+    const row = [
+      idx + 1,
+      `"${(item.tag || "").replace(/"/g, '""')}"`,
+      item.node_type || "",
+      `"${item.server || ""}"`,
+      item.port || "",
+      tcpStr,
+      webStr,
+      statusStr,
+    ];
+    csvRows.push(row.join(","));
+  });
+
+  const csvString = "\uFEFF" + csvRows.join("\r\n");
+  const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:T]/g, "")
+    .slice(0, 14);
+  a.href = url;
+  a.download = `subout_speedtest_${timestamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast("测速结果已成功导出为 CSV", "success");
+};
+
+const filterAvailableInTable = () => {
+  webFilter.value = "success";
+  closePingModal();
+  loadNodes();
+  showToast("已应用筛选: 仅显示可用节点");
+};
+
+const openPingModalWithSummary = () => {
+  openPingModal();
+  pingModal.activeTab = "summary";
+};
+
+const loadGlobalSpeedSummary = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/api/nodes/speed-summary`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.tested_nodes > 0) {
+        lastSpeedTestSummary.value = {
+          total: data.total_nodes,
+          successCount: data.available_nodes,
+          failedCount: data.failed_nodes,
+          successRate: data.availability_rate.toFixed(1),
+          avgLatency: data.avg_web_latency || data.avg_tcp_latency || 0,
+          fastest: data.fastest_node
+            ? {
+                tag: data.fastest_node.tag,
+                effectiveLatency: data.fastest_node.latency,
+                latency: data.fastest_node.latency,
+                node_type: data.fastest_node.node_type,
+              }
+            : null,
+          time: data.last_tested_at
+            ? data.last_tested_at.split(" ")[1] || data.last_tested_at
+            : "历史记录",
+          tiers: {
+            fast: data.web_tiers?.fast || data.tcp_tiers?.fast || 0,
+            medium: data.web_tiers?.medium || data.tcp_tiers?.medium || 0,
+            slow: data.web_tiers?.slow || data.tcp_tiers?.slow || 0,
+            failed: data.failed_nodes || 0,
+          },
+          fromApi: true,
+        };
+      }
+    }
+  } catch {}
+};
 
 const getEffectiveTargetUrl = () => {
   if (pingModal.targetUrlSelect === "custom") {
@@ -2403,10 +3202,13 @@ const openPingModal = async () => {
   pingModal.targetUrlSelect = "http://www.gstatic.com/generate_204";
   pingModal.customTargetUrl = "";
   pingModal.isTesting = false;
-  pingModal.progress = 0;
-  pingModal.total = 0;
-  pingModal.logs = [];
-  pingModal.statusMap = {};
+  if (pingModal.results.length === 0) {
+    pingModal.progress = 0;
+    pingModal.total = 0;
+    pingModal.logs = [];
+    pingModal.statusMap = {};
+    pingModal.activeTab = "summary";
+  }
   pingModal.show = true;
   loadAllNodesForSelect();
   fetchServiceStatus();
@@ -2609,6 +3411,12 @@ const startPingTests = async (bypassTunCheck = false) => {
   pingModal.isTesting = true;
   pingModal.progress = 0;
   pingModal.total = targetNodeIds.length;
+  pingModal.results = [];
+  pingModal.activeTab = "summary";
+  pingModal.filterTier = "all";
+  pingModal.searchQuery = "";
+  pingModal.completedAt = null;
+
   if (!systemModeInfo.value.kernel_installed) {
     pingModal.logs = [
       "开始测试 (未检测到 sing-box 内核，已跳过真实网页测速，仅测试传输层连通性)...",
@@ -2654,6 +3462,35 @@ const startPingTests = async (bypassTunCheck = false) => {
     const node = allNodesListForSelect.value.find((n) => n.id === id) ||
       nodes.value.find((n) => n.id === id) || { tag: `节点 #${id}` };
 
+    const recordResult = (tcpVal, webVal) => {
+      let effectiveLat = null;
+      if (webVal !== null && webVal !== undefined) {
+        effectiveLat = webVal;
+      } else if (tcpVal !== null && tcpVal !== undefined) {
+        effectiveLat = tcpVal;
+      }
+
+      let status = "failed";
+      if (effectiveLat !== null) {
+        if (effectiveLat < 100) status = "fast";
+        else if (effectiveLat <= 300) status = "medium";
+        else status = "slow";
+      }
+
+      pingModal.results.push({
+        id,
+        tag: node.tag,
+        node_type: node.node_type || "unknown",
+        server: node.server || "",
+        port: node.port || 0,
+        tcp: tcpVal,
+        web: webVal,
+        effectiveLatency: effectiveLat,
+        latency: effectiveLat,
+        status,
+      });
+    };
+
     pingModal.logs.push(`正在测试 [${node.tag}] ...`);
 
     try {
@@ -2684,11 +3521,15 @@ const startPingTests = async (bypassTunCheck = false) => {
           if (pingModal.testType === "both") {
             const tcp = item.tcp_latency;
             const web = item.web_latency;
+            const tcpVal = tcp !== undefined && tcp !== null ? tcp : null;
+            const webVal = web !== undefined && web !== null ? web : null;
             latencyMap.value[id] = {
-              tcp: tcp !== undefined && tcp !== null ? tcp : null,
-              web: web !== undefined && web !== null ? web : null,
+              tcp: tcpVal,
+              web: webVal,
               target_url: targetUrl,
             };
+            recordResult(tcpVal, webVal);
+
             if (tcp !== undefined && tcp !== null) {
               if (web !== undefined && web !== null) {
                 pingModal.statusMap[id] = web;
@@ -2717,15 +3558,19 @@ const startPingTests = async (bypassTunCheck = false) => {
             }
           } else if (pingModal.testType === "web") {
             const latency = item.latency;
+            const webVal =
+              latency !== undefined && latency !== null ? latency : null;
             const latObj =
               latencyMap.value[id] && typeof latencyMap.value[id] === "object"
                 ? latencyMap.value[id]
                 : {};
             latencyMap.value[id] = {
               ...latObj,
-              web: latency !== undefined && latency !== null ? latency : null,
+              web: webVal,
               target_url: targetUrl,
             };
+            recordResult(null, webVal);
+
             if (latency !== undefined && latency !== null) {
               pingModal.statusMap[id] = latency;
               pingModal.logs.push(`[${node.tag}] 网页延迟: ${latency}ms`);
@@ -2735,14 +3580,18 @@ const startPingTests = async (bypassTunCheck = false) => {
             }
           } else {
             const latency = item.latency;
+            const tcpVal =
+              latency !== undefined && latency !== null ? latency : null;
             const latObj =
               latencyMap.value[id] && typeof latencyMap.value[id] === "object"
                 ? latencyMap.value[id]
                 : {};
             latencyMap.value[id] = {
               ...latObj,
-              tcp: latency !== undefined && latency !== null ? latency : null,
+              tcp: tcpVal,
             };
+            recordResult(tcpVal, null);
+
             if (latency !== undefined && latency !== null) {
               pingModal.statusMap[id] = latency;
               pingModal.logs.push(`[${node.tag}] TCP 延迟: ${latency}ms`);
@@ -2754,11 +3603,13 @@ const startPingTests = async (bypassTunCheck = false) => {
         } else {
           pingModal.statusMap[id] = "failed";
           setFailedStatus(id);
+          recordResult(null, null);
           pingModal.logs.push(`[${node.tag}] 接口未返回数据`);
         }
       } else {
         pingModal.statusMap[id] = "failed";
         setFailedStatus(id);
+        recordResult(null, null);
         const errText = await res.text();
         pingModal.logs.push(
           `[${node.tag}] ${errText || `接口错误 (${res.status})`}`,
@@ -2771,6 +3622,7 @@ const startPingTests = async (bypassTunCheck = false) => {
       }
       pingModal.statusMap[id] = "failed";
       setFailedStatus(id);
+      recordResult(null, null);
       pingModal.logs.push(`[${node.tag}] 网络错误: ${e.message || e}`);
     } finally {
       activeCount--;
@@ -2779,7 +3631,20 @@ const startPingTests = async (bypassTunCheck = false) => {
         runNext();
       } else if (activeCount === 0) {
         pingModal.isTesting = false;
+        pingModal.completedAt = new Date().toLocaleTimeString();
         pingModal.logs.push("测试完成。");
+
+        if (pingSummaryStats.value) {
+          lastSpeedTestSummary.value = {
+            ...pingSummaryStats.value,
+            time: pingModal.completedAt,
+            results: [...pingModal.results],
+            testType: pingModal.testType,
+            targetUrl,
+          };
+          showSummaryBanner.value = true;
+        }
+
         loadNodes();
       }
     }
@@ -2794,5 +3659,270 @@ const startPingTests = async (bypassTunCheck = false) => {
 onMounted(() => {
   loadNodes();
   loadSubscriptions();
+  loadGlobalSpeedSummary();
 });
 </script>
+
+<style scoped>
+/* Speed test banner on main page */
+.speed-test-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+.speed-test-banner.is-testing {
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.25);
+}
+.banner-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.banner-badge {
+  font-weight: 600;
+  color: var(--primary);
+}
+.banner-time {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.banner-stat {
+  color: var(--text-color);
+}
+.banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.banner-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 0.3rem;
+  line-height: 1;
+}
+.banner-close-btn:hover {
+  color: var(--text-color);
+}
+
+/* Modal tabs */
+.ping-tabs-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+}
+.ping-tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.15s;
+}
+.ping-tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+.ping-tab-btn.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: var(--primary);
+  font-weight: 600;
+}
+.tab-badge {
+  background: var(--primary);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+}
+
+/* Metric Cards */
+.metric-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+}
+.metric-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+.metric-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-main);
+  line-height: 1.2;
+}
+.metric-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+.metric-card.success .metric-value {
+  color: var(--success);
+}
+.metric-card.danger .metric-value.text-danger {
+  color: var(--danger);
+}
+.metric-card.info .metric-value {
+  color: var(--info);
+}
+.metric-card.primary .metric-value {
+  color: var(--primary);
+}
+
+/* Distribution Bar */
+.distribution-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+.distribution-bar {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  display: flex;
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+}
+.dist-seg {
+  height: 100%;
+  transition: width 0.3s;
+}
+.seg-fast {
+  background: var(--success);
+}
+.seg-medium {
+  background: var(--info);
+}
+.seg-slow {
+  background: var(--warning);
+}
+.seg-failed {
+  background: var(--danger);
+}
+
+.tier-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.tier-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tier-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+}
+.tier-chip.active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Actions bar */
+.summary-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+/* Ranked results table */
+.ranked-results-section {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.ranked-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-color);
+}
+.ranked-table-wrapper {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.ranked-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.ranked-table th,
+.ranked-table td {
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border-color);
+}
+.ranked-table th {
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.ranked-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.badge-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+}
+.badge-info {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--info);
+}
+.badge-warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+}
+.badge-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}
+</style>
+

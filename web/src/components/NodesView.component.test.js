@@ -755,4 +755,227 @@ describe("NodesView - 节点池管理", () => {
       expect(pingCall).toBeDefined();
     });
   });
+
+  describe("节点测速结果汇总与统计展示", () => {
+    it("测速完成后在结果汇总 Tab 中展示指标卡片与最优节点", async () => {
+      const wrapper = await mountNodesView();
+      wrapper.vm.pingModal.show = true;
+      wrapper.vm.pingModal.results = [
+        {
+          id: 1,
+          tag: "极速节点",
+          node_type: "vless",
+          server: "1.1.1.1",
+          port: 443,
+          tcp: 45,
+          web: 60,
+          effectiveLatency: 60,
+          status: "fast",
+        },
+        {
+          id: 2,
+          tag: "良好节点",
+          node_type: "vmess",
+          server: "2.2.2.2",
+          port: 8080,
+          tcp: 120,
+          web: 160,
+          effectiveLatency: 160,
+          status: "medium",
+        },
+        {
+          id: 3,
+          tag: "较慢节点",
+          node_type: "ss",
+          server: "3.3.3.3",
+          port: 8388,
+          tcp: 320,
+          web: 380,
+          effectiveLatency: 380,
+          status: "slow",
+        },
+        {
+          id: 4,
+          tag: "超时节点",
+          node_type: "trojan",
+          server: "4.4.4.4",
+          port: 443,
+          tcp: null,
+          web: null,
+          effectiveLatency: null,
+          status: "failed",
+        },
+      ];
+      wrapper.vm.pingModal.activeTab = "summary";
+      await flushPromises();
+
+      const stats = wrapper.vm.pingSummaryStats;
+      expect(stats).not.toBeNull();
+      expect(stats.total).toBe(4);
+      expect(stats.successCount).toBe(3);
+      expect(stats.failedCount).toBe(1);
+      expect(stats.successRate).toBe("75.0");
+      expect(stats.avgLatency).toBe(Math.round((60 + 160 + 380) / 3)); // 200
+      expect(stats.fastest.tag).toBe("极速节点");
+      expect(stats.tiers).toEqual({
+        fast: 1,
+        medium: 1,
+        slow: 1,
+        failed: 1,
+      });
+
+      const text = wrapper.text();
+      expect(text).toContain("已测总数");
+      expect(text).toContain("可用节点");
+      expect(text).toContain("超时 / 异常");
+      expect(text).toContain("连通率 75.0%");
+      expect(text).toContain("极速节点");
+    });
+
+    it("分档芯片切换正常过滤测试排行列表", async () => {
+      const wrapper = await mountNodesView();
+      wrapper.vm.pingModal.show = true;
+      wrapper.vm.pingModal.results = [
+        { id: 1, tag: "N1", node_type: "vless", effectiveLatency: 50, status: "fast" },
+        { id: 2, tag: "N2", node_type: "vmess", effectiveLatency: 150, status: "medium" },
+        { id: 3, tag: "N3", node_type: "ss", effectiveLatency: 350, status: "slow" },
+        { id: 4, tag: "N4", node_type: "trojan", effectiveLatency: null, status: "failed" },
+      ];
+      wrapper.vm.pingModal.activeTab = "summary";
+      await flushPromises();
+
+      expect(wrapper.vm.filteredPingResults.length).toBe(4);
+
+      wrapper.vm.pingModal.filterTier = "fast";
+      expect(wrapper.vm.filteredPingResults.length).toBe(1);
+      expect(wrapper.vm.filteredPingResults[0].tag).toBe("N1");
+
+      wrapper.vm.pingModal.filterTier = "medium";
+      expect(wrapper.vm.filteredPingResults.length).toBe(1);
+      expect(wrapper.vm.filteredPingResults[0].tag).toBe("N2");
+
+      wrapper.vm.pingModal.filterTier = "slow";
+      expect(wrapper.vm.filteredPingResults.length).toBe(1);
+      expect(wrapper.vm.filteredPingResults[0].tag).toBe("N3");
+
+      wrapper.vm.pingModal.filterTier = "failed";
+      expect(wrapper.vm.filteredPingResults.length).toBe(1);
+      expect(wrapper.vm.filteredPingResults[0].tag).toBe("N4");
+
+      wrapper.vm.pingModal.filterTier = "success";
+      expect(wrapper.vm.filteredPingResults.length).toBe(3);
+    });
+
+    it("一键勾选超时节点功能生效", async () => {
+      const wrapper = await mountNodesView();
+      wrapper.vm.pingModal.show = true;
+      wrapper.vm.pingModal.results = [
+        { id: 1, tag: "有效节点", effectiveLatency: 60, status: "fast" },
+        { id: 2, tag: "超时节点A", effectiveLatency: null, status: "failed" },
+        { id: 3, tag: "超时节点B", effectiveLatency: null, status: "failed" },
+      ];
+      wrapper.vm.pingModal.activeTab = "summary";
+      await flushPromises();
+
+      wrapper.vm.batchSelectFailedNodes();
+      expect(wrapper.vm.selectedNodeIds).toEqual([2, 3]);
+      expect(mockShowToast).toHaveBeenCalledWith("已勾选 2 个超时节点，可直接执行批量删除或禁用", "success");
+    });
+
+    it("复制测速报告与导出 CSV 正常工作", async () => {
+      const wrapper = await mountNodesView();
+      wrapper.vm.pingModal.show = true;
+      wrapper.vm.pingModal.results = [
+        {
+          id: 1,
+          tag: "极速节点",
+          node_type: "vless",
+          server: "1.1.1.1",
+          port: 443,
+          tcp: 50,
+          web: 80,
+          effectiveLatency: 80,
+          status: "fast",
+        },
+      ];
+      wrapper.vm.pingModal.activeTab = "summary";
+      await flushPromises();
+
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: { writeText: writeTextMock },
+      });
+
+      await wrapper.vm.copySpeedTestReport();
+      expect(writeTextMock).toHaveBeenCalled();
+      const reportArg = writeTextMock.mock.calls[0][0];
+      expect(reportArg).toContain("Subout 节点测速报告");
+      expect(reportArg).toContain("极速节点");
+      expect(mockShowToast).toHaveBeenCalledWith("测速报告已成功复制到剪贴板", "success");
+
+      // 测试导出 CSV
+      const createObjectURLMock = vi.fn(() => "blob:mock-csv-url");
+      const revokeObjectURLMock = vi.fn();
+      global.URL.createObjectURL = createObjectURLMock;
+      global.URL.revokeObjectURL = revokeObjectURLMock;
+
+      wrapper.vm.exportSpeedTestCsv();
+      expect(createObjectURLMock).toHaveBeenCalled();
+    });
+
+    it("主界面顶部测速汇总横条展示与点击查看详情", async () => {
+      const wrapper = await mountNodesView();
+      wrapper.vm.lastSpeedTestSummary = {
+        total: 10,
+        successCount: 8,
+        failedCount: 2,
+        successRate: "80.0",
+        avgLatency: 145,
+        fastest: { tag: "东京专线", latency: 42 },
+        time: "12:00:00",
+        tiers: { fast: 3, medium: 4, slow: 1, failed: 2 },
+      };
+      await flushPromises();
+
+      const banner = wrapper.find(".speed-test-banner");
+      expect(banner.exists()).toBe(true);
+      expect(banner.text()).toContain("测速汇总");
+      expect(banner.text()).toContain("可用 8 个 (80.0%)");
+      expect(banner.text()).toContain("145 ms");
+      expect(banner.text()).toContain("东京专线");
+
+      // 点击查看完整报告按钮
+      const detailBtn = banner
+        .findAll("button")
+        .find((b) => b.text().includes("查看完整报告"));
+      expect(detailBtn).toBeDefined();
+      await detailBtn.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.vm.pingModal.show).toBe(true);
+      expect(wrapper.vm.pingModal.activeTab).toBe("summary");
+    });
+
+    it("TCP 和网页延迟下拉筛选框选项包含精确闭合区间与超时时间阈值", async () => {
+      const wrapper = await mountNodesView();
+      const selects = wrapper.findAll("select");
+      const tcpSelect = selects.find((s) => s.text().includes("TCP: 全部"));
+      const webSelect = selects.find((s) => s.text().includes("网页: 全部"));
+
+      expect(tcpSelect).toBeDefined();
+      expect(webSelect).toBeDefined();
+
+      const tcpOptions = tcpSelect.findAll("option").map((o) => o.text());
+      expect(tcpOptions).toContain("🚀 高速 (<100ms)");
+      expect(tcpOptions).toContain("⚡ 中等 (100-300ms)");
+      expect(tcpOptions).toContain("🐢 高延迟 (300-2000ms)");
+      expect(tcpOptions).toContain("❌ 超时 (>2000ms)");
+
+      const webOptions = webSelect.findAll("option").map((o) => o.text());
+      expect(webOptions).toContain("🚀 高速 (<100ms)");
+      expect(webOptions).toContain("⚡ 中等 (100-300ms)");
+      expect(webOptions).toContain("🐢 高延迟 (300-5000ms)");
+      expect(webOptions).toContain("❌ 超时 (>5000ms)");
+    });
+  });
 });

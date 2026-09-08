@@ -703,6 +703,17 @@ pub async fn ping_nodes(
     Ok(Json(results))
 }
 
+pub async fn get_speed_test_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<db::SpeedTestSummary>, StatusCode> {
+    check_auth(&state, &headers).await?;
+    let conn = get_db_conn(&state.db_path)?;
+    let summary = db::get_nodes_speed_summary(&conn)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(summary))
+}
+
 #[derive(Deserialize)]
 pub struct SiteTestRequest {
     pub url: String,
@@ -808,3 +819,52 @@ pub async fn test_site_reachability(
         error: Some("网络无法在 10 秒内连通目标网站，请确认外部代理软件已正常连接".to_string()),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_udp_protocol() {
+        assert!(is_udp_protocol("hysteria2"));
+        assert!(is_udp_protocol("HYSTERIA2"));
+        assert!(is_udp_protocol("hysteria"));
+        assert!(is_udp_protocol("tuic"));
+        assert!(is_udp_protocol("wireguard"));
+
+        assert!(!is_udp_protocol("vless"));
+        assert!(!is_udp_protocol("vmess"));
+        assert!(!is_udp_protocol("trojan"));
+        assert!(!is_udp_protocol("shadowsocks"));
+        assert!(!is_udp_protocol("direct"));
+    }
+
+    #[test]
+    fn test_validate_node_json_valid() {
+        let valid_json = serde_json::json!({
+            "type": "vless",
+            "tag": "node-1",
+            "server": "1.2.3.4",
+            "server_port": 443
+        })
+        .to_string();
+
+        let res = validate_node_json("node-1", "vless", "1.2.3.4", 443, &valid_json);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_validate_node_json_mismatched_server() {
+        let json = serde_json::json!({
+            "type": "vless",
+            "tag": "node-1",
+            "server": "5.6.7.8",
+            "server_port": 443
+        })
+        .to_string();
+
+        let res = validate_node_json("node-1", "vless", "1.2.3.4", 443, &json);
+        assert!(res.is_err());
+    }
+}
+
