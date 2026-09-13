@@ -74,3 +74,37 @@ pub struct ConfigHistory {
     #[serde(default)]
     pub updated_at: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct LatencyTierCount {
+    pub fast: i64,
+    pub medium: i64,
+    pub slow: i64,
+    pub failed: i64,
+    pub untested: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct FastestNodeInfo {
+    pub id: i64,
+    pub tag: String,
+    pub latency: u64,
+    pub node_type: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SpeedTestSummary {
+    pub total_nodes: i64,
+    pub tested_nodes: i64,
+    pub available_nodes: i64,
+    pub failed_nodes: i64,
+    pub untested_nodes: i64,
+    pub availability_rate: f64,
+    pub avg_web_latency: Option<u64>,
+    pub avg_tcp_latency: Option<u64>,
+    pub fastest_node: Option<FastestNodeInfo>,
+    pub web_tiers: LatencyTierCount,
+    pub tcp_tiers: LatencyTierCount,
+    pub last_tested_at: Option<String>,
+}
+

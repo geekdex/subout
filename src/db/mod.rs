@@ -3,7 +3,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 pub mod models;
-pub use models::{ConfigHistory, Node, NodesPage, OutboundGroup, Settings, Subscription};
+pub use models::{
+    ConfigHistory, FastestNodeInfo, LatencyTierCount, Node, NodesPage, OutboundGroup, Settings,
+    SpeedTestSummary, Subscription,
+};
 
 pub fn hash_password(password: &str) -> String {
     let mut hasher = Sha256::new();
@@ -929,3 +932,236 @@ pub fn get_config_history_detail(conn: &Connection, id: i64) -> Result<Option<Co
         Ok(None)
     }
 }
+
+pub fn get_nodes_speed_summary(conn: &Connection) -> Result<SpeedTestSummary> {
+    let mut stmt = conn.prepare(
+        "SELECT id, tag, node_type, last_tcp_latency, last_web_latency, last_tested_at FROM nodes"
+    )?;
+
+    let mut total_nodes = 0i64;
+    let mut tested_nodes = 0i64;
+    let mut available_nodes = 0i64;
+    let mut failed_nodes = 0i64;
+    let mut untested_nodes = 0i64;
+
+    let mut sum_web = 0u64;
+    let mut count_web = 0u64;
+    let mut sum_tcp = 0u64;
+    let mut count_tcp = 0u64;
+
+    let mut fastest: Option<FastestNodeInfo> = None;
+    let mut max_tested_at: Option<String> = None;
+
+    let mut web_tiers = LatencyTierCount {
+        fast: 0,
+        medium: 0,
+        slow: 0,
+        failed: 0,
+        untested: 0,
+    };
+    let mut tcp_tiers = LatencyTierCount {
+        fast: 0,
+        medium: 0,
+        slow: 0,
+        failed: 0,
+        untested: 0,
+    };
+
+    let rows = stmt.query_map([], |row| {
+        let id: i64 = row.get(0)?;
+        let tag: String = row.get(1)?;
+        let node_type: String = row.get(2)?;
+        let tcp: Option<i64> = row.get(3)?;
+        let web: Option<i64> = row.get(4)?;
+        let tested_at: Option<String> = row.get(5)?;
+        Ok((id, tag, node_type, tcp, web, tested_at))
+    })?;
+
+    for r in rows {
+        let (id, tag, node_type, tcp, web, tested_at) = r?;
+        total_nodes += 1;
+
+        if let Some(t) = tested_at
+            && max_tested_at.as_ref().is_none_or(|curr| t > *curr)
+        {
+            max_tested_at = Some(t);
+        }
+
+        let is_tested = tcp.is_some() || web.is_some();
+        if !is_tested {
+            untested_nodes += 1;
+            web_tiers.untested += 1;
+            tcp_tiers.untested += 1;
+            continue;
+        }
+
+        tested_nodes += 1;
+
+        // Process TCP
+        match tcp {
+            Some(v) if v > 0 => {
+                let v_u64 = v as u64;
+                sum_tcp += v_u64;
+                count_tcp += 1;
+                if v < 100 {
+                    tcp_tiers.fast += 1;
+                } else if v <= 300 {
+                    tcp_tiers.medium += 1;
+                } else {
+                    tcp_tiers.slow += 1;
+                }
+            }
+            Some(_) => {
+                tcp_tiers.failed += 1;
+            }
+            None => {
+                tcp_tiers.untested += 1;
+            }
+        }
+
+        // Process Web
+        match web {
+            Some(v) if v > 0 => {
+                let v_u64 = v as u64;
+                sum_web += v_u64;
+                count_web += 1;
+                if v < 100 {
+                    web_tiers.fast += 1;
+                } else if v <= 300 {
+                    web_tiers.medium += 1;
+                } else {
+                    web_tiers.slow += 1;
+                }
+            }
+            Some(_) => {
+                web_tiers.failed += 1;
+            }
+            None => {
+                web_tiers.untested += 1;
+            }
+        }
+
+        // Overall availability: available if either web > 0 or tcp > 0
+        let web_ok = web.is_some_and(|v| v > 0);
+        let tcp_ok = tcp.is_some_and(|v| v > 0);
+
+        if web_ok || tcp_ok {
+            available_nodes += 1;
+            let effective_lat = if web_ok {
+                web.unwrap_or(0) as u64
+            } else {
+                tcp.unwrap_or(0) as u64
+            };
+            if fastest.as_ref().is_none_or(|f| effective_lat < f.latency) {
+                fastest = Some(FastestNodeInfo {
+                    id,
+                    tag,
+                    latency: effective_lat,
+                    node_type,
+                });
+            }
+        } else {
+            failed_nodes += 1;
+        }
+    }
+
+    let availability_rate = if tested_nodes > 0 {
+        ((available_nodes as f64 / tested_nodes as f64) * 1000.0).round() / 10.0
+    } else {
+        0.0
+    };
+
+    let avg_web_latency = sum_web.checked_div(count_web);
+    let avg_tcp_latency = sum_tcp.checked_div(count_tcp);
+
+    Ok(SpeedTestSummary {
+        total_nodes,
+        tested_nodes,
+        available_nodes,
+        failed_nodes,
+        untested_nodes,
+        availability_rate,
+        avg_web_latency,
+        avg_tcp_latency,
+        fastest_node: fastest,
+        web_tiers,
+        tcp_tiers,
+        last_tested_at: max_tested_at,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_speed_test_summary_empty() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        let summary = get_nodes_speed_summary(&conn).unwrap();
+        assert_eq!(summary.total_nodes, 0);
+        assert_eq!(summary.tested_nodes, 0);
+        assert_eq!(summary.available_nodes, 0);
+        assert_eq!(summary.failed_nodes, 0);
+        assert_eq!(summary.untested_nodes, 0);
+        assert_eq!(summary.availability_rate, 0.0);
+        assert_eq!(summary.avg_web_latency, None);
+        assert_eq!(summary.avg_tcp_latency, None);
+        assert_eq!(summary.fastest_node, None);
+    }
+
+    #[test]
+    fn test_speed_test_summary_with_nodes() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        // Node 1: Fast (tcp 40ms, web 60ms)
+        save_node(&conn, None, "node1", "vless", "1.1.1.1", 443, "{}", true, true).unwrap();
+        update_node_ping_result(&conn, 1, Some(40), Some(60), "2026-09-08 10:00:00", Some("http://test.com")).unwrap();
+
+        // Node 2: Medium (tcp 120ms, web 180ms)
+        save_node(&conn, None, "node2", "vmess", "2.2.2.2", 443, "{}", true, true).unwrap();
+        update_node_ping_result(&conn, 2, Some(120), Some(180), "2026-09-08 10:01:00", Some("http://test.com")).unwrap();
+
+        // Node 3: Slow (tcp 350ms, web 420ms)
+        save_node(&conn, None, "node3", "trojan", "3.3.3.3", 443, "{}", true, true).unwrap();
+        update_node_ping_result(&conn, 3, Some(350), Some(420), "2026-09-08 10:02:00", Some("http://test.com")).unwrap();
+
+        // Node 4: Timeout (-1, -1)
+        save_node(&conn, None, "node4", "ss", "4.4.4.4", 443, "{}", true, true).unwrap();
+        update_node_ping_result(&conn, 4, Some(-1), Some(-1), "2026-09-08 10:03:00", Some("http://test.com")).unwrap();
+
+        // Node 5: Untested
+        save_node(&conn, None, "node5", "hysteria2", "5.5.5.5", 443, "{}", true, true).unwrap();
+
+        let summary = get_nodes_speed_summary(&conn).unwrap();
+        assert_eq!(summary.total_nodes, 5);
+        assert_eq!(summary.tested_nodes, 4);
+        assert_eq!(summary.available_nodes, 3);
+        assert_eq!(summary.failed_nodes, 1);
+        assert_eq!(summary.untested_nodes, 1);
+        assert_eq!(summary.availability_rate, 75.0); // 3 / 4 = 75.0%
+
+        // Web avg: (60 + 180 + 420) / 3 = 660 / 3 = 220
+        assert_eq!(summary.avg_web_latency, Some(220));
+        // TCP avg: (40 + 120 + 350) / 3 = 510 / 3 = 170
+        assert_eq!(summary.avg_tcp_latency, Some(170));
+
+        // Fastest node should be node1 with 60ms web latency
+        let fastest = summary.fastest_node.unwrap();
+        assert_eq!(fastest.id, 1);
+        assert_eq!(fastest.tag, "node1");
+        assert_eq!(fastest.latency, 60);
+
+        // Tiers
+        assert_eq!(summary.web_tiers.fast, 1);
+        assert_eq!(summary.web_tiers.medium, 1);
+        assert_eq!(summary.web_tiers.slow, 1);
+        assert_eq!(summary.web_tiers.failed, 1);
+        assert_eq!(summary.web_tiers.untested, 1);
+
+        assert_eq!(summary.last_tested_at, Some("2026-09-08 10:03:00".to_string()));
+    }
+}
+

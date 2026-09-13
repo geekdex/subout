@@ -153,6 +153,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         )
         .route("/api/nodes/batch-delete", post(nodes::batch_delete_nodes))
         .route("/api/nodes/ping", post(nodes::ping_nodes))
+        .route(
+            "/api/nodes/speed-summary",
+            get(nodes::get_speed_test_summary),
+        )
         .route("/api/nodes/site-test", post(nodes::test_site_reachability))
         // Outbound Groups
         .route(
