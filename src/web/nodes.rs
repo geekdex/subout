@@ -719,13 +719,21 @@ pub struct SiteTestRequest {
     pub url: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SiteTestResponse {
     pub url: String,
     pub status_code: Option<u16>,
     pub latency: Option<u64>,
     pub success: bool,
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns_rule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns_server: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_rule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outbound: Option<String>,
 }
 
 async fn try_fetch_url(client: &reqwest::Client, url: &str) -> Option<(u16, u64)> {
@@ -754,8 +762,24 @@ pub async fn test_site_reachability(
             latency: None,
             success: false,
             error: Some("网址不能为空".to_string()),
+            dns_rule: None,
+            dns_server: None,
+            route_rule: None,
+            outbound: None,
         }));
     }
+
+    // Evaluate DNS and Route rule matching against active sing-box configuration
+    let trace_info = crate::rule_matcher::evaluate_site_trace(&state, &url);
+    let (dns_rule, dns_server, route_rule, outbound) = match trace_info {
+        Some(t) => (
+            Some(t.dns_rule),
+            Some(t.dns_server),
+            Some(t.route_rule),
+            Some(t.outbound),
+        ),
+        None => (None, None, None, None),
+    };
 
     let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -774,6 +798,10 @@ pub async fn test_site_reachability(
             latency: Some(elapsed),
             success,
             error: None,
+            dns_rule,
+            dns_server,
+            route_rule,
+            outbound,
         }));
     }
 
@@ -807,6 +835,10 @@ pub async fn test_site_reachability(
                 latency: Some(elapsed),
                 success,
                 error: None,
+                dns_rule,
+                dns_server,
+                route_rule,
+                outbound,
             }));
         }
     }
@@ -817,6 +849,10 @@ pub async fn test_site_reachability(
         latency: None,
         success: false,
         error: Some("网络无法在 10 秒内连通目标网站，请确认外部代理软件已正常连接".to_string()),
+        dns_rule,
+        dns_server,
+        route_rule,
+        outbound,
     }))
 }
 
