@@ -127,25 +127,46 @@
             danger: !customResult.success,
           }"
         >
-          <div class="result-left">
-            <span
-              class="result-status-tag"
-              :class="customResult.success ? 'tag-success' : 'tag-danger'"
-            >
-              {{ customResult.success ? "访问成功" : "访问失败" }}
-            </span>
-            <span class="result-url">{{ customResult.url }}</span>
+          <div class="result-top">
+            <div class="result-left">
+              <span
+                class="result-status-tag"
+                :class="customResult.success ? 'tag-success' : 'tag-danger'"
+              >
+                {{ customResult.success ? "访问成功" : "访问失败" }}
+              </span>
+              <span class="result-url">{{ customResult.url }}</span>
+            </div>
+            <div class="result-right">
+              <span v-if="customResult.status_code" class="result-info"
+                >HTTP {{ customResult.status_code }}</span
+              >
+              <span v-if="customResult.latency !== null" class="result-info"
+                >{{ customResult.latency }} ms</span
+              >
+              <span v-if="customResult.error" class="result-error">{{
+                customResult.error
+              }}</span>
+            </div>
           </div>
-          <div class="result-right">
-            <span v-if="customResult.status_code" class="result-info"
-              >HTTP {{ customResult.status_code }}</span
-            >
-            <span v-if="customResult.latency !== null" class="result-info"
-              >{{ customResult.latency }} ms</span
-            >
-            <span v-if="customResult.error" class="result-error">{{
-              customResult.error
-            }}</span>
+
+          <!-- Trace Info for Custom URL -->
+          <div
+            v-if="customResult.dns_rule || customResult.route_rule"
+            class="custom-trace-details"
+          >
+            <div v-if="customResult.dns_rule" class="custom-trace-item">
+              <span class="custom-trace-badge dns-badge">DNS 规则</span>
+              <span class="custom-trace-rule">{{ customResult.dns_rule }}</span>
+              <span class="custom-trace-arrow">➔</span>
+              <span class="custom-trace-server">{{ customResult.dns_server || "默认服务" }}</span>
+            </div>
+            <div v-if="customResult.route_rule" class="custom-trace-item">
+              <span class="custom-trace-badge route-badge">请求出口</span>
+              <span class="custom-trace-rule">{{ customResult.route_rule }}</span>
+              <span class="custom-trace-arrow">➔</span>
+              <span class="custom-trace-outbound">{{ customResult.outbound || "默认出站" }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -223,6 +244,38 @@
                   </span>
                 </span>
                 <span v-else class="metric-value text-muted">--</span>
+              </div>
+            </div>
+
+            <!-- Route & DNS Trace Information -->
+            <div
+              v-if="site.result && (site.result.dns_rule || site.result.route_rule)"
+              class="site-trace-box"
+            >
+              <div
+                v-if="site.result.dns_rule"
+                class="site-trace-row"
+                :title="`DNS 规则: ${site.result.dns_rule} ➔ ${site.result.dns_server || ''}`"
+              >
+                <span class="trace-tag-pill trace-dns-pill">DNS</span>
+                <span class="trace-text">
+                  <span class="trace-rule-part">{{ site.result.dns_rule }}</span>
+                  <span v-if="site.result.dns_server" class="trace-sep">➔</span>
+                  <span v-if="site.result.dns_server" class="trace-target-part">{{ site.result.dns_server }}</span>
+                </span>
+              </div>
+
+              <div
+                v-if="site.result.route_rule"
+                class="site-trace-row"
+                :title="`路由出口: ${site.result.route_rule} ➔ ${site.result.outbound || ''}`"
+              >
+                <span class="trace-tag-pill trace-route-pill">出口</span>
+                <span class="trace-text">
+                  <span class="trace-rule-part">{{ site.result.route_rule }}</span>
+                  <span v-if="site.result.outbound" class="trace-sep">➔</span>
+                  <span v-if="site.result.outbound" class="trace-target-part trace-highlight">{{ site.result.outbound }}</span>
+                </span>
               </div>
             </div>
 
@@ -665,11 +718,11 @@ export default {
 
 .custom-result-banner {
   margin-top: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
+  padding: 0.85rem 1.1rem;
+  border-radius: 10px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.75rem;
   font-size: 0.9rem;
   color: var(--text-main);
 }
@@ -682,6 +735,14 @@ export default {
 .custom-result-banner.danger {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid var(--danger);
+}
+
+.result-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .result-left {
@@ -724,6 +785,62 @@ export default {
 
 .result-error {
   color: var(--danger);
+}
+
+.custom-trace-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed rgba(128, 128, 128, 0.3);
+  font-size: 0.85rem;
+}
+
+.custom-trace-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.custom-trace-badge {
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.custom-trace-badge.dns-badge {
+  background: rgba(59, 130, 246, 0.18);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.custom-trace-badge.route-badge {
+  background: rgba(168, 85, 247, 0.18);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.custom-trace-rule {
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.custom-trace-arrow {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.custom-trace-server {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.custom-trace-outbound {
+  color: var(--success);
+  font-weight: 600;
 }
 
 .category-tabs {
@@ -910,6 +1027,74 @@ export default {
 
 .lat-slow {
   color: var(--danger);
+}
+
+.site-trace-box {
+  margin-top: 0.65rem;
+  background: var(--bg-main, rgba(0, 0, 0, 0.15));
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+}
+
+.site-trace-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-tag-pill {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.08rem 0.35rem;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.trace-dns-pill {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.trace-route-pill {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.trace-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+  font-size: 0.78rem;
+}
+
+.trace-rule-part {
+  color: var(--text-muted);
+}
+
+.trace-sep {
+  margin: 0 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.trace-target-part {
+  font-weight: 500;
+}
+
+.trace-highlight {
+  color: var(--success);
+  font-weight: 600;
 }
 
 .site-error-msg {
