@@ -470,8 +470,14 @@ else
     # If no explicit tag provided, query GitHub API or HTTP header location redirect
     if [[ -z "$LATEST_TAG" ]]; then
         echo -e "  正在查询最新 Release 版本号..."
-        # Method A: GitHub API
-        LATEST_TAG=$(curl -fsSL -H "User-Agent: subout-installer" "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+        # Method A: GitHub API with jq fallback
+        if command -v jq >/dev/null 2>&1; then
+            # Use jq for robust JSON parsing
+            LATEST_TAG=$(curl -fsSL -H "User-Agent: subout-installer" "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null | jq -r '.tag_name // empty' || echo "")
+        else
+            # Fallback: grep with stricter pattern (match only tag_name field)
+            LATEST_TAG=$(curl -fsSL -H "User-Agent: subout-installer" "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || echo "")
+        fi
 
         # Method B: HTTP Header Redirect Fallback (Avoids GitHub API rate limiting)
         if [[ -z "$LATEST_TAG" ]]; then
