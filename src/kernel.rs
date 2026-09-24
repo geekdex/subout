@@ -327,6 +327,7 @@ pub async fn download_and_install_kernel(
     let mut downloaded_bytes: u64 = 0;
     let mut last_speed_time = std::time::Instant::now();
     let mut last_speed_bytes: u64 = 0;
+    let mut last_reported_progress = 0.0; // 优化：记录上次报告的进度，确保单调性
 
     while let Some(chunk_res) = stream.next().await {
         if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
@@ -352,29 +353,51 @@ pub async fn download_and_install_kernel(
 
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(last_speed_time).as_secs_f64();
-        let speed = if elapsed >= 0.5 {
+        
+        // 优化：只在 1 秒或以上时计算速度，降低抖动
+        // 这样可以避免在 macOS 上网络延迟导致的瞬间波动
+        let speed = if elapsed >= 1.0 {
             let diff = downloaded_bytes.saturating_sub(last_speed_bytes);
             let s = (diff as f64 / elapsed) as u64;
             last_speed_time = now;
             last_speed_bytes = downloaded_bytes;
             s
         } else {
-            0
+            // 在聚合窗口内，保持上一次计算的速度值
+            // 避免每次都报告 0，导致进度条显示抖动
+            {
+                let st = status_lock.blocking_read();
+                st.speed_bytes_per_sec
+            }
         };
 
-        let progress = if total_size > 0 {
+        // 优化：进度条单调性保证
+        let new_progress = if total_size > 0 {
             ((downloaded_bytes as f64 / total_size as f64) * 100.0).min(100.0)
         } else {
             0.0
         };
+        
+        // 只在进度确实增加时更新，避免网络乱序导致的回退
+        let progress_to_report = if new_progress >= last_reported_progress {
+            last_reported_progress = new_progress;
+            new_progress
+        } else {
+            last_reported_progress
+        };
 
-        {
+        // 优化：降低更新频率，避免过于频繁的状态写入
+        // 只在进度增加至少 1% 或每秒更新一次时才报告
+        let should_update = {
+            let st = status_lock.blocking_read();
+            (progress_to_report - st.progress).abs() >= 1.0 || elapsed >= 1.0
+        };
+
+        if should_update {
             let mut st = status_lock.write().await;
             st.downloaded_bytes = downloaded_bytes;
-            st.progress = progress;
-            if speed > 0 {
-                st.speed_bytes_per_sec = speed;
-            }
+            st.progress = progress_to_report;
+            st.speed_bytes_per_sec = speed;
         }
     }
 
