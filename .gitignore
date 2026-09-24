@@ -7,3 +7,5 @@ web/dist
 /runtime
 *.db
 .temp_singbox_*
+.kiro
+

@@ -153,6 +153,15 @@
           >
             {{ cancelling ? "正在取消..." : "取消下载" }}
           </button>
+          <button
+            v-else-if="hasDownloadError && !isDownloading"
+            class="btn btn-sm btn-secondary"
+            style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
+            @click="refreshStatusCheck"
+            title="手动检测内核状态，可修复僵尸状态"
+          >
+            🔄 重新检测
+          </button>
         </div>
       </div>
 
@@ -244,6 +253,9 @@ const hasKernelError = computed(() => {
 });
 
 let pollTimer = null;
+let lastProgress = 0; // 用于进度条单调性检查
+let verificationAttempts = 0; // 完成后验证重试计数
+let lastVerificationTime = 0; // 上次验证的时间戳
 
 const formatBytes = (bytes) => {
   if (!bytes || bytes === 0) return "0 B";
@@ -258,25 +270,90 @@ const pollStatus = async () => {
     const res = await fetch(`${API_BASE}/api/kernel/status`, {
       headers: { Authorization: `Bearer ${token.value}` },
     });
-    if (res.ok) {
-      const statusData = await res.json();
-      kernelInfo.value.download_status = statusData;
-      if (statusData.status === "ready") {
-        stopPolling();
-        await fetchKernelInfo();
-        showToast("sing-box 内核下载并配置成功！");
-      } else if (statusData.status === "error") {
-        stopPolling();
-      }
+    if (!res.ok) return;
+
+    const statusData = await res.json();
+    
+    // 优化 1: 进度条单调性保证 - 进度永不后退
+    if (statusData.progress !== undefined) {
+      statusData.progress = Math.max(lastProgress, statusData.progress);
+      lastProgress = statusData.progress;
+    }
+
+    kernelInfo.value.download_status = statusData;
+
+    // 优化 2: 下载完成状态检测
+    if (statusData.status === "ready") {
+      stopPolling();
+      // 触发完整信息刷新以确保状态同步
+      await verifyAndCompleteDownload();
+    } else if (statusData.status === "error") {
+      stopPolling();
+      lastProgress = 0;
+      verificationAttempts = 0;
+    } else if (statusData.status === "downloading" || statusData.status === "extracting") {
+      // 重置完成状态的重试计数
+      verificationAttempts = 0;
     }
   } catch (e) {
-    console.error("Poll status error", e);
+    console.error("[Kernel] Poll status error:", e);
+  }
+};
+
+// 优化 3: 完成后验证机制，处理状态同步延迟
+const verifyAndCompleteDownload = async () => {
+  try {
+    const now = Date.now();
+    // 防止频繁验证（最多每 500ms 验证一次）
+    if (now - lastVerificationTime < 500) return;
+    lastVerificationTime = now;
+
+    // 重试验证，最多 3 次
+    if (verificationAttempts >= 3) {
+      showToast("sing-box 内核下载并配置成功！");
+      return;
+    }
+
+    verificationAttempts++;
+    const res = await fetch(`${API_BASE}/api/kernel/info`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    });
+
+    if (res.ok) {
+      const info = await res.json();
+      // 只有当内核确实已安装时才认为完成
+      if (info.is_installed) {
+        kernelInfo.value = info;
+        showToast("sing-box 内核下载并配置成功！");
+        verificationAttempts = 0;
+        lastProgress = 0;
+      } else {
+        // 内核还未安装，继续等待
+        kernelInfo.value.download_status = { status: "extracting", progress: 100 };
+        // 继续轮询验证
+        startPolling();
+      }
+    } else {
+      // API 请求失败，再次尝试轮询
+      startPolling();
+    }
+  } catch (e) {
+    console.error("[Kernel] Verification error:", e);
+    // 网络错误时继续轮询
+    if (verificationAttempts < 3) {
+      startPolling();
+    }
   }
 };
 
 const startPolling = () => {
   if (pollTimer) return;
-  pollTimer = setInterval(pollStatus, 800);
+  // 优化：使用自适应轮询间隔
+  // - 下载中：较快 600ms
+  // - 提取中或完成状态验证：1000ms
+  const status = downloadStatus.value?.status;
+  const interval = status === "downloading" ? 600 : 1000;
+  pollTimer = setInterval(pollStatus, interval);
 };
 
 const stopPolling = () => {
@@ -312,6 +389,29 @@ const startDownload = async () => {
     }
   } catch {
     showToast("请求下载网络错误", "danger");
+  }
+};
+
+// 优化：手动刷新状态检查，用于恢复"僵尸状态"（下载完成但状态未同步）
+const refreshStatusCheck = async () => {
+  try {
+    showToast("正在检测内核状态...");
+    // 先刷新完整的内核信息
+    await fetchKernelInfo();
+    // 然后验证并完成
+    const res = await fetch(`${API_BASE}/api/kernel/status`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    });
+    if (res.ok) {
+      const statusData = await res.json();
+      kernelInfo.value.download_status = statusData;
+      if (statusData.status === "ready" || kernelInfo.value.is_installed) {
+        showToast("内核已就绪！");
+      }
+    }
+  } catch (e) {
+    showToast("状态检测失败", "danger");
+    console.error("[Kernel] Refresh status error:", e);
   }
 };
 
