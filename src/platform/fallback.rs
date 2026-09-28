@@ -28,7 +28,7 @@ impl PlatformStrategy for FallbackPlatform {
     fn setup_child_process(&self, _cmd: &mut tokio::process::Command) {}
 
     fn tun_permission_error_guide(&self, err: &str, _singbox_bin: &Path) -> String {
-        format!("TUN 模式启动失败: {}", err)
+        format!("TUN 模式启动失败: {err}")
     }
 
     fn is_pid_alive(&self, _pid: u32) -> bool {
@@ -70,7 +70,7 @@ impl PlatformStrategy for FallbackPlatform {
     }
 
     fn external_process_stop_failed_message(&self, pid: u32, _has_sudo_pass: bool) -> String {
-        format!("终止外部进程 (PID: {}) 失败：进程仍在运行", pid)
+        format!("终止外部进程 (PID: {pid}) 失败：进程仍在运行")
     }
 
     fn enable_system_proxy(&self, _port: u16, _sudo_pass: Option<&str>) {}
@@ -96,15 +96,11 @@ impl PlatformStrategy for FallbackPlatform {
     }
 
     fn default_data_dir(&self) -> PathBuf {
-        dirs::data_dir()
-            .map(|d| d.join("subout"))
-            .unwrap_or_else(|| PathBuf::from("./runtime/data"))
+        dirs::data_dir().map_or_else(|| PathBuf::from("./runtime/data"), |d| d.join("subout"))
     }
 
     fn default_config_dir(&self, _data_dir: &Path) -> PathBuf {
-        dirs::config_dir()
-            .map(|c| c.join("subout"))
-            .unwrap_or_else(|| PathBuf::from("./runtime/config"))
+        dirs::config_dir().map_or_else(|| PathBuf::from("./runtime/config"), |c| c.join("subout"))
     }
 
     fn default_log_dir(&self, data_dir: &Path) -> PathBuf {

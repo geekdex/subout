@@ -58,10 +58,10 @@ impl PlatformStrategy for LinuxPlatform {
                     cmd.stdin(std::process::Stdio::piped())
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped());
-                    let mut child = cmd.spawn().map_err(|e| anyhow!("执行 sudo 失败: {}", e))?;
+                    let mut child = cmd.spawn().map_err(|e| anyhow!("执行 sudo 失败: {e}"))?;
                     if let Some(mut stdin) = child.stdin.take() {
                         use tokio::io::AsyncWriteExt;
-                        let _ = stdin.write_all(format!("{}\n", pass).as_bytes()).await;
+                        let _ = stdin.write_all(format!("{pass}\n").as_bytes()).await;
                         let _ = stdin.flush().await;
                         drop(stdin);
                     }
@@ -119,9 +119,9 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn tun_permission_error_guide(&self, err: &str, singbox_bin: &Path) -> String {
+        let bin_display = singbox_bin.display();
         format!(
-            "TUN 模式启动失败 ({}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行，或在终端执行 sudo setcap cap_net_admin=+ep {:?} (Linux) 授权免密运行。",
-            err, singbox_bin
+            "TUN 模式启动失败 ({err}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行，或在终端执行 sudo setcap cap_net_admin=+ep {bin_display} (Linux) 授权免密运行。"
         )
     }
 
@@ -285,12 +285,11 @@ impl PlatformStrategy for LinuxPlatform {
                             || comm.contains("subout")
                             || cmdline
                                 .as_deref()
-                                .map(|c| {
+                                .is_some_and(|c| {
                                     c.contains("subout")
                                         || c.contains(&config_path_str)
                                         || c.contains("sing-box-running.json")
-                                })
-                                .unwrap_or(false);
+                                });
 
                         if is_subout {
                             continue;
@@ -299,17 +298,15 @@ impl PlatformStrategy for LinuxPlatform {
                         let is_singbox = comm == "sing-box"
                             || exe_path
                                 .as_deref()
-                                .map(|p| p.ends_with("/sing-box"))
-                                .unwrap_or(false)
+                                .is_some_and(|p| p.ends_with("/sing-box"))
                             || cmdline
                                 .as_deref()
-                                .map(|c| {
+                                .is_some_and(|c| {
                                     c.starts_with("sing-box ")
                                         || c.contains("/sing-box ")
                                         || c.contains("sing-box run")
                                         || c == "sing-box"
-                                })
-                                .unwrap_or(false);
+                                });
 
                         if is_singbox && seen_pids.insert(pid) {
                             results.push(ConflictingProcessInfo {
@@ -388,8 +385,8 @@ impl PlatformStrategy for LinuxPlatform {
                     let _ = kill(pid_i32, sig);
                 }
                 if let Some(pass) = sudo_pass {
-                    let sig_arg = format!("-{}", sig);
-                    let pgid_arg = format!("-{}", pid);
+                    let sig_arg = format!("-{sig}");
+                    let pgid_arg = format!("-{pid}");
                     let _ = self
                         .run_sudo_command("kill", &[&sig_arg, "--", &pgid_arg], Some(pass))
                         .await;
@@ -609,13 +606,11 @@ impl PlatformStrategy for LinuxPlatform {
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String {
         if !has_sudo_pass && !self.is_running_as_root() {
             format!(
-                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未获权限终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在系统终端中执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box",
-                pid
+                "外部进程 (PID: {pid}) 属于系统守护进程或 Root 用户，未获权限终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在系统终端中执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box"
             )
         } else {
             format!(
-                "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box / sudo kill -9 {}",
-                pid, pid
+                "终止/接管外部进程 (PID: {pid}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box / sudo kill -9 {pid}"
             )
         }
     }
@@ -758,7 +753,7 @@ fn run_linux_admin_cmd(cmd_name: &str, args: &[&str], sudo_pass: Option<&str>) -
             if let Ok(mut child) = cmd.spawn() {
                 if let Some(mut stdin) = child.stdin.take() {
                     use std::io::Write;
-                    let _ = stdin.write_all(format!("{}\n", pass).as_bytes());
+                    let _ = stdin.write_all(format!("{pass}\n").as_bytes());
                 }
                 if let Ok(status) = child.wait() {
                     return status.success();
@@ -805,9 +800,8 @@ fn get_linux_cmd_output(cmd_name: &str, args: &[&str]) -> Option<String> {
 pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
     // 1. 检查并循环清理策略路由中的残留项（table 2022 / lookup 2022 / fwmark）
     for _ in 0..10 {
-        let rule_output = match get_linux_cmd_output("ip", &["rule", "show"]) {
-            Some(out) => out,
-            None => break,
+        let Some(rule_output) = get_linux_cmd_output("ip", &["rule", "show"]) else {
+            break;
         };
 
         if !rule_output.contains("2022")
@@ -862,14 +856,14 @@ mod tests {
 
     #[test]
     fn test_linux_tun_network_cleanup_parser() {
-        let sample_rules = r#"0:	from all lookup local
+        let sample_rules = r"0:	from all lookup local
 9000:	from all fwmark 0x2024 goto 9002
 9001:	from all fwmark 0x2023 lookup 2022
 9002:	from all nop
 32766:	from all lookup main
 32767:	from all lookup default
 32768:	from all lookup 2022
-"#;
+";
         assert!(sample_rules.contains("lookup 2022"));
         assert!(sample_rules.contains("0x2023"));
         assert!(sample_rules.contains("0x2024"));

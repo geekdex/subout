@@ -59,21 +59,16 @@ impl Outbound {
 
     pub fn is_insecure(&self) -> bool {
         let tls = match self {
-            Outbound::Socks(_) => &None,
+            Outbound::Socks(_) | Outbound::Shadowsocks(_) => &None,
             Outbound::Http(o) => &o.tls,
             Outbound::Vmess(o) => &o.tls,
             Outbound::Anytls(o) => &o.tls,
             Outbound::Trojan(o) => &o.tls,
             Outbound::Vless(o) => &o.tls,
-            Outbound::Shadowsocks(_) => &None,
             Outbound::Hysteria(o) => &o.tls,
             Outbound::Hysteria2(o) => &o.tls,
         };
-        if let Some(t) = tls {
-            t.insecure.unwrap_or(false)
-        } else {
-            false
-        }
+        tls.as_ref().is_some_and(|t| t.insecure.unwrap_or(false))
     }
 
     pub fn is_announcement(&self) -> bool {

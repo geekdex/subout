@@ -81,7 +81,7 @@ pub async fn add_custom_node(
     ) {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("节点校验失败: {}", err_msg),
+            format!("节点校验失败: {err_msg}"),
         ));
     }
 
@@ -159,7 +159,7 @@ pub async fn update_node(
         if let Err(err_msg) = validate_node_json(tag, node_type, server, port, raw_json) {
             return Err((
                 StatusCode::BAD_REQUEST,
-                format!("节点校验失败: {}", err_msg),
+                format!("节点校验失败: {err_msg}"),
             ));
         }
 
@@ -182,11 +182,11 @@ pub async fn update_node(
             let new_json: Value = serde_json::from_str(raw_json).unwrap_or(Value::Null);
             let diff_str = diff_json(&old_json, &new_json);
             if diff_str != "没有检测到实际改动" {
-                detail_parts.push(format!("配置变动: {}", diff_str));
+                detail_parts.push(format!("配置变动: {diff_str}"));
             }
         }
         let detail = if detail_parts.is_empty() {
-            format!("更新节点 '{}' (无关键字段变化)", tag)
+            format!("更新节点 '{tag}' (无关键字段变化)")
         } else {
             format!("更新节点 '{}': {}", tag, detail_parts.join(", "))
         };
@@ -268,7 +268,7 @@ pub fn validate_node_json(
     raw_json: &str,
 ) -> Result<(), String> {
     let val: serde_json::Value =
-        serde_json::from_str(raw_json).map_err(|e| format!("JSON 语法错误: {}", e))?;
+        serde_json::from_str(raw_json).map_err(|e| format!("JSON 语法错误: {e}"))?;
     let obj = val
         .as_object()
         .ok_or_else(|| "JSON 必须是对象格式".to_string())?;
@@ -279,8 +279,7 @@ pub fn validate_node_json(
         .ok_or_else(|| "JSON 配置中缺少 tag 字段".to_string())?;
     if json_tag != tag {
         return Err(format!(
-            "JSON 中的 tag ('{}') 必须与节点名称 ('{}') 一致",
-            json_tag, tag
+            "JSON 中的 tag ('{json_tag}') 必须与节点名称 ('{tag}') 一致"
         ));
     }
 
@@ -290,8 +289,7 @@ pub fn validate_node_json(
         .ok_or_else(|| "JSON 配置中缺少 type 字段".to_string())?;
     if json_type != node_type {
         return Err(format!(
-            "JSON 中的 type ('{}') 必须与协议类型 ('{}') 一致",
-            json_type, node_type
+            "JSON 中的 type ('{json_type}') 必须与协议类型 ('{node_type}') 一致"
         ));
     }
 
@@ -301,20 +299,18 @@ pub fn validate_node_json(
         .ok_or_else(|| "JSON 配置中缺少 server 字段".to_string())?;
     if json_server != server {
         return Err(format!(
-            "JSON 中的 server ('{}') 必须与服务器地址 ('{}') 一致",
-            json_server, server
+            "JSON 中的 server ('{json_server}') 必须与服务器地址 ('{server}') 一致"
         ));
     }
 
     let json_port = obj
         .get("server_port")
         .or_else(|| obj.get("port"))
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| "JSON 配置中缺少 server_port / port 字段".to_string())?;
     if json_port != u64::from(port) {
         return Err(format!(
-            "JSON 中的端口 ('{}') 必须与输入框中的端口 ('{}') 一致",
-            json_port, port
+            "JSON 中的端口 ('{json_port}') 必须与输入框中的端口 ('{port}') 一致"
         ));
     }
 
@@ -331,25 +327,25 @@ pub fn diff_json(old_val: &Value, new_val: &Value) -> String {
         (Value::Object(old_obj), Value::Object(new_obj)) => {
             let mut changes = Vec::new();
             for (key, val) in new_obj {
-                if !old_obj.contains_key(key) {
-                    changes.push(format!("新增字段 '{}'", key));
-                } else {
+                if old_obj.contains_key(key) {
                     let old_field_val = &old_obj[key];
                     if old_field_val != val {
                         if (!old_field_val.is_object() && !old_field_val.is_array())
                             && (!val.is_object() && !val.is_array())
                         {
                             changes
-                                .push(format!("修改字段 '{}' ({} → {})", key, old_field_val, val));
+                                .push(format!("修改字段 '{key}' ({old_field_val} → {val})"));
                         } else {
-                            changes.push(format!("更新字段 '{}' 内容", key));
+                            changes.push(format!("更新字段 '{key}' 内容"));
                         }
                     }
+                } else {
+                    changes.push(format!("新增字段 '{key}'"));
                 }
             }
             for key in old_obj.keys() {
                 if !new_obj.contains_key(key) {
-                    changes.push(format!("删除字段 '{}'", key));
+                    changes.push(format!("删除字段 '{key}'"));
                 }
             }
             if changes.is_empty() {
@@ -362,7 +358,7 @@ pub fn diff_json(old_val: &Value, new_val: &Value) -> String {
             format!("更新列表 (长度 {} → {})", old_arr.len(), new_arr.len())
         }
         _ => {
-            format!("修改配置 ({} → {})", old_val, new_val)
+            format!("修改配置 ({old_val} → {new_val})")
         }
     }
 }
@@ -403,7 +399,7 @@ fn is_udp_protocol(node_type: &str) -> bool {
 
 async fn test_transport_latency(server: &str, port: u16, node_type: &str) -> Option<u64> {
     let start = Instant::now();
-    let addr = format!("{}:{}", server, port);
+    let addr = format!("{server}:{port}");
     let timeout_duration = Duration::from_millis(2000);
 
     if is_udp_protocol(node_type) {
@@ -462,7 +458,7 @@ pub async fn test_node_web_latency(
         }
 
         // 3. Write a temporary config file with explicit route.final = "proxy"
-        let temp_file_path = crate::paths::AppPaths::get().temp_file_path(&format!("singbox_test_{}", port), ".json");
+        let temp_file_path = crate::paths::AppPaths::get().temp_file_path(&format!("singbox_test_{port}"), ".json");
 
         let config = serde_json::json!({
             "log": {
@@ -506,7 +502,7 @@ pub async fn test_node_web_latency(
                 // Child process exited prematurely
                 break;
             }
-            if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+            if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
                 .await
                 .is_ok()
             {
@@ -524,7 +520,7 @@ pub async fn test_node_web_latency(
         let mut latency = None;
         if ready {
             let start = Instant::now();
-            if let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{}", port))
+            if let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{port}"))
                 && let Ok(client) = reqwest::Client::builder()
                     .proxy(proxy)
                     .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -690,11 +686,11 @@ pub async fn ping_nodes(
         for item in &results {
             let (tcp, web) = match test_type {
                 "both" => (
-                    Some(item.tcp_latency.map(|v| v as i64).unwrap_or(-1)),
-                    Some(item.web_latency.map(|v| v as i64).unwrap_or(-1)),
+                    Some(item.tcp_latency.map_or(-1, |v| v as i64)),
+                    Some(item.web_latency.map_or(-1, |v| v as i64)),
                 ),
-                "web" => (None, Some(item.web_latency.map(|v| v as i64).unwrap_or(-1))),
-                _ => (Some(item.tcp_latency.map(|v| v as i64).unwrap_or(-1)), None),
+                "web" => (None, Some(item.web_latency.map_or(-1, |v| v as i64))),
+                _ => (Some(item.tcp_latency.map_or(-1, |v| v as i64)), None),
             };
             let _ = db::update_node_ping_result(&conn, item.id, tcp, web, &now_str, target_url_opt);
         }

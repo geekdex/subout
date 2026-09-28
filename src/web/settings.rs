@@ -70,7 +70,7 @@ pub async fn save_sudo_password(
         .service_manager
         .validate_and_save_sudo_pass(trimmed)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Sudo 密码验证失败: {}", e)))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Sudo 密码验证失败: {e}")))?;
 
     Ok(Json(serde_json::json!({
         "status": "success",
@@ -133,8 +133,7 @@ pub async fn get_auto_update_settings(
             last_status = "failed".to_string();
             let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
             last_log = format!(
-                "{}\n[{}] 错误: 自动更新任务执行超时 (超过10分钟)，已自动重置状态。\n",
-                last_log, timestamp
+                "{last_log}\n[{timestamp}] 错误: 自动更新任务执行超时 (超过10分钟)，已自动重置状态。\n"
             );
             let _ = db::update_setting(&conn, "auto_update_last_status", &last_status);
             let _ = db::update_setting(&conn, "auto_update_last_log", &last_log);
@@ -343,7 +342,7 @@ pub async fn trigger_auto_update(
         if let Err(e) =
             auto_update::run_auto_update_process(&db_path_clone, Some(service_mgr)).await
         {
-            eprintln!("[AutoUpdate] Manually triggered update failed: {}", e);
+            eprintln!("[AutoUpdate] Manually triggered update failed: {e}");
         }
     });
 

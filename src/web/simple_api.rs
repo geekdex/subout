@@ -52,7 +52,7 @@ pub async fn save_simple_config(
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
     let generated = simple_config::generate_simple_singbox_config(&conn, &payload.config)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成简单配置失败: {}", e)))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成简单配置失败: {e}")))?;
 
     let log = generated
         .get("log")
@@ -84,14 +84,14 @@ pub async fn save_simple_config(
     {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("配置校验未通过: {}", err_msg),
+            format!("配置校验未通过: {err_msg}"),
         ));
     }
 
     simple_config::save_simple_config(&conn, &payload.config).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("保存配置失败: {}", e),
+            format!("保存配置失败: {e}"),
         )
     })?;
 
@@ -105,7 +105,7 @@ pub async fn save_simple_config(
         {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("配置已保存，但重启服务失败: {}", e),
+                format!("配置已保存，但重启服务失败: {e}"),
             ));
         }
     }
@@ -128,7 +128,7 @@ pub async fn preview_simple_config(
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
     let generated = simple_config::generate_simple_singbox_config(&conn, &payload)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成预览失败: {}", e)))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成预览失败: {e}")))?;
 
     Ok(Json(generated))
 }

@@ -66,7 +66,7 @@ fn parse_args() -> Result<CliArgs, String> {
                     if let Ok(p) = p_str.parse::<u16>() {
                         port = Some(p);
                     } else {
-                        return Err(format!("Error: Invalid port number '{}'.", p_str));
+                        return Err(format!("Error: Invalid port number '{p_str}'."));
                     }
                 } else {
                     return Err("Error: Parameter '-p' requires a value.".to_string());
@@ -124,7 +124,7 @@ fn parse_args() -> Result<CliArgs, String> {
                 }
             }
             other => {
-                return Err(format!("Error: Unknown option '{}'.", other));
+                return Err(format!("Error: Unknown option '{other}'."));
             }
         }
     }
@@ -181,7 +181,7 @@ async fn main() {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             eprintln!("Run 'subout -h' or 'subout --help' for usage details.");
             std::process::exit(1);
         }
@@ -204,13 +204,13 @@ async fn main() {
 
     if args.web {
         if let Err(e) = subout::web::run_server(args.port).await {
-            eprintln!("Web server error: {}", e);
+            eprintln!("Web server error: {e}");
             std::process::exit(1);
         }
         std::process::exit(0);
     } else {
         if let Err(e) = run(args).await {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             std::process::exit(1);
         }
         std::process::exit(0);
@@ -227,13 +227,13 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     let output_path = args.output.as_ref().unwrap();
 
     if args.verbose {
-        eprintln!("[Info] Loading subscription from: {}", source);
+        eprintln!("[Info] Loading subscription from: {source}");
     }
 
     let (content, source_type) = subout::load_subscription_content(source).await?;
 
     if args.verbose {
-        eprintln!("[Info] Subscription source identified as: {}", source_type);
+        eprintln!("[Info] Subscription source identified as: {source_type}");
         eprintln!("[Info] Parsing subscription content...");
     }
 
@@ -248,7 +248,7 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
                 skipped_announcements.len()
             );
             for ann in &skipped_announcements {
-                eprintln!("  - {}", ann);
+                eprintln!("  - {ann}");
             }
         }
     }
@@ -256,16 +256,15 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Optimization check: Duplicate tags
     let mut tag_counts = std::collections::HashMap::new();
     let mut duplicate_count = 0;
-    for outbound in outbounds.iter_mut() {
+    for outbound in &mut outbounds {
         let base_tag = outbound.tag().to_string();
         let count = tag_counts.entry(base_tag.clone()).or_insert(0);
         *count += 1;
         if *count > 1 {
-            let new_tag = format!("{}-{}", base_tag, count);
+            let new_tag = format!("{base_tag}-{count}");
             if args.verbose {
                 eprintln!(
-                    "[Optimization Hint] Duplicate tag '{}' found. Renamed to '{}' to ensure uniqueness in sing-box config.",
-                    base_tag, new_tag
+                    "[Optimization Hint] Duplicate tag '{base_tag}' found. Renamed to '{new_tag}' to ensure uniqueness in sing-box config."
                 );
             }
             outbound.set_tag(new_tag);
@@ -275,8 +274,7 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     if duplicate_count > 0 && !args.verbose {
         println!(
-            "[Optimization Hint] Resolved {} duplicate tags to ensure configuration validity. Run with -v for details.",
-            duplicate_count
+            "[Optimization Hint] Resolved {duplicate_count} duplicate tags to ensure configuration validity. Run with -v for details."
         );
     }
 
@@ -294,7 +292,7 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
         );
         if args.verbose {
             for node in &insecure_nodes {
-                eprintln!("  - {}", node);
+                eprintln!("  - {node}");
             }
         } else {
             eprintln!("  (Run with -v to list insecure nodes)");
@@ -339,31 +337,31 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
         eprintln!("[Info] Parsed nodes summary:");
         if vmess_count > 0 {
-            eprintln!("  - VMess: {}", vmess_count);
+            eprintln!("  - VMess: {vmess_count}");
         }
         if vless_count > 0 {
-            eprintln!("  - VLESS: {}", vless_count);
+            eprintln!("  - VLESS: {vless_count}");
         }
         if ss_count > 0 {
-            eprintln!("  - Shadowsocks: {}", ss_count);
+            eprintln!("  - Shadowsocks: {ss_count}");
         }
         if trojan_count > 0 {
-            eprintln!("  - Trojan: {}", trojan_count);
+            eprintln!("  - Trojan: {trojan_count}");
         }
         if socks_count > 0 {
-            eprintln!("  - SOCKS: {}", socks_count);
+            eprintln!("  - SOCKS: {socks_count}");
         }
         if http_count > 0 {
-            eprintln!("  - HTTP: {}", http_count);
+            eprintln!("  - HTTP: {http_count}");
         }
         if anytls_count > 0 {
-            eprintln!("  - Anytls: {}", anytls_count);
+            eprintln!("  - Anytls: {anytls_count}");
         }
         if hysteria_count > 0 {
-            eprintln!("  - Hysteria: {}", hysteria_count);
+            eprintln!("  - Hysteria: {hysteria_count}");
         }
         if hysteria2_count > 0 {
-            eprintln!("  - Hysteria2: {}", hysteria2_count);
+            eprintln!("  - Hysteria2: {hysteria2_count}");
         }
     }
 
@@ -379,8 +377,7 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     if args.verbose {
         eprintln!(
-            "[Info] Saving generated outbounds configuration to: {}",
-            output_path
+            "[Info] Saving generated outbounds configuration to: {output_path}"
         );
     }
 

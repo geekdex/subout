@@ -58,10 +58,10 @@ impl PlatformStrategy for MacOsPlatform {
                     cmd.stdin(std::process::Stdio::piped())
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped());
-                    let mut child = cmd.spawn().map_err(|e| anyhow!("执行 sudo 失败: {}", e))?;
+                    let mut child = cmd.spawn().map_err(|e| anyhow!("执行 sudo 失败: {e}"))?;
                     if let Some(mut stdin) = child.stdin.take() {
                         use tokio::io::AsyncWriteExt;
-                        let _ = stdin.write_all(format!("{}\n", pass).as_bytes()).await;
+                        let _ = stdin.write_all(format!("{pass}\n").as_bytes()).await;
                         let _ = stdin.flush().await;
                         drop(stdin);
                     }
@@ -107,8 +107,7 @@ impl PlatformStrategy for MacOsPlatform {
 
     fn tun_permission_error_guide(&self, err: &str, _singbox_bin: &Path) -> String {
         format!(
-            "TUN 模式启动失败 ({}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行。",
-            err
+            "TUN 模式启动失败 ({err}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行。"
         )
     }
 
@@ -248,8 +247,8 @@ impl PlatformStrategy for MacOsPlatform {
                     let _ = kill(pid_i32, sig);
                 }
                 if let Some(pass) = sudo_pass {
-                    let sig_arg = format!("-{}", sig);
-                    let pgid_arg = format!("-{}", pid);
+                    let sig_arg = format!("-{sig}");
+                    let pgid_arg = format!("-{pid}");
                     let _ = self
                         .run_sudo_command("kill", &[&sig_arg, "--", &pgid_arg], Some(pass))
                         .await;
@@ -395,13 +394,11 @@ impl PlatformStrategy for MacOsPlatform {
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String {
         if !has_sudo_pass && !self.is_running_as_root() {
             format!(
-                "外部进程 (PID: {}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在终端执行 brew services stop sing-box / sudo kill -9 {}",
-                pid, pid
+                "外部进程 (PID: {pid}) 属于系统守护进程或 Root 用户，未能直接终止。请在弹窗中输入系统的 Sudo 密码授权接管，或在终端执行 brew services stop sing-box / sudo kill -9 {pid}"
             )
         } else {
             format!(
-                "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 brew services stop sing-box / sudo kill -9 {}",
-                pid, pid
+                "终止/接管外部进程 (PID: {pid}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 brew services stop sing-box / sudo kill -9 {pid}"
             )
         }
     }
@@ -558,12 +555,11 @@ impl PlatformStrategy for MacOsPlatform {
 }
 
 pub fn get_macos_network_services() -> Vec<String> {
-    let output = match std::process::Command::new("networksetup")
+    let Ok(output) = std::process::Command::new("networksetup")
         .arg("-listallnetworkservices")
         .output()
-    {
-        Ok(o) => o,
-        Err(_) => return Vec::new(),
+    else {
+        return Vec::new();
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
     stdout
@@ -586,7 +582,7 @@ pub fn run_macos_netsetup(args: &[&str], sudo_pass: Option<&str>) {
                 .output();
         } else if let Some(pass) = sudo_pass {
             use std::io::Write;
-            let mut child = match std::process::Command::new("sudo")
+            let Ok(mut child) = std::process::Command::new("sudo")
                 .arg("-S")
                 .arg("-k")
                 .arg("-p")
@@ -598,12 +594,11 @@ pub fn run_macos_netsetup(args: &[&str], sudo_pass: Option<&str>) {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
-            {
-                Ok(c) => c,
-                Err(_) => return,
+            else {
+                return;
             };
             if let Some(mut stdin) = child.stdin.take() {
-                let _ = writeln!(stdin, "{}", pass);
+                let _ = writeln!(stdin, "{pass}");
             }
             let _ = child.wait();
         } else {

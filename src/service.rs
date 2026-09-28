@@ -152,7 +152,7 @@ pub async fn append_to_file(path: &Path, line: &str) {
         .await
     {
         use tokio::io::AsyncWriteExt;
-        let _ = file.write_all(format!("{}\n", line).as_bytes()).await;
+        let _ = file.write_all(format!("{line}\n").as_bytes()).await;
     }
 }
 
@@ -274,7 +274,7 @@ impl SingBoxServiceManager {
             platform
                 .run_sudo_command("true", &[], Some(trimmed))
                 .await
-                .map_err(|e| anyhow!("Sudo 密码验证失败: {}", e))?;
+                .map_err(|e| anyhow!("Sudo 密码验证失败: {e}"))?;
         }
 
         self.save_sudo_pass(trimmed).await;
@@ -314,12 +314,9 @@ impl SingBoxServiceManager {
     pub async fn is_running(&self) -> bool {
         let mut child_guard = self.child.write().await;
         if let Some(ref mut child) = *child_guard {
-            match child.try_wait() {
-                Ok(None) => true,
-                _ => {
-                    *child_guard = None;
-                    false
-                }
+            if let Ok(None) = child.try_wait() { true } else {
+                *child_guard = None;
+                false
             }
         } else {
             false
@@ -329,12 +326,9 @@ impl SingBoxServiceManager {
     pub async fn get_managed_pid(&self) -> Option<u32> {
         let mut child_guard = self.child.write().await;
         if let Some(ref mut child) = *child_guard {
-            match child.try_wait() {
-                Ok(None) => child.id(),
-                _ => {
-                    *child_guard = None;
-                    None
-                }
+            if let Ok(None) = child.try_wait() { child.id() } else {
+                *child_guard = None;
+                None
             }
         } else {
             None
@@ -358,7 +352,7 @@ impl SingBoxServiceManager {
                         *self.started_at.write().await = None;
                         if self.last_error.read().await.is_none() && !status.success() {
                             *self.last_error.write().await =
-                                Some(format!("sing-box 核心进程已退出 ({})", status));
+                                Some(format!("sing-box 核心进程已退出 ({status})"));
                         }
                         (false, None)
                     }
@@ -368,7 +362,7 @@ impl SingBoxServiceManager {
                         *self.started_at.write().await = None;
                         if self.last_error.read().await.is_none() {
                             *self.last_error.write().await =
-                                Some(format!("检测 sing-box 进程状态异常: {}", e));
+                                Some(format!("检测 sing-box 进程状态异常: {e}"));
                         }
                         (false, None)
                     }
@@ -426,7 +420,7 @@ impl SingBoxServiceManager {
         let config_json = running_config_content
             .as_deref()
             .and_then(|s| serde_json::from_str::<Value>(s).ok());
-        let is_tun = is_run && config_json.as_ref().map(is_tun_mode).unwrap_or(false);
+        let is_tun = is_run && config_json.as_ref().is_some_and(is_tun_mode);
         let conflicting_processes = detect_conflicting_singbox_processes(pid);
 
         let (log_level, log_disabled, log_output) = if is_run {
@@ -440,17 +434,17 @@ impl SingBoxServiceManager {
                 .get("log")
                 .and_then(|l| l.get("level"))
                 .and_then(|lv| lv.as_str())
-                .map(|s| s.to_lowercase());
+                .map(str::to_lowercase);
             let disabled = c
                 .get("log")
                 .and_then(|l| l.get("disabled"))
-                .and_then(|d| d.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let output = c
                 .get("log")
                 .and_then(|l| l.get("output"))
                 .and_then(|o| o.as_str())
-                .map(|s| s.to_string());
+                .map(std::string::ToString::to_string);
             (level.or(Some("info".to_string())), disabled, output)
         } else if let Some(db_path) = self.db_path.read().await.as_deref()
             && let Ok(conn) = rusqlite::Connection::open(db_path)
@@ -482,17 +476,17 @@ impl SingBoxServiceManager {
                         .get("log")
                         .and_then(|l| l.get("level"))
                         .and_then(|lv| lv.as_str())
-                        .map(|s| s.to_lowercase());
+                        .map(str::to_lowercase);
                     let disabled = c
                         .get("log")
                         .and_then(|l| l.get("disabled"))
-                        .and_then(|d| d.as_bool())
+                        .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false);
                     let output = c
                         .get("log")
                         .and_then(|l| l.get("output"))
                         .and_then(|o| o.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
                     (level.or(Some("info".to_string())), disabled, output)
                 } else if let Ok(Some(log_str)) = crate::db::get_base_config_section(&conn, "log")
                     && let Ok(c) = serde_json::from_str::<Value>(&log_str)
@@ -500,12 +494,12 @@ impl SingBoxServiceManager {
                     let level = c
                         .get("level")
                         .and_then(|lv| lv.as_str())
-                        .map(|s| s.to_lowercase());
-                    let disabled = c.get("disabled").and_then(|d| d.as_bool()).unwrap_or(false);
+                        .map(str::to_lowercase);
+                    let disabled = c.get("disabled").and_then(serde_json::Value::as_bool).unwrap_or(false);
                     let output = c
                         .get("output")
                         .and_then(|o| o.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
                     (level.or(Some("info".to_string())), disabled, output)
                 } else {
                     (Some("info".to_string()), false, None)
@@ -578,7 +572,7 @@ impl SingBoxServiceManager {
                 "接管未完全成功：仍有外部 sing-box 进程在运行 (PID: {})",
                 pids.join(", ")
             );
-            self.append_log(&format!("❌ {}", msg)).await;
+            self.append_log(&format!("❌ {msg}")).await;
             return Err(anyhow!(msg));
         }
 
@@ -635,7 +629,7 @@ impl SingBoxServiceManager {
                     details,
                     pids.join(" ")
                 );
-                self.append_log(&format!("❌ {}", err_msg)).await;
+                self.append_log(&format!("❌ {err_msg}")).await;
                 *self.last_error.write().await = Some(err_msg.clone());
                 return Err(anyhow!(err_msg));
             }
@@ -647,7 +641,7 @@ impl SingBoxServiceManager {
         let log_disabled = config_json
             .get("log")
             .and_then(|l| l.get("disabled"))
-            .and_then(|d| d.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         let configured_level_str = config_json
@@ -662,7 +656,7 @@ impl SingBoxServiceManager {
             .get("log")
             .and_then(|l| l.get("output"))
             .and_then(|o| o.as_str())
-            .map(|s| s.trim())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(|s| {
                 let path = PathBuf::from(s);
@@ -699,7 +693,7 @@ impl SingBoxServiceManager {
 
         // 3. Write config file
         std::fs::write(&config_path, &config_str)
-            .map_err(|e| anyhow!("写入 sing-box 运行配置文件失败: {}", e))?;
+            .map_err(|e| anyhow!("写入 sing-box 运行配置文件失败: {e}"))?;
 
         let tun_mode = is_tun_mode(&final_config_json);
         let as_root = is_running_as_root();
@@ -800,8 +794,8 @@ impl SingBoxServiceManager {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                let err_msg = format!("启动 sing-box 进程失败: {}", e);
-                self.append_log(&format!("❌ {}", err_msg)).await;
+                let err_msg = format!("启动 sing-box 进程失败: {e}");
+                self.append_log(&format!("❌ {err_msg}")).await;
                 *self.last_error.write().await = Some(err_msg.clone());
                 return Err(anyhow!(err_msg));
             }
@@ -812,7 +806,7 @@ impl SingBoxServiceManager {
             && let Some(mut stdin) = child.stdin.take()
         {
             use tokio::io::AsyncWriteExt;
-            let pass_bytes = format!("{}\n", pass);
+            let pass_bytes = format!("{pass}\n");
             let _ = stdin.write_all(pass_bytes.as_bytes()).await;
             let _ = stdin.flush().await;
             drop(stdin); // Explicitly close stdin to prevent sudo from waiting for more input
@@ -865,7 +859,7 @@ impl SingBoxServiceManager {
                     if should_record_singbox_line(&clean, min_level, is_disabled) {
                         let timestamp =
                             chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                        let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
+                        let formatted = format!("[{timestamp}] [sing-box] {clean}");
                         {
                             let mut l = logs_clone.write().await;
                             if l.len() >= MAX_LOG_LINES {
@@ -907,7 +901,7 @@ impl SingBoxServiceManager {
                     if should_record_singbox_line(&clean, min_level, is_disabled) {
                         let timestamp =
                             chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                        let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
+                        let formatted = format!("[{timestamp}] [sing-box] {clean}");
                         {
                             let mut l = logs_clone.write().await;
                             if l.len() >= MAX_LOG_LINES {
@@ -986,7 +980,7 @@ impl SingBoxServiceManager {
                                                 .format("%Y-%m-%d %H:%M:%S")
                                                 .to_string();
                                             let formatted =
-                                                format!("[{}] [sing-box] {}", timestamp, clean);
+                                                format!("[{timestamp}] [sing-box] {clean}");
 
                                             {
                                                 let mut l = logs_clone.write().await;
@@ -1049,7 +1043,7 @@ impl SingBoxServiceManager {
                 self.clear_saved_sudo_pass().await;
                 let guide =
                     "Sudo 密码不正确或已失效，请重新输入系统管理员密码进行授权。".to_string();
-                self.append_log(&format!("❌ {}", guide)).await;
+                self.append_log(&format!("❌ {guide}")).await;
                 *self.last_error.write().await = Some(guide.clone());
                 return Err(anyhow!(guide));
             }
@@ -1065,14 +1059,14 @@ impl SingBoxServiceManager {
 
             if is_permission_err && !as_root && !has_sudo_pass {
                 let guide = platform.tun_permission_error_guide(&err, &singbox_bin);
-                self.append_log(&format!("❌ {}", guide)).await;
+                self.append_log(&format!("❌ {guide}")).await;
                 *self.last_error.write().await = Some(guide.clone());
                 return Err(anyhow!(guide));
             }
-            self.append_log(&format!("❌ sing-box 启动失败: {}", err))
+            self.append_log(&format!("❌ sing-box 启动失败: {err}"))
                 .await;
             *self.last_error.write().await = Some(err.clone());
-            return Err(anyhow!("sing-box 启动异常: {}", err));
+            return Err(anyhow!("sing-box 启动异常: {err}"));
         }
 
         if let Some(ref p) = effective_sudo_pass {
@@ -1083,7 +1077,7 @@ impl SingBoxServiceManager {
         if let Some(port) = get_mixed_port_from_config(config_json) {
             platform.enable_system_proxy(port, cached_pass.as_deref());
             if platform.is_macos() || platform.is_windows() {
-                self.append_log(&format!("🌐 已自动设置系统网络代理 (127.0.0.1:{})", port))
+                self.append_log(&format!("🌐 已自动设置系统网络代理 (127.0.0.1:{port})"))
                     .await;
             }
         }
@@ -1093,8 +1087,7 @@ impl SingBoxServiceManager {
             platform.enable_tun_dns(&tun_ip, cached_pass.as_deref());
             if platform.is_macos() {
                 self.append_log(&format!(
-                    "🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({})",
-                    tun_ip
+                    "🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({tun_ip})"
                 ))
                 .await;
             }
@@ -1103,18 +1096,16 @@ impl SingBoxServiceManager {
         let summary = get_inbounds_summary_from_config(&config_path);
         if let Some(s) = summary {
             self.append_log(&format!(
-                "🟢 sing-box 服务已就绪并开始运行 (PID: {:?}, 入站: {})",
-                pid, s
+                "🟢 sing-box 服务已就绪并开始运行 (PID: {pid:?}, 入站: {s})"
             ))
             .await;
         } else if started_ready {
             self.append_log(&format!(
-                "🟢 sing-box 服务已就绪并开始运行 (PID: {:?})",
-                pid
+                "🟢 sing-box 服务已就绪并开始运行 (PID: {pid:?})"
             ))
             .await;
         } else {
-            self.append_log(&format!("🟢 sing-box 进程已拉起 (PID: {:?})", pid))
+            self.append_log(&format!("🟢 sing-box 进程已拉起 (PID: {pid:?})"))
                 .await;
         }
 
@@ -1207,25 +1198,25 @@ impl SingBoxServiceManager {
     pub async fn kill_external_process(&self, pid: u32, sudo_pass: Option<&str>) -> Result<()> {
         let current_pid = std::process::id();
         if pid == current_pid || pid <= 1 {
-            return Err(anyhow!("无法终止受保护的系统进程 (PID: {})", pid));
+            return Err(anyhow!("无法终止受保护的系统进程 (PID: {pid})"));
         }
 
         let platform = crate::platform::current_platform();
 
         if !platform.is_pid_alive(pid) {
-            self.append_log(&format!("外部进程 (PID: {}) 已不再运行", pid))
+            self.append_log(&format!("外部进程 (PID: {pid}) 已不再运行"))
                 .await;
             return Ok(());
         }
 
-        self.append_log(&format!("正在请求终止外部 sing-box 进程 (PID: {})...", pid))
+        self.append_log(&format!("正在请求终止外部 sing-box 进程 (PID: {pid})..."))
             .await;
 
         let cached_pass = self.cached_sudo_pass.read().await.clone();
         let pass_clean = sudo_pass
-            .map(|p| p.trim())
+            .map(str::trim)
             .filter(|p| !p.is_empty())
-            .map(|p| p.to_string())
+            .map(std::string::ToString::to_string)
             .or(cached_pass);
 
         if let Err(e) = platform
@@ -1234,7 +1225,7 @@ impl SingBoxServiceManager {
             && e.to_string().contains("Sudo 密码不正确")
         {
             self.clear_saved_sudo_pass().await;
-            self.append_log(&format!("❌ 终止外部进程失败: {}", e))
+            self.append_log(&format!("❌ 终止外部进程失败: {e}"))
                 .await;
             return Err(e);
         }
@@ -1251,7 +1242,7 @@ impl SingBoxServiceManager {
 
         if !is_dead {
             let msg = platform.external_process_stop_failed_message(pid, pass_clean.is_some());
-            self.append_log(&format!("❌ {}", msg)).await;
+            self.append_log(&format!("❌ {msg}")).await;
             return Err(anyhow!(msg));
         }
 
@@ -1259,7 +1250,7 @@ impl SingBoxServiceManager {
             self.save_sudo_pass(pass).await;
         }
 
-        self.append_log(&format!("🟢 已成功终止外部 sing-box 进程 (PID: {})", pid))
+        self.append_log(&format!("🟢 已成功终止外部 sing-box 进程 (PID: {pid})"))
             .await;
         Ok(())
     }
@@ -1343,7 +1334,7 @@ pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option
                     if iface.is_empty() {
                         summaries.push("TUN".to_string());
                     } else {
-                        summaries.push(format!("TUN ({})", iface));
+                        summaries.push(format!("TUN ({iface})"));
                     }
                 }
                 "mixed" => {
@@ -1353,26 +1344,26 @@ pub fn get_inbounds_summary_from_config(config_path: &std::path::Path) -> Option
                         .unwrap_or("127.0.0.1");
                     let port = inb
                         .get("listen_port")
-                        .and_then(|p| p.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(2080);
-                    summaries.push(format!("{}:{} (混合代理)", listen, port));
+                    summaries.push(format!("{listen}:{port} (混合代理)"));
                 }
                 "http" => {
                     let port = inb
                         .get("listen_port")
-                        .and_then(|p| p.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(8080);
-                    summaries.push(format!("HTTP :{}", port));
+                    summaries.push(format!("HTTP :{port}"));
                 }
                 "socks" => {
                     let port = inb
                         .get("listen_port")
-                        .and_then(|p| p.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(1080);
-                    summaries.push(format!("SOCKS5 :{}", port));
+                    summaries.push(format!("SOCKS5 :{port}"));
                 }
                 other => {
-                    summaries.push(format!("入站 ({})", other));
+                    summaries.push(format!("入站 ({other})"));
                 }
             }
         }
@@ -1401,8 +1392,8 @@ pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
     if let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) {
         for inbound in inbounds {
             let inbound_type = inbound.get("type").and_then(|t| t.as_str());
-            if matches!(inbound_type, Some("mixed") | Some("http") | Some("socks"))
-                && let Some(port) = inbound.get("listen_port").and_then(|p| p.as_u64())
+            if matches!(inbound_type, Some("mixed" | "http" | "socks"))
+                && let Some(port) = inbound.get("listen_port").and_then(serde_json::Value::as_u64)
             {
                 return Some(port as u16);
             }
@@ -1614,7 +1605,7 @@ mod tests {
         let conflicts = detect_conflicting_singbox_processes(Some(current_pid));
         // Current test process must never be identified as an external conflict
         assert!(!conflicts.iter().any(|c| c.pid == current_pid));
-        println!("Live detected conflicts in test: {:?}", conflicts);
+        println!("Live detected conflicts in test: {conflicts:?}");
     }
 
     #[test]
@@ -1777,7 +1768,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let db_file = std::env::temp_dir().join(format!("test_sudo_{}.db", unique_id));
+        let db_file = std::env::temp_dir().join(format!("test_sudo_{unique_id}.db"));
         let db_path = db_file.to_string_lossy().to_string();
 
         let _ = crate::db::init_db(&db_path).unwrap();
@@ -1847,7 +1838,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let log_file = std::env::temp_dir().join(format!("singbox_test_{}.log", unique_id));
+        let log_file = std::env::temp_dir().join(format!("singbox_test_{unique_id}.log"));
 
         let logs = Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOG_LINES)));
         let last_error = Arc::new(RwLock::new(None));
@@ -1896,7 +1887,7 @@ mod tests {
                                     let timestamp = chrono::Local::now()
                                         .format("%Y-%m-%d %H:%M:%S")
                                         .to_string();
-                                    let formatted = format!("[{}] [sing-box] {}", timestamp, clean);
+                                    let formatted = format!("[{timestamp}] [sing-box] {clean}");
 
                                     if is_actual_singbox_error(&clean) {
                                         *last_error_clone.write().await = Some(clean.clone());

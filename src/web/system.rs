@@ -47,9 +47,7 @@ pub async fn get_system_dirs(
     let path_str = query.path.unwrap_or_default();
 
     let current_dir = if path_str.trim().is_empty() {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")))
+        std::env::var("HOME").map_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")), PathBuf::from)
     } else {
         PathBuf::from(path_str)
     };
@@ -91,7 +89,7 @@ pub async fn initialize_db(
     let conn = get_db_conn(&state.db_path)?;
 
     crate::db::reset_db(&conn).map_err(|e| {
-        eprintln!("[Error] Database reset failed: {}", e);
+        eprintln!("[Error] Database reset failed: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -190,7 +188,7 @@ pub async fn set_system_mode(
 
     // 1. Generate target mode config to validate
     let target_config = crate::web::service_api::get_config_for_mode(&conn, target_mode)
-        .map_err(|(code, msg)| (code, format!("目标模式配置生成失败: {}", msg)))?;
+        .map_err(|(code, msg)| (code, format!("目标模式配置生成失败: {msg}")))?;
 
     // 2. Validate configuration with sing-box logic
     let log = target_config.get("log").cloned().unwrap_or_default();
@@ -213,7 +211,7 @@ pub async fn set_system_mode(
     ) {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("目标模式配置校验未通过: {}", err_msg),
+            format!("目标模式配置校验未通过: {err_msg}"),
         ));
     }
 
@@ -221,13 +219,13 @@ pub async fn set_system_mode(
     crate::db::update_setting(&conn, "app_mode", target_mode).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("更新模式失败: {}", e),
+            format!("更新模式失败: {e}"),
         )
     })?;
     crate::db::update_setting(&conn, "app_mode_initialized", "true").map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("更新初始化状态失败: {}", e),
+            format!("更新初始化状态失败: {e}"),
         )
     })?;
 
@@ -246,7 +244,7 @@ pub async fn set_system_mode(
             let _ = crate::db::update_setting(&conn, "app_mode", &current_mode);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("服务重载失败，已自动回滚为原模式: {}", e),
+                format!("服务重载失败，已自动回滚为原模式: {e}"),
             ));
         }
     }

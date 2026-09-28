@@ -42,10 +42,9 @@ pub async fn check_and_run_auto_update(
             let interval_secs = match interval_str.as_str() {
                 "1h" => 3600,
                 "6h" => 6 * 3600,
-                "12h" => 12 * 3600,
                 "24h" => 24 * 3600,
                 "48h" => 48 * 3600,
-                _ => 12 * 3600,
+                _ => 12 * 3600, // 12h or default
             };
             now >= last_run + interval_secs
         }
@@ -53,12 +52,11 @@ pub async fn check_and_run_auto_update(
 
     if should_run {
         println!(
-            "[AutoUpdate] Triggering scheduled auto update (next_run: {}, now: {})...",
-            next_run, now
+            "[AutoUpdate] Triggering scheduled auto update (next_run: {next_run}, now: {now})..."
         );
         drop(conn);
         if let Err(e) = run_auto_update_process(db_path, service_manager).await {
-            eprintln!("[AutoUpdate] Scheduled update failed: {}", e);
+            eprintln!("[AutoUpdate] Scheduled update failed: {e}");
         }
     }
 
@@ -101,10 +99,9 @@ pub async fn run_auto_update_process(
             let interval_secs = match interval_str.as_str() {
                 "1h" => 3600,
                 "6h" => 6 * 3600,
-                "12h" => 12 * 3600,
                 "24h" => 24 * 3600,
                 "48h" => 48 * 3600,
-                _ => 12 * 3600,
+                _ => 12 * 3600, // 12h or default
             };
             now + interval_secs
         };
@@ -118,28 +115,27 @@ pub async fn run_auto_update_process(
         crate::db::update_setting(
             &conn,
             "auto_update_last_log",
-            &format!("[{}] 自动更新任务启动...\n", now_str),
+            &format!("[{now_str}] 自动更新任务启动...\n"),
         )?;
         (url, next_run)
     };
 
     let log_accum = Arc::new(std::sync::Mutex::new(format!(
-        "[{}] 自动更新任务启动...\n",
-        now_str
+        "[{now_str}] 自动更新任务启动...\n"
     )));
     let db_path_clone = db_path.to_string();
     let update_log = {
         let log_accum = log_accum.clone();
         move |msg: &str| {
             let current_time = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-            let timestamp_prefix = format!("[{}] ", current_time);
+            let timestamp_prefix = format!("[{current_time}] ");
             let mut log = log_accum.lock().unwrap();
             if !log.is_empty() && !log.ends_with('\n') {
                 log.push('\n');
             }
             log.push_str(&timestamp_prefix);
             log.push_str(msg);
-            println!("[AutoUpdate] {}{}", timestamp_prefix, msg);
+            println!("[AutoUpdate] {timestamp_prefix}{msg}");
             if let Ok(conn) = Connection::open(&db_path_clone) {
                 let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
                 let _ = crate::db::update_setting(&conn, "auto_update_last_log", &log);
@@ -161,22 +157,21 @@ pub async fn run_auto_update_process(
             }
             let running_id: i64 = running_id_str.parse()?;
             let history = crate::db::get_config_history_detail(&conn, running_id)?
-                .ok_or_else(|| anyhow!("未找到运行中的配置模板(ID: {})", running_id))?;
+                .ok_or_else(|| anyhow!("未找到运行中的配置模板(ID: {running_id})"))?;
             let history_detail = history.detail.clone();
             let content_str = history.content.ok_or_else(|| anyhow!("配置模板内容为空"))?;
             let full_config: Value = serde_json::from_str(&content_str)?;
             (running_id, history_detail, full_config)
         };
         update_log(&format!(
-            "  -> 已载入当前运行配置模板 (ID: {}, 备注: {})",
-            running_id, history_detail
+            "  -> 已载入当前运行配置模板 (ID: {running_id}, 备注: {history_detail})"
         ));
 
         // Step 2: Update all active subscriptions in subscription management
         update_log("步骤 2: 正在挨个更新订阅源管理中的所有节点...");
         let fetch_results = crate::fetcher::fetch_all_active_subscriptions(db_path).await?;
         for res in &fetch_results {
-            update_log(&format!("  -> {}", res));
+            update_log(&format!("  -> {res}"));
         }
 
         // Step 3: Conduct speed test on all nodes and delete timed-out nodes
@@ -194,8 +189,7 @@ pub async fn run_auto_update_process(
         }
         let nodes_to_test_count = nodes_to_test.len();
         update_log(&format!(
-            "  -> 需要测速的订阅节点数量: {} 个",
-            nodes_to_test_count
+            "  -> 需要测速的订阅节点数量: {nodes_to_test_count} 个"
         ));
 
         let sem = Arc::new(Semaphore::new(8));
@@ -243,8 +237,7 @@ pub async fn run_auto_update_process(
             tx.commit()?;
         }
         update_log(&format!(
-            "  -> 测速完成，共删除超时节点 {} 个: {:?}",
-            deleted_count, deleted_tags
+            "  -> 测速完成，共删除超时节点 {deleted_count} 个: {deleted_tags:?}"
         ));
 
         // Step 4: Auto-configure nodes in all groups that have "conditional auto-matching" enabled
@@ -293,16 +286,14 @@ pub async fn run_auto_update_process(
             let outbounds_len = updated_cfg
                 .get("outbounds")
                 .and_then(|o| o.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
+                .map_or(0, std::vec::Vec::len);
 
             update_log(&format!(
-                "  -> 出站配置构建完成，总计出站数量: {} 个",
-                outbounds_len
+                "  -> 出站配置构建完成，总计出站数量: {outbounds_len} 个"
             ));
 
             for rep in &repaired {
-                update_log(&format!("  -> [自动修复失效路由/DNS] {}", rep));
+                update_log(&format!("  -> [自动修复失效路由/DNS] {rep}"));
             }
 
             updated_cfg
@@ -328,7 +319,7 @@ pub async fn run_auto_update_process(
             &route_val,
             &experimental_val,
         ) {
-            return Err(anyhow!("配置校验失败: {}", err_msg));
+            return Err(anyhow!("配置校验失败: {err_msg}"));
         }
         update_log("  -> sing-box 校验成功！");
 
@@ -341,14 +332,13 @@ pub async fn run_auto_update_process(
         let new_config_str = serde_json::to_string_pretty(&final_config)?;
         std::fs::write(&running_config_path, &new_config_str)?;
         update_log(&format!(
-            "  -> 配置文件已成功保存至 {:?}",
-            running_config_path
+            "  -> 配置文件已成功保存至 {}",
+            running_config_path.display()
         ));
 
         // Save history config and update active config id
         let new_history_desc = format!(
-            "自动更新配置 (包含已更新策略组和代理节点, 清理超时节点: {} 个)",
-            deleted_count
+            "自动更新配置 (包含已更新策略组和代理节点, 清理超时节点: {deleted_count} 个)"
         );
         let new_content_json = serde_json::to_string(&final_config)?;
         {
@@ -365,8 +355,7 @@ pub async fn run_auto_update_process(
                 &new_history_id.to_string(),
             )?;
             update_log(&format!(
-                "  -> 已生成全新历史配置记录 (ID: {}) 并设置为当前运行配置",
-                new_history_id
+                "  -> 已生成全新历史配置记录 (ID: {new_history_id}) 并设置为当前运行配置"
             ));
         }
 
@@ -375,11 +364,11 @@ pub async fn run_auto_update_process(
             if mgr.is_running().await {
                 update_log("  -> sing-box 服务正在运行，正在重启服务应用最新节点配置...");
                 match mgr.restart_with_sudo(&final_config, None).await {
-                    Ok(_) => {
+                    Ok(()) => {
                         update_log("  -> sing-box 核心服务已成功重启并生效！");
                     }
                     Err(e) => {
-                        update_log(&format!("  -> 警告: 重启 sing-box 服务失败: {}", e));
+                        update_log(&format!("  -> 警告: 重启 sing-box 服务失败: {e}"));
                     }
                 }
             } else {
@@ -393,8 +382,7 @@ pub async fn run_auto_update_process(
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_default();
         update_log(&format!(
-            "自动更新完成！下次更新预定时间: {}",
-            next_run_time_str
+            "自动更新完成！下次更新预定时间: {next_run_time_str}"
         ));
         Ok(())
     };
@@ -407,15 +395,15 @@ pub async fn run_auto_update_process(
         log.clone()
     };
     match run_res {
-        Ok(_) => {
+        Ok(()) => {
             crate::db::update_setting(&conn_final, "auto_update_last_status", "success")?;
             crate::db::update_setting(&conn_final, "auto_update_last_log", &final_log)?;
             Ok(final_log)
         }
         Err(e) => {
             let current_time = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-            let timestamp_prefix = format!("[{}] ", current_time);
-            let err_msg = format!("{}\n{}自动更新失败: {}", final_log, timestamp_prefix, e);
+            let timestamp_prefix = format!("[{current_time}] ");
+            let err_msg = format!("{final_log}\n{timestamp_prefix}自动更新失败: {e}");
             crate::db::update_setting(&conn_final, "auto_update_last_status", "failed")?;
             crate::db::update_setting(&conn_final, "auto_update_last_log", &err_msg)?;
             Err(e)
@@ -536,7 +524,7 @@ mod tests {
             .filter(|o| {
                 matches!(
                     o.get("type").and_then(|t| t.as_str()),
-                    Some("selector") | Some("urltest")
+                    Some("selector" | "urltest")
                 )
             })
             .map(|o| o.get("tag").unwrap().as_str().unwrap())

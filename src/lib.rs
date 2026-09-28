@@ -14,7 +14,7 @@ pub mod web;
 use parser::Outbound;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SubscriptionUserInfo {
     pub upload: Option<i64>,
     pub download: Option<i64>,
@@ -23,7 +23,8 @@ pub struct SubscriptionUserInfo {
 }
 
 impl SubscriptionUserInfo {
-    pub fn merge(mut self, other: SubscriptionUserInfo) -> Self {
+    #[must_use]
+    pub const fn merge(mut self, other: Self) -> Self {
         if self.upload.is_none() {
             self.upload = other.upload;
         }
@@ -153,10 +154,10 @@ pub async fn load_subscription_content(
 ) -> Result<(String, String), Box<dyn std::error::Error>> {
     if source.starts_with("http://") || source.starts_with("https://") {
         let content = fetch_subscription(source).await?;
-        Ok((content, format!("URL: {}", source)))
+        Ok((content, format!("URL: {source}")))
     } else if std::path::Path::new(source).exists() {
         let content = std::fs::read_to_string(source)?;
-        Ok((content, format!("File: {}", source)))
+        Ok((content, format!("File: {source}")))
     } else {
         Ok((source.to_string(), "Inline Raw Content".to_string()))
     }
@@ -170,10 +171,10 @@ mod tests {
     fn test_parse_userinfo_str() {
         let s = "upload=123456; download=987654; total=107374182400; expire=1780000000";
         let info = parse_userinfo_str(s);
-        assert_eq!(info.upload, Some(123456));
-        assert_eq!(info.download, Some(987654));
-        assert_eq!(info.total, Some(107374182400));
-        assert_eq!(info.expire, Some(1780000000));
+        assert_eq!(info.upload, Some(123_456));
+        assert_eq!(info.download, Some(987_654));
+        assert_eq!(info.total, Some(107_374_182_400));
+        assert_eq!(info.expire, Some(1_780_000_000));
     }
 
     #[test]
@@ -183,6 +184,6 @@ mod tests {
         assert_eq!(info.upload, Some(100));
         assert_eq!(info.download, Some(200));
         assert_eq!(info.total, Some(1000));
-        assert_eq!(info.expire, Some(1780000000));
+        assert_eq!(info.expire, Some(1_780_000_000));
     }
 }

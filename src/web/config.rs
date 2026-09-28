@@ -313,13 +313,13 @@ pub async fn restore_history_config(
                 let sec_str = serde_json::to_string(sec_val).map_err(|_| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("序列化{}失败", sec),
+                        format!("序列化{sec}失败"),
                     )
                 })?;
                 db::save_base_config_section(&conn, sec, &sec_str).map_err(|_| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("恢复{}配置失败", sec),
+                        format!("恢复{sec}配置失败"),
                     )
                 })?;
             }
@@ -488,7 +488,7 @@ pub async fn validate_full_config(
     if let Err(e) = std::fs::write(&temp_file_path, config_str) {
         return Ok(Json(ValidationResponse {
             valid: false,
-            error: Some(format!("写入临时配置文件失败: {}", e)),
+            error: Some(format!("写入临时配置文件失败: {e}")),
             command_missing: false,
         }));
     }
@@ -543,7 +543,7 @@ pub async fn validate_full_config(
             } else {
                 Ok(Json(ValidationResponse {
                     valid: false,
-                    error: Some(format!("执行 sing-box 校验命令失败: {}", e)),
+                    error: Some(format!("执行 sing-box 校验命令失败: {e}")),
                     command_missing: false,
                 }))
             }
@@ -578,9 +578,9 @@ pub fn validate_config_with_singbox(
     let temp_file_path = crate::paths::AppPaths::get().temp_file_path("singbox_val", ".json");
 
     let config_str =
-        serde_json::to_string_pretty(&config).map_err(|e| format!("序列化失败: {}", e))?;
+        serde_json::to_string_pretty(&config).map_err(|e| format!("序列化失败: {e}"))?;
     if let Err(e) = std::fs::write(&temp_file_path, config_str) {
-        return Err(format!("写入临时文件失败: {}", e));
+        return Err(format!("写入临时文件失败: {e}"));
     }
 
     let singbox_bin = crate::kernel::get_singbox_executable()
@@ -621,7 +621,7 @@ pub fn validate_config_with_singbox(
             if e.kind() == std::io::ErrorKind::NotFound {
                 Ok(())
             } else {
-                Err(format!("执行 sing-box 校验失败: {}", e))
+                Err(format!("执行 sing-box 校验失败: {e}"))
             }
         }
     }
@@ -687,7 +687,7 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
                 _ => detail_err,
             };
 
-            return format!("{} 校验失败: {}", tag_desc, detail_cn);
+            return format!("{tag_desc} 校验失败: {detail_cn}");
         }
     }
 
@@ -696,8 +696,7 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
         if let Some(end_quote) = field_info.find('"') {
             let field_name = &field_info[..end_quote];
             return format!(
-                "配置校验失败：存在未知或不支持的属性 \"{}\" ({})",
-                field_name, msg
+                "配置校验失败：存在未知或不支持的属性 \"{field_name}\" ({msg})"
             );
         }
     }
@@ -726,26 +725,23 @@ pub async fn create_history_config(
     let conn =
         get_db_conn(&state.db_path).map_err(|status| (status, "数据库连接失败".to_string()))?;
 
-    let content_str = match payload.content {
-        Some(c) => serde_json::to_string(&c).unwrap_or_else(|_| "{}".to_string()),
-        None => {
-            let default_cfg = json!({
-                "log": {},
-                "dns": {},
-                "inbounds": [],
-                "outbounds": [],
-                "route": {},
-                "experimental": {}
-            });
-            serde_json::to_string(&default_cfg).unwrap_or_else(|_| "{}".to_string())
-        }
+    let content_str = if let Some(c) = payload.content { serde_json::to_string(&c).unwrap_or_else(|_| "{}".to_string()) } else {
+        let default_cfg = json!({
+            "log": {},
+            "dns": {},
+            "inbounds": [],
+            "outbounds": [],
+            "route": {},
+            "experimental": {}
+        });
+        serde_json::to_string(&default_cfg).unwrap_or_else(|_| "{}".to_string())
     };
 
     conn.execute(
         "INSERT INTO config_history (change_type, action, detail, content, updated_at) VALUES ('配置列表', '创建配置', ?, ?, datetime('now', 'localtime'))",
         rusqlite::params![payload.detail, content_str],
     )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("写入数据库失败: {}", e)))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("写入数据库失败: {e}")))?;
 
     let id = conn.last_insert_rowid();
 
@@ -803,7 +799,7 @@ pub async fn update_history_config(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("查询数据库失败: {}", e),
+                format!("查询数据库失败: {e}"),
             )
         })?;
 
@@ -840,7 +836,7 @@ pub async fn update_history_config(
     ) {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("配置语法错误: {}", err_msg),
+            format!("配置语法错误: {err_msg}"),
         ));
     }
 
@@ -855,7 +851,7 @@ pub async fn update_history_config(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("更新失败: {}", e),
+                format!("更新失败: {e}"),
             )
         })?;
     } else {
@@ -866,7 +862,7 @@ pub async fn update_history_config(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("更新失败: {}", e),
+                format!("更新失败: {e}"),
             )
         })?;
     }
@@ -912,7 +908,7 @@ pub async fn delete_history_config(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("删除失败: {}", e),
+                format!("删除失败: {e}"),
             )
         })?;
 
@@ -945,7 +941,7 @@ pub async fn sync_history_config_resources(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("查询配置失败: {}", e),
+                format!("查询配置失败: {e}"),
             )
         })?
         .ok_or((StatusCode::NOT_FOUND, "配置项不存在".to_string()))?;
@@ -955,13 +951,13 @@ pub async fn sync_history_config_resources(
         "配置内容为空，无法同步资源".to_string(),
     ))?;
     let base_config: Value = serde_json::from_str(&content_str)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("解析配置JSON失败: {}", e)))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("解析配置JSON失败: {e}")))?;
 
     let (updated_config, repaired_tags) =
         generator::sync_config_with_latest_resources(&conn, &base_config, &[]).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("同步资源失败: {}", e),
+                format!("同步资源失败: {e}"),
             )
         })?;
 
@@ -988,14 +984,14 @@ pub async fn sync_history_config_resources(
     ) {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("同步后配置语法校验失败: {}", err_msg),
+            format!("同步后配置语法校验失败: {err_msg}"),
         ));
     }
 
     let updated_content_str = serde_json::to_string(&updated_config).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("序列化配置失败: {}", e),
+            format!("序列化配置失败: {e}"),
         )
     })?;
 
@@ -1003,7 +999,7 @@ pub async fn sync_history_config_resources(
         "UPDATE config_history SET content = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
         rusqlite::params![updated_content_str, id],
     )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("更新数据库失败: {}", e)))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("更新数据库失败: {e}")))?;
 
     let running_id_str = db::get_setting(&conn, "running_config_id")
         .unwrap_or(None)
@@ -1049,18 +1045,13 @@ pub async fn sync_history_config_resources(
 
     let outbounds_arr = outbounds_val
         .as_array()
-        .map(|a| a.as_slice())
-        .unwrap_or(&[]);
+        .map_or(&[][..], Vec::as_slice);
     let groups_count = outbounds_arr
         .iter()
         .filter(|o| {
             matches!(
                 o.get("type").and_then(|t| t.as_str()),
-                Some("selector")
-                    | Some("urltest")
-                    | Some("url-test")
-                    | Some("fallback")
-                    | Some("loadbalance")
+                Some("selector" | "urltest" | "url-test" | "fallback" | "loadbalance")
             )
         })
         .count();
@@ -1168,7 +1159,7 @@ pub async fn save_running_config(
 
     if let Some(id) = payload.config_id {
         if let Err(e) = db::update_setting(&conn, "running_config_id", &id.to_string()) {
-            let err_msg = format!("保存配置ID失败: {}", e);
+            let err_msg = format!("保存配置ID失败: {e}");
             logs.push(ExecutionStepLog {
                 step: "保存参数".to_string(),
                 status: "error".to_string(),
@@ -1203,21 +1194,19 @@ pub async fn save_running_config(
                 }
             }
         }
-    } else {
-        if let Err(e) = db::update_setting(&conn, "running_config_id", "") {
-            let err_msg = format!("清除配置ID失败: {}", e);
-            logs.push(ExecutionStepLog {
-                step: "保存参数".to_string(),
-                status: "error".to_string(),
-                message: err_msg.clone(),
-                timestamp: get_execution_timestamp(),
-            });
-            return Ok(Json(serde_json::json!({
-                "status": "failed",
-                "message": err_msg,
-                "logs": logs
-            })));
-        }
+    } else if let Err(e) = db::update_setting(&conn, "running_config_id", "") {
+        let err_msg = format!("清除配置ID失败: {e}");
+        logs.push(ExecutionStepLog {
+            step: "保存参数".to_string(),
+            status: "error".to_string(),
+            message: err_msg.clone(),
+            timestamp: get_execution_timestamp(),
+        });
+        return Ok(Json(serde_json::json!({
+            "status": "failed",
+            "message": err_msg,
+            "logs": logs
+        })));
     }
 
     logs.push(ExecutionStepLog {
@@ -1237,57 +1226,50 @@ pub async fn save_running_config(
             timestamp: get_execution_timestamp(),
         });
 
-        let singbox_bin = match crate::kernel::get_singbox_executable() {
-            Some(bin) => {
-                logs.push(ExecutionStepLog {
-                    step: "内核检查".to_string(),
-                    status: "success".to_string(),
-                    message: format!("检测到可用内核: {}", bin.display()),
-                    timestamp: get_execution_timestamp(),
-                });
-                bin
-            }
-            None => {
-                let err_msg = "未检测到已安装的 sing-box 内核，无法启动服务。请先前往控制中心下载并安装 sing-box 内核。".to_string();
-                logs.push(ExecutionStepLog {
-                    step: "内核检查".to_string(),
-                    status: "error".to_string(),
-                    message: err_msg.clone(),
-                    timestamp: get_execution_timestamp(),
-                });
-                return Ok(Json(serde_json::json!({
-                    "status": "failed",
-                    "message": err_msg,
-                    "logs": logs
-                })));
-            }
+        let singbox_bin = if let Some(bin) = crate::kernel::get_singbox_executable() {
+            logs.push(ExecutionStepLog {
+                step: "内核检查".to_string(),
+                status: "success".to_string(),
+                message: format!("检测到可用内核: {}", bin.display()),
+                timestamp: get_execution_timestamp(),
+            });
+            bin
+        } else {
+            let err_msg = "未检测到已安装的 sing-box 内核，无法启动服务。请先前往控制中心下载并安装 sing-box 内核。".to_string();
+            logs.push(ExecutionStepLog {
+                step: "内核检查".to_string(),
+                status: "error".to_string(),
+                message: err_msg.clone(),
+                timestamp: get_execution_timestamp(),
+            });
+            return Ok(Json(serde_json::json!({
+                "status": "failed",
+                "message": err_msg,
+                "logs": logs
+            })));
         };
 
         // STEP 2: 读取配置模板与生成配置
-        let config_id = match payload.config_id {
-            Some(id) => id,
-            None => {
-                let err_msg = "未选择要运行的配置模板".to_string();
-                logs.push(ExecutionStepLog {
-                    step: "生成配置".to_string(),
-                    status: "error".to_string(),
-                    message: err_msg.clone(),
-                    timestamp: get_execution_timestamp(),
-                });
-                return Ok(Json(serde_json::json!({
-                    "status": "failed",
-                    "message": err_msg,
-                    "logs": logs
-                })));
-            }
+        let Some(config_id) = payload.config_id else {
+            let err_msg = "未选择要运行的配置模板".to_string();
+            logs.push(ExecutionStepLog {
+                step: "生成配置".to_string(),
+                status: "error".to_string(),
+                message: err_msg.clone(),
+                timestamp: get_execution_timestamp(),
+            });
+            return Ok(Json(serde_json::json!({
+                "status": "failed",
+                "message": err_msg,
+                "logs": logs
+            })));
         };
 
         logs.push(ExecutionStepLog {
             step: "生成配置".to_string(),
             status: "info".to_string(),
             message: format!(
-                "正在读取配置模板 #{} 内容并构建 sing-box 配置...",
-                config_id
+                "正在读取配置模板 #{config_id} 内容并构建 sing-box 配置..."
             ),
             timestamp: get_execution_timestamp(),
         });
@@ -1295,7 +1277,7 @@ pub async fn save_running_config(
         let history = match db::get_config_history_detail(&conn, config_id) {
             Ok(Some(h)) => h,
             Ok(None) => {
-                let err_msg = format!("所选配置 #{} 在历史库中不存在", config_id);
+                let err_msg = format!("所选配置 #{config_id} 在历史库中不存在");
                 logs.push(ExecutionStepLog {
                     step: "生成配置".to_string(),
                     status: "error".to_string(),
@@ -1309,7 +1291,7 @@ pub async fn save_running_config(
                 })));
             }
             Err(e) => {
-                let err_msg = format!("查询配置失败: {}", e);
+                let err_msg = format!("查询配置失败: {e}");
                 logs.push(ExecutionStepLog {
                     step: "生成配置".to_string(),
                     status: "error".to_string(),
@@ -1324,28 +1306,25 @@ pub async fn save_running_config(
             }
         };
 
-        let content_str = match history.content {
-            Some(c) => c,
-            None => {
-                let err_msg = "所选配置模板内容为空".to_string();
-                logs.push(ExecutionStepLog {
-                    step: "生成配置".to_string(),
-                    status: "error".to_string(),
-                    message: err_msg.clone(),
-                    timestamp: get_execution_timestamp(),
-                });
-                return Ok(Json(serde_json::json!({
-                    "status": "failed",
-                    "message": err_msg,
-                    "logs": logs
-                })));
-            }
+        let Some(content_str) = history.content else {
+            let err_msg = "所选配置模板内容为空".to_string();
+            logs.push(ExecutionStepLog {
+                step: "生成配置".to_string(),
+                status: "error".to_string(),
+                message: err_msg.clone(),
+                timestamp: get_execution_timestamp(),
+            });
+            return Ok(Json(serde_json::json!({
+                "status": "failed",
+                "message": err_msg,
+                "logs": logs
+            })));
         };
 
         let config_val: Value = match serde_json::from_str(&content_str) {
             Ok(v) => v,
             Err(e) => {
-                let err_msg = format!("解析配置模板 JSON 失败: {}", e);
+                let err_msg = format!("解析配置模板 JSON 失败: {e}");
                 logs.push(ExecutionStepLog {
                     step: "生成配置".to_string(),
                     status: "error".to_string(),
@@ -1381,7 +1360,7 @@ pub async fn save_running_config(
             logs.push(ExecutionStepLog {
                 step: "语法校验".to_string(),
                 status: "error".to_string(),
-                message: format!("Sing-Box 语法校验未通过: {}", err_msg),
+                message: format!("Sing-Box 语法校验未通过: {err_msg}"),
                 timestamp: get_execution_timestamp(),
             });
             return Ok(Json(serde_json::json!({
@@ -1409,7 +1388,7 @@ pub async fn save_running_config(
         ) {
             Ok(g) => g,
             Err(e) => {
-                let err_msg = format!("生成完整配置失败: {}", e);
+                let err_msg = format!("生成完整配置失败: {e}");
                 logs.push(ExecutionStepLog {
                     step: "生成配置".to_string(),
                     status: "error".to_string(),
@@ -1428,8 +1407,7 @@ pub async fn save_running_config(
             step: "生成配置".to_string(),
             status: "success".to_string(),
             message: format!(
-                "配置模板 #{} 读取并整合生成 sing-box 核心配置成功",
-                config_id
+                "配置模板 #{config_id} 读取并整合生成 sing-box 核心配置成功"
             ),
             timestamp: get_execution_timestamp(),
         });
@@ -1453,7 +1431,7 @@ pub async fn save_running_config(
             .restart_with_sudo_and_takeover(&generated, sudo_pass.as_deref(), takeover)
             .await
         {
-            Ok(_) => {
+            Ok(()) => {
                 logs.push(ExecutionStepLog {
                     step: "核心运行".to_string(),
                     status: "success".to_string(),
@@ -1467,7 +1445,7 @@ pub async fn save_running_config(
                 })));
             }
             Err(e) => {
-                let err_msg = format!("启动 sing-box 服务失败: {}", e);
+                let err_msg = format!("启动 sing-box 服务失败: {e}");
                 logs.push(ExecutionStepLog {
                     step: "核心运行".to_string(),
                     status: "error".to_string(),

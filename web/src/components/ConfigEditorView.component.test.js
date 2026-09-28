@@ -996,6 +996,221 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       await flushPromises();
       expect(wrapper.find(".mock-dns-editor").exists()).toBe(true);
     });
+
+    it("支持新建模式 (new) 同步规则", async () => {
+      window.location.hash = "#configs/edit/1/route";
+      const wrapper = await mountConfigEditor();
+      await flushPromises();
+
+      const routeRule = {
+        domain: ["test.com"],
+        action: "route",
+        outbound: "proxy",
+      };
+
+      wrapper.vm.openSyncModal(routeRule, "route", 0);
+      expect(wrapper.vm.ruleSyncModal.show).toBe(true);
+      expect(wrapper.vm.ruleSyncModal.mode).toBe("new");
+
+      wrapper.vm.confirmSyncRule();
+      expect(wrapper.vm.ruleSyncModal.show).toBe(false);
+      const dnsRules = wrapper.vm.configData.dns.rules;
+      const lastRule = dnsRules[dnsRules.length - 1];
+      expect(lastRule.domain).toEqual(["test.com"]);
+      expect(lastRule.server).toBeDefined();
+    });
+
+    it("支持覆盖模式 (overwrite) 同步规则", async () => {
+      window.location.hash = "#configs/edit/1/route";
+      const wrapper = await mountConfigEditor();
+      await flushPromises();
+
+      wrapper.vm.configData.dns.rules = [
+        { domain: ["old.com"], server: "remote-dns" },
+      ];
+
+      const routeRule = {
+        domain_suffix: [".google.com"],
+        action: "route",
+        outbound: "proxy",
+      };
+
+      wrapper.vm.openSyncModal(routeRule, "route", 0);
+      wrapper.vm.ruleSyncModal.mode = "overwrite";
+      wrapper.vm.ruleSyncModal.targetIndex = 0;
+
+      wrapper.vm.confirmSyncRule();
+      expect(wrapper.vm.ruleSyncModal.show).toBe(false);
+      expect(wrapper.vm.configData.dns.rules[0].domain_suffix).toEqual([
+        ".google.com",
+      ]);
+      expect(wrapper.vm.configData.dns.rules[0].domain).toBeUndefined();
+    });
+
+    it("支持追加模式 (append) 同步规则并去重合并匹配条件", async () => {
+      window.location.hash = "#configs/edit/1/route";
+      const wrapper = await mountConfigEditor();
+      await flushPromises();
+
+      wrapper.vm.configData.dns.rules = [
+        {
+          domain: ["existing.com", "shared.com"],
+          server: "local-dns",
+        },
+      ];
+
+      const routeRule = {
+        domain: ["shared.com", "brand-new.com"],
+        action: "route",
+        outbound: "proxy",
+      };
+
+      wrapper.vm.openSyncModal(routeRule, "route", 0);
+      wrapper.vm.ruleSyncModal.mode = "append";
+      wrapper.vm.ruleSyncModal.targetIndex = 0;
+
+      wrapper.vm.confirmSyncRule();
+      expect(wrapper.vm.ruleSyncModal.show).toBe(false);
+
+      const targetDnsRule = wrapper.vm.configData.dns.rules[0];
+      expect(targetDnsRule.domain).toEqual([
+        "existing.com",
+        "shared.com",
+        "brand-new.com",
+      ]);
+    });
+  });
+
+  describe("快捷域名 / IP 分流推荐（支持 IP 与节点按组/关键词筛选）", () => {
+    it("支持纯 IP 地址输入并智能格式化为 CIDR 且配置 ip_cidr 规则", async () => {
+      window.location.hash = "#configs/edit/1/route";
+      const wrapper = await mountConfigEditor();
+      await flushPromises();
+
+      await wrapper.vm.openDomainWizard();
+      expect(wrapper.vm.domainWizardModal.show).toBe(true);
+
+      wrapper.vm.domainWizardModal.inputText = "198.51.100.23";
+      await flushPromises();
+
+      expect(wrapper.vm.domainWizardModal.detectedType).toBe("ip");
+      expect(wrapper.vm.domainWizardModal.detectedIps).toEqual([
+        "198.51.100.23/32",
+      ]);
+      expect(wrapper.vm.domainWizardModal.errorMsg).toBe("");
+      expect(wrapper.vm.domainWizardModal.testUrl).toBe(
+        "http://cp.cloudflare.com/generate_204",
+      );
+
+      wrapper.vm.domainWizardModal.selectedOutbound = "proxy";
+      wrapper.vm.domainWizardModal.targetRuleAction = "create";
+      wrapper.vm.confirmApplyDomainWizard();
+
+      expect(wrapper.vm.domainWizardModal.show).toBe(false);
+      const firstRouteRule = wrapper.vm.configData.route.rules[0];
+      expect(firstRouteRule.outbound).toBe("proxy");
+      expect(firstRouteRule.ip_cidr).toEqual(["198.51.100.23/32"]);
+    });
+
+    it("支持 CIDR 网段输入并写入 ip_cidr 规则", async () => {
+      window.location.hash = "#configs/edit/1/route";
+      const wrapper = await mountConfigEditor();
+      await flushPromises();
+
+      await wrapper.vm.openDomainWizard();
+      wrapper.vm.domainWizardModal.inputText = "203.0.113.0/24\n192.168.1.10";
+      await flushPromises();
+
+      expect(wrapper.vm.domainWizardModal.detectedType).toBe("ip");
+      expect(wrapper.vm.domainWizardModal.detectedIps).toEqual([
+        "203.0.113.0/24",
+        "192.168.1.10/32",
+      ]);
+
+      wrapper.vm.domainWizardModal.selectedOutbound = "cf_tunnel";
+      wrapper.vm.domainWizardModal.targetRuleAction = "create";
+      wrapper.vm.confirmApplyDomainWizard();
+
+      const createdRule = wrapper.vm.configData.route.rules[0];
+      expect(createdRule.ip_cidr).toEqual([
+        "203.0.113.0/24",
+        "192.168.1.10/32",
+      ]);
+    });
+
+    it("支持域名与 IP 混合模式输入，同时生成 domain 与 ip_cidr", async () => {
+      window.location.hash = "#configs/edit/1/route";
+      const wrapper = await mountConfigEditor();
+      await flushPromises();
+
+      await wrapper.vm.openDomainWizard();
+      wrapper.vm.domainWizardModal.inputText = "api.github.com 45.76.12.34";
+      await flushPromises();
+
+      expect(wrapper.vm.domainWizardModal.detectedType).toBe("mixed");
+      expect(wrapper.vm.domainWizardModal.detectedDomains).toEqual([
+        "api.github.com",
+      ]);
+      expect(wrapper.vm.domainWizardModal.detectedIps).toEqual([
+        "45.76.12.34/32",
+      ]);
+
+      wrapper.vm.domainWizardModal.selectedOutbound = "proxy";
+      wrapper.vm.domainWizardModal.targetRuleAction = "create";
+      wrapper.vm.confirmApplyDomainWizard();
+
+      const createdRule = wrapper.vm.configData.route.rules[0];
+      expect(createdRule.domain).toEqual(["api.github.com"]);
+      expect(createdRule.ip_cidr).toEqual(["45.76.12.34/32"]);
+    });
+
+    it("节点筛选面板支持关键词筛选与全选/清空操作", async () => {
+      window.location.hash = "#configs/edit/1/route";
+      const wrapper = await mountConfigEditor();
+      await flushPromises();
+
+      wrapper.vm.configData.outbounds = [
+        { tag: "node1", type: "vless", server: "1.1.1.1", server_port: 443 },
+        { tag: "node2", type: "vmess", server: "2.2.2.2", server_port: 8080 },
+        { tag: "cf_tunnel", type: "urltest", outbounds: ["node1", "node2"] },
+      ];
+
+      await wrapper.vm.openDomainWizard();
+      expect(wrapper.vm.domainWizardModal.selectedNodeTags.length).toBeGreaterThan(0);
+
+      // 清空节点
+      const clearBtn = wrapper.find(".wizard-clear-nodes-btn");
+      if (clearBtn.exists()) {
+        await clearBtn.trigger("click");
+      } else {
+        wrapper.vm.clearWizardNodes();
+      }
+      expect(wrapper.vm.domainWizardModal.selectedNodeTags.length).toBe(0);
+
+      // 全选全部节点
+      const selectAllBtn = wrapper.find(".wizard-select-all-btn");
+      if (selectAllBtn.exists()) {
+        await selectAllBtn.trigger("click");
+      } else {
+        wrapper.vm.selectAllWizardNodes();
+      }
+      expect(wrapper.vm.domainWizardModal.selectedNodeTags.length).toBe(
+        wrapper.vm.availableNodesForWizard.length,
+      );
+
+      // 关键词筛选
+      wrapper.vm.domainWizardModal.nodeSearch = "node1";
+      await flushPromises();
+      const filtered = wrapper.vm.filteredNodesForWizard;
+      expect(filtered.every((n) => n.tag.includes("node1"))).toBe(true);
+
+      // 未选节点时阻止测速
+      wrapper.vm.domainWizardModal.selectedNodeTags = [];
+      wrapper.vm.domainWizardModal.inputText = "1.2.3.4";
+      await flushPromises();
+      await wrapper.vm.startLatencyTest();
+      expect(mockShowToast).toHaveBeenCalledWith("请至少选择一个待测试节点", "warning");
+    });
   });
 
   describe("配置列表与同步最新资源", () => {

@@ -137,6 +137,7 @@ pub fn sanitize_log_value(log: &mut Value) {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub fn generate_config_with_base(
     _conn: &Connection,
     mut log: Value,
@@ -188,7 +189,7 @@ pub fn sync_config_with_latest_resources(
         "v2ray",
     ];
 
-    let deleted_set: HashSet<&str> = deleted_tags.iter().map(|s| s.as_str()).collect();
+    let deleted_set: HashSet<&str> = deleted_tags.iter().map(std::string::String::as_str).collect();
 
     // 1. Collect non-group non-proxy system outbounds and custom nodes
     let mut system_outbounds = Vec::new();
@@ -205,7 +206,8 @@ pub fn sync_config_with_latest_resources(
             ) {
                 // Outbound groups will be refreshed from database
                 continue;
-            } else if proxy_types.contains(&o_type) {
+            }
+            if proxy_types.contains(&o_type) {
                 if !deleted_set.contains(o_tag) {
                     template_custom_nodes.push(o.clone());
                 }
@@ -362,7 +364,7 @@ pub fn sync_config_with_latest_resources(
             if let Some(final_tag) = route_obj.get("final").and_then(|f| f.as_str())
                 && !all_valid_tags.contains(final_tag)
             {
-                repaired_tags.push(format!("route.final ({} -> direct)", final_tag));
+                repaired_tags.push(format!("route.final ({final_tag} -> direct)"));
                 route_obj.insert("final".to_string(), json!("direct"));
             }
             if let Some(rules) = route_obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
@@ -415,7 +417,7 @@ mod tests {
         let mut log = json!({});
         sanitize_log_value(&mut log);
         assert_eq!(log.get("level").and_then(|v| v.as_str()), Some("info"));
-        assert_eq!(log.get("timestamp").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(log.get("timestamp").and_then(serde_json::Value::as_bool), Some(true));
 
         let mut custom_log =
             json!({ "level": "warn", "output": "sing-box.log", "timestamp": false });
@@ -429,7 +431,7 @@ mod tests {
             Some("sing-box.log")
         );
         assert_eq!(
-            custom_log.get("timestamp").and_then(|v| v.as_bool()),
+            custom_log.get("timestamp").and_then(serde_json::Value::as_bool),
             Some(false)
         );
     }

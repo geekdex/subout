@@ -49,8 +49,7 @@ impl PlatformStrategy for WindowsPlatform {
             "TUN 虚拟网卡设备冲突：检测到系统中存在残留的 Wintun 虚拟网卡（通常是上次异常关闭或其它代理软件残留）。已自动执行清理，请点击重新启动。若仍报错，请在设备管理器中卸载残存的 Wintun 网卡或重启电脑。".to_string()
         } else {
             format!(
-                "TUN 模式启动失败 ({}): 创建 Wintun 虚拟网卡需要 Windows 系统管理员权限。请以管理员身份运行 Subout 后重试。",
-                err
+                "TUN 模式启动失败 ({err}): 创建 Wintun 虚拟网卡需要 Windows 系统管理员权限。请以管理员身份运行 Subout 后重试。"
             )
         }
     }
@@ -139,7 +138,7 @@ impl PlatformStrategy for WindowsPlatform {
                 if let Ok(output) = std::process::Command::new("tasklist")
                     .args([
                         "/FI",
-                        &format!("IMAGENAME eq {}", img_name),
+                        &format!("IMAGENAME eq {img_name}"),
                         "/FO",
                         "CSV",
                         "/NH",
@@ -289,13 +288,12 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn external_process_stop_failed_message(&self, pid: u32, _has_sudo_pass: bool) -> String {
         format!(
-            "终止/接管外部进程 (PID: {}) 失败：进程仍在运行。请以管理员身份运行 Subout，或在 PowerShell (管理员) 中执行 Stop-Service sing-box; Set-Service sing-box -StartupType Disabled / taskkill /F /PID {} 终止该进程",
-            pid, pid
+            "终止/接管外部进程 (PID: {pid}) 失败：进程仍在运行。请以管理员身份运行 Subout，或在 PowerShell (管理员) 中执行 Stop-Service sing-box; Set-Service sing-box -StartupType Disabled / taskkill /F /PID {pid} 终止该进程"
         )
     }
 
     fn enable_system_proxy(&self, port: u16, _sudo_pass: Option<&str>) {
-        let proxy_addr = format!("127.0.0.1:{}", port);
+        let proxy_addr = format!("127.0.0.1:{port}");
         let override_hosts = "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*";
 
         let _ = std::process::Command::new("reg")
@@ -426,9 +424,7 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn default_data_dir(&self) -> PathBuf {
         std::env::var("ProgramData")
-            .or_else(|_| std::env::var("ALLUSERSPROFILE"))
-            .map(|p| PathBuf::from(p).join("Subout"))
-            .unwrap_or_else(|_| PathBuf::from(r"C:\ProgramData\Subout"))
+            .or_else(|_| std::env::var("ALLUSERSPROFILE")).map_or_else(|_| PathBuf::from(r"C:\ProgramData\Subout"), |p| PathBuf::from(p).join("Subout"))
     }
 
     fn default_config_dir(&self, data_dir: &Path) -> PathBuf {
@@ -449,10 +445,10 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn standard_singbox_candidates(&self, binary_name: &str) -> Vec<PathBuf> {
         let mut candidates = vec![
-            PathBuf::from(format!(r"C:\Program Files\Subout\{}", binary_name)),
-            PathBuf::from(format!(r"C:\Program Files\sing-box\{}", binary_name)),
-            PathBuf::from(format!(r"C:\ProgramData\Subout\bin\{}", binary_name)),
-            PathBuf::from(format!(r"C:\ProgramData\subout\bin\{}", binary_name)),
+            PathBuf::from(format!(r"C:\Program Files\Subout\{binary_name}")),
+            PathBuf::from(format!(r"C:\Program Files\sing-box\{binary_name}")),
+            PathBuf::from(format!(r"C:\ProgramData\Subout\bin\{binary_name}")),
+            PathBuf::from(format!(r"C:\ProgramData\subout\bin\{binary_name}")),
         ];
 
         if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
@@ -578,15 +574,14 @@ pub fn filter_conflicting_processes(
 
         let is_subout_instance = cmdline
             .as_deref()
-            .map(|c| {
+            .is_some_and(|c| {
                 let c_lower = c.to_lowercase();
                 c_lower.contains("subout")
                     || c.contains(&config_path_str)
                     || c.contains(&config_path_norm)
                     || c_lower.contains("sing-box.json")
                     || c_lower.contains("sing-box-running.json")
-            })
-            .unwrap_or(false);
+            });
 
         if is_subout_instance {
             continue;
@@ -707,21 +702,21 @@ mod tests {
                 parent_process_id: Some(100),
                 name: Some("powershell.exe".to_string()),
                 command_line: Some(r#""powershell" -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'sing-box.exe'\"""#.to_string()),
-                executable_path: Some(r#"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"#.to_string()),
+                executable_path: Some(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".to_string()),
             },
             CimProcessItem {
                 process_id: Some(3000),
                 parent_process_id: Some(100),
                 name: Some("cargo.exe".to_string()),
                 command_line: Some("cargo run".to_string()),
-                executable_path: Some(r#"C:\Users\pan\.cargo\bin\cargo.exe"#.to_string()),
+                executable_path: Some(r"C:\Users\pan\.cargo\bin\cargo.exe".to_string()),
             },
             CimProcessItem {
                 process_id: Some(4000),
                 parent_process_id: Some(100),
                 name: Some("subout.exe".to_string()),
                 command_line: Some("subout.exe web".to_string()),
-                executable_path: Some(r#"C:\Subout\subout.exe"#.to_string()),
+                executable_path: Some(r"C:\Subout\subout.exe".to_string()),
             },
         ];
 
@@ -758,10 +753,10 @@ mod tests {
                 parent_process_id: Some(current_pid),
                 name: Some("sing-box.exe".to_string()),
                 command_line: Some(
-                    r#"sing-box.exe -D C:\Subout run -c C:\Subout\generated\sing-box.json"#
+                    r"sing-box.exe -D C:\Subout run -c C:\Subout\generated\sing-box.json"
                         .to_string(),
                 ),
-                executable_path: Some(r#"C:\Subout\bin\sing-box.exe"#.to_string()),
+                executable_path: Some(r"C:\Subout\bin\sing-box.exe".to_string()),
             },
             // Another child of current_pid
             CimProcessItem {
@@ -777,9 +772,9 @@ mod tests {
                 parent_process_id: Some(1),
                 name: Some("sing-box.exe".to_string()),
                 command_line: Some(
-                    r#"sing-box.exe run -c C:\etc\sing-box\config.json"#.to_string(),
+                    r"sing-box.exe run -c C:\etc\sing-box\config.json".to_string(),
                 ),
-                executable_path: Some(r#"C:\Program Files\sing-box\sing-box.exe"#.to_string()),
+                executable_path: Some(r"C:\Program Files\sing-box\sing-box.exe".to_string()),
             },
         ];
 
@@ -790,11 +785,11 @@ mod tests {
         assert_eq!(filtered[0].name, "sing-box.exe");
         assert_eq!(
             filtered[0].cmdline.as_deref(),
-            Some(r#"sing-box.exe run -c C:\etc\sing-box\config.json"#)
+            Some(r"sing-box.exe run -c C:\etc\sing-box\config.json")
         );
         assert_eq!(
             filtered[0].exe_path.as_deref(),
-            Some(r#"C:\Program Files\sing-box\sing-box.exe"#)
+            Some(r"C:\Program Files\sing-box\sing-box.exe")
         );
     }
 }

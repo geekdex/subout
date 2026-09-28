@@ -5,9 +5,9 @@ pub use types::Outbound;
 pub use utils::decode_base64;
 
 use percent_encoding::percent_decode_str;
-use types::*;
+use types::{VmessJsonRaw, TlsConfig, VmessOutbound, SocksOutbound, HttpOutbound, AnytlsOutbound, TrojanOutbound, RealityConfig, UtlsConfig, VlessOutbound, ShadowsocksOutbound, HysteriaOutbound, Hysteria2Obfs, Hysteria2Outbound};
 use url::Url;
-use utils::*;
+use utils::{parse_transport_params, maybe_decode_base64, parse_mbps};
 
 pub fn parse_line(line: &str) -> Option<Outbound> {
     let line = line.trim();
@@ -109,7 +109,7 @@ pub fn parse_line(line: &str) -> Option<Outbound> {
             && let Some(decoded_rest) = decode_base64(base64_part.to_string())
             && decoded_rest.contains('@')
         {
-            let mock_url = format!("http://{}{}", decoded_rest, fragment);
+            let mock_url = format!("http://{decoded_rest}{fragment}");
             if let Ok(parsed_url) = Url::parse(&mock_url) {
                 return parse_url_to_outbound(&parsed_url, true);
             }
@@ -141,17 +141,13 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
     let scheme = url.scheme();
     let host = url.host_str()?.to_string();
     let port = url.port().unwrap_or(match scheme {
-        "https" => 443,
         "http" => 80,
         "socks" | "socks5" => 1080,
-        "trojan" | "vless" | "anytls" | "hysteria" | "hysteria2" => 443,
         _ => 443,
     });
 
     let tag = url
-        .fragment()
-        .map(|f| percent_decode_str(f).decode_utf8_lossy().into_owned())
-        .unwrap_or_else(|| format!("{}:{}", host, port));
+        .fragment().map_or_else(|| format!("{host}:{port}"), |f| percent_decode_str(f).decode_utf8_lossy().into_owned());
 
     let username = if url.username().is_empty() {
         None
@@ -209,8 +205,7 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
             let pass = password.clone().or(username.clone()).unwrap_or_default();
             let allow_insecure = params
                 .get("allowInsecure")
-                .map(|v| v == "1" || v == "true")
-                .unwrap_or(false);
+                .is_some_and(|v| v == "1" || v == "true");
             let sni = extract_sni(&host, &params);
 
             Some(Outbound::Anytls(AnytlsOutbound {
@@ -229,7 +224,7 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
         }
         "trojan" => {
             let pass = password.clone().or(username.clone()).unwrap_or_default();
-            let has_tls = params.get("security").map(|v| v == "tls").unwrap_or(true);
+            let has_tls = params.get("security").is_none_or(|v| v == "tls");
             let tls_config = if has_tls {
                 Some(TlsConfig {
                     enabled: true,
@@ -350,8 +345,7 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
 
             let allow_insecure = params
                 .get("insecure")
-                .map(|v| v == "1" || v == "true")
-                .unwrap_or(false);
+                .is_some_and(|v| v == "1" || v == "true");
             let sni = extract_sni(&host, &params);
 
             let up_mbps = params
@@ -394,8 +388,7 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
 
             let allow_insecure = params
                 .get("insecure")
-                .map(|v| v == "1" || v == "true")
-                .unwrap_or(false);
+                .is_some_and(|v| v == "1" || v == "true");
             let sni = extract_sni(&host, &params);
 
             let up_mbps = params
