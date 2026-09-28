@@ -41,7 +41,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
 
     // Initialize database
     let _conn = db::init_db(&db_path)?;
-    println!("[Init] Database initialized at: {}", db_path);
+    println!("[Init] Database initialized at: {db_path}");
 
     // Reset auto_update_last_status to failed if it was left as running due to a crash/restart
     if let Ok(Some(status)) = db::get_setting(&_conn, "auto_update_last_status")
@@ -53,8 +53,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             .unwrap_or_default();
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let new_log = format!(
-            "{}\n[{}] 提示: 系统重启，终止了上次运行中可能被中断的自动更新任务。\n",
-            existing_log, timestamp
+            "{existing_log}\n[{timestamp}] 提示: 系统重启，终止了上次运行中可能被中断的自动更新任务。\n"
         );
         let _ = db::update_setting(&_conn, "auto_update_last_log", &new_log);
     }
@@ -88,16 +87,16 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         )
         .await
         {
-            eprintln!("[AutoUpdate] Background check error on startup: {}", e);
+            eprintln!("[AutoUpdate] Background check error on startup: {e}");
         }
         loop {
             tokio::select! {
                 _ = auto_update_rx.changed() => {
                     break;
                 }
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {
+                () = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {
                     if let Err(e) = crate::auto_update::check_and_run_auto_update(&db_path_clone, Some(service_mgr_clone.clone())).await {
-                        eprintln!("[AutoUpdate] Background check error: {}", e);
+                        eprintln!("[AutoUpdate] Background check error: {e}");
                     }
                 }
             }
@@ -260,8 +259,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             configured_port = Some(p);
         } else {
             return Err(format!(
-                "Error: Invalid port number '{}' in PORT environment variable.",
-                port_env
+                "Error: Invalid port number '{port_env}' in PORT environment variable."
             )
             .into());
         }
@@ -271,11 +269,11 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         let addr = SocketAddr::from(([0, 0, 0, 0], p));
         match tokio::net::TcpListener::bind(addr).await {
             Ok(l) => {
-                println!("[Server] Subout Panel running on http://localhost:{}", p);
+                println!("[Server] Subout Panel running on http://localhost:{p}");
                 l
             }
             Err(e) => {
-                return Err(format!("Failed to bind to configured port {}: {}", p, e).into());
+                return Err(format!("Failed to bind to configured port {p}: {e}").into());
             }
         }
     } else {
@@ -283,19 +281,14 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         for i in 0..=10 {
             let try_port = 1234 + i;
             let addr = SocketAddr::from(([0, 0, 0, 0], try_port));
-            match tokio::net::TcpListener::bind(addr).await {
-                Ok(l) => {
-                    println!(
-                        "[Server] Subout Panel running on http://localhost:{}",
-                        try_port
-                    );
-                    bind_result = Some(l);
-                    break;
-                }
-                Err(_) => {
-                    // Port is occupied, continue probing next port
-                }
+            if let Ok(l) = tokio::net::TcpListener::bind(addr).await {
+                println!(
+                    "[Server] Subout Panel running on http://localhost:{try_port}"
+                );
+                bind_result = Some(l);
+                break;
             }
+            // Port is occupied, continue probing next port
         }
         if let Some(l) = bind_result {
             l
@@ -330,8 +323,8 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         let terminate = std::future::pending::<()>();
 
         tokio::select! {
-            _ = ctrl_c => {},
-            _ = terminate => {},
+            () = ctrl_c => {},
+            () = terminate => {},
         }
 
         println!("\n[Server] 正在停止服务并安全退出... (再次按 Ctrl+C 强制退出)");
@@ -359,10 +352,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
     tokio::select! {
         res = serve_future => {
             if let Err(e) = res {
-                eprintln!("[Server] Web server error: {}", e);
+                eprintln!("[Server] Web server error: {e}");
             }
         }
-        _ = async {
+        () = async {
             let _ = shutdown_exit_rx.changed().await;
             // Allow up to 300ms for active HTTP connections to flush before exiting
             tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;

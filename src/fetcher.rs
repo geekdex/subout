@@ -116,7 +116,7 @@ pub async fn fetch_and_update_subscription(db_path: &str, sub_id: i64) -> Result
                 *count += 1;
 
                 if *count > 1 {
-                    let new_tag = format!("{}-{}", base_tag, count);
+                    let new_tag = format!("{base_tag}-{count}");
                     outbound.set_tag(new_tag);
                 }
 
@@ -194,7 +194,7 @@ pub async fn fetch_all_active_subscriptions(db_path: &str) -> Result<Vec<String>
     for sub in subs {
         if sub.enabled {
             match fetch_and_update_subscription(db_path, sub.id).await {
-                Ok(_) => {
+                Ok(()) => {
                     messages.push(format!(
                         "Successfully fetched subscription '{}'.",
                         sub.label

@@ -54,7 +54,7 @@ pub async fn download_kernel(
         if let Err(e) =
             kernel::download_and_install_kernel(status_lock_clone, cancel_flag_clone).await
         {
-            eprintln!("[Kernel] Download and install task ended: {}", e);
+            eprintln!("[Kernel] Download and install task ended: {e}");
         }
     });
 

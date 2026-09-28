@@ -24,7 +24,7 @@ pub fn match_domain_suffix(domain: &str, suffix: &str) -> bool {
     if s.is_empty() || d.is_empty() {
         return false;
     }
-    d == s || d.ends_with(&format!(".{}", s))
+    d == s || d.ends_with(&format!(".{s}"))
 }
 
 /// Matches domain keyword case-insensitively.
@@ -68,72 +68,74 @@ pub fn ip_in_cidr(ip: IpAddr, cidr: &str) -> bool {
     }
 }
 
+const KNOWN_CN_SUFFIXES: &[&str] = &[
+    "qq.com",
+    "tencent.com",
+    "baidu.com",
+    "bilibili.com",
+    "zhihu.com",
+    "taobao.com",
+    "alipay.com",
+    "aliyun.com",
+    "aliyuncs.com",
+    "alibaba.com",
+    "jd.com",
+    "163.com",
+    "126.com",
+    "sina.com",
+    "sina.com.cn",
+    "weibo.com",
+    "bytedance.com",
+    "douyin.com",
+    "toutiao.com",
+    "xiaohongshu.com",
+    "meituan.com",
+    "kuaishou.com",
+    "csdn.net",
+    "oschina.net",
+    "gitee.com",
+    "deepseek.com",
+    "moonshot.cn",
+    "zhipuai.cn",
+    "baichuan-ai.com",
+    "huawei.com",
+    "honor.com",
+    "xiaomi.com",
+    "oppo.com",
+    "vivo.com",
+    "10010.com",
+    "189.cn",
+    "12306.cn",
+    "gov.cn",
+    "cn.bing.com",
+    "npmmirror.com",
+    "packages.microsoft.com",
+    "bbs.deepin.org",
+    "mama.cn",
+    "soyobao.com",
+    "xiaoshuxiong.com",
+    "xscat.net",
+    "qcloud.com",
+    "byteimg.com",
+    "spendleaf.com",
+    "i-m.dev",
+    "aiapp.pro",
+    "webtech.wiki",
+    "zed.dev",
+];
+
 /// Checks if a domain belongs to mainland China domains / geosite-cn.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 pub fn is_cn_domain(domain: &str) -> bool {
     let d = domain.trim().trim_end_matches('.').to_ascii_lowercase();
     if d.ends_with(".cn") {
         return true;
     }
 
-    const KNOWN_CN_SUFFIXES: &[&str] = &[
-        "qq.com",
-        "tencent.com",
-        "baidu.com",
-        "bilibili.com",
-        "zhihu.com",
-        "taobao.com",
-        "alipay.com",
-        "aliyun.com",
-        "aliyuncs.com",
-        "alibaba.com",
-        "jd.com",
-        "163.com",
-        "126.com",
-        "sina.com",
-        "sina.com.cn",
-        "weibo.com",
-        "bytedance.com",
-        "douyin.com",
-        "toutiao.com",
-        "xiaohongshu.com",
-        "meituan.com",
-        "kuaishou.com",
-        "csdn.net",
-        "oschina.net",
-        "gitee.com",
-        "deepseek.com",
-        "moonshot.cn",
-        "zhipuai.cn",
-        "baichuan-ai.com",
-        "huawei.com",
-        "honor.com",
-        "xiaomi.com",
-        "oppo.com",
-        "vivo.com",
-        "10010.com",
-        "189.cn",
-        "12306.cn",
-        "gov.cn",
-        "cn.bing.com",
-        "npmmirror.com",
-        "packages.microsoft.com",
-        "bbs.deepin.org",
-        "mama.cn",
-        "soyobao.com",
-        "xiaoshuxiong.com",
-        "xscat.net",
-        "qcloud.com",
-        "byteimg.com",
-        "spendleaf.com",
-        "i-m.dev",
-        "aiapp.pro",
-        "webtech.wiki",
-        "zed.dev",
-    ];
 
     KNOWN_CN_SUFFIXES
         .iter()
-        .any(|suffix| d == *suffix || d.ends_with(&format!(".{}", suffix)))
+        .any(|suffix| d == *suffix || d.ends_with(&format!(".{suffix}")))
 }
 
 /// Matches geosite tag for domain.
@@ -268,9 +270,9 @@ pub fn domain_matches_geosite(domain: &str, tag: &str) -> bool {
         }
         other => {
             d == other
-                || d.ends_with(&format!(".{}", other))
-                || d == format!("{}.com", other)
-                || d.ends_with(&format!(".{}.com", other))
+                || d.ends_with(&format!(".{other}"))
+                || d == format!("{other}.com")
+                || d.ends_with(&format!(".{other}.com"))
         }
     }
 }
@@ -372,14 +374,14 @@ fn test_rule_criteria(
     for rs in rule_sets {
         let rs_trimmed = rs.trim();
         if domain_matches_geosite(&d_lower, rs_trimmed) {
-            return Some(format!("规则集 ({})", rs_trimmed));
+            return Some(format!("规则集 ({rs_trimmed})"));
         }
     }
 
     // 6. Private IP matching
     if rule
         .get("ip_is_private")
-        .and_then(|v| v.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
         && is_private_ip
     {
@@ -398,13 +400,13 @@ fn test_rule_criteria(
     // 8. Port matching
     let ports = get_port_list(rule.get("port"));
     if !ports.is_empty() && ports.contains(&port) {
-        return Some(format!("目标端口 ({})", port));
+        return Some(format!("目标端口 ({port})"));
     }
 
     // 9. Protocol matching
     let protocols = get_str_list(rule.get("protocol"));
     if !protocols.is_empty() && protocols.iter().any(|p| p.eq_ignore_ascii_case(protocol)) {
-        return Some(format!("协议 ({})", protocol));
+        return Some(format!("协议 ({protocol})"));
     }
 
     None
@@ -441,15 +443,14 @@ fn evaluate_rule(
                 .or_else(|| sub_rules.first()?.get(target_field).and_then(|v| v.as_str()))?
                 .to_string();
             return Some((matched_reasons.join(" + "), target));
-        } else {
-            // "or" mode (default)
-            for sub in sub_rules {
-                if let Some(desc) = test_rule_criteria(sub, domain, ip, port, protocol, is_private_ip) {
-                    let target = target_opt
-                        .or_else(|| sub.get(target_field).and_then(|v| v.as_str()))?
-                        .to_string();
-                    return Some((desc, target));
-                }
+        }
+        // "or" mode (default)
+        for sub in sub_rules {
+            if let Some(desc) = test_rule_criteria(sub, domain, ip, port, protocol, is_private_ip) {
+                let target = target_opt
+                    .or_else(|| sub.get(target_field).and_then(|v| v.as_str()))?
+                    .to_string();
+                return Some((desc, target));
             }
         }
     } else if let Some(desc) = test_rule_criteria(rule, domain, ip, port, protocol, is_private_ip) {
@@ -468,8 +469,8 @@ pub fn format_dns_server(server_tag: &str, dns_val: &Value) -> String {
             if s.get("tag").and_then(|t| t.as_str()) == Some(server_tag) {
                 let srv_type = s.get("type").and_then(|t| t.as_str()).unwrap_or("udp");
                 return match srv_type {
-                    "fakeip" => format!("{} (FakeIP)", server_tag),
-                    "local" => format!("{} (本地解析)", server_tag),
+                    "fakeip" => format!("{server_tag} (FakeIP)"),
+                    "local" => format!("{server_tag} (本地解析)"),
                     "https" | "tls" | "h3" | "quic" | "tcp" | "udp" => {
                         let host = s.get("server").and_then(|h| h.as_str()).unwrap_or("");
                         let detour = s.get("detour").and_then(|d| d.as_str());
@@ -478,10 +479,10 @@ pub fn format_dns_server(server_tag: &str, dns_val: &Value) -> String {
                         } else if !host.is_empty() {
                             format!("{} ({} {})", server_tag, srv_type.to_uppercase(), host)
                         } else {
-                            format!("{} ({})", server_tag, srv_type)
+                            format!("{server_tag} ({srv_type})")
                         }
                     }
-                    other => format!("{} ({})", server_tag, other),
+                    other => format!("{server_tag} ({other})"),
                 };
             }
         }
@@ -520,19 +521,19 @@ pub fn format_outbound(outbound_tag: &str, config_val: &Value) -> String {
                         if let Some(dt) = default_target
                             && dt != outbound_tag
                         {
-                            return format!("{} ➔ {} (选择组)", outbound_tag, dt);
+                            return format!("{outbound_tag} ➔ {dt} (选择组)");
                         }
-                        return format!("{} (选择组)", outbound_tag);
+                        return format!("{outbound_tag} (选择组)");
                     }
                     "urltest" => {
-                        return format!("{} (自动优选)", outbound_tag);
+                        return format!("{outbound_tag} (自动优选)");
                     }
                     "vless" | "vmess" | "trojan" | "hysteria2" | "hysteria" | "shadowsocks"
                     | "socks" | "http" | "tuic" | "wireguard" | "anytls" => {
-                        return format!("{} ({} 节点)", outbound_tag, o_type);
+                        return format!("{outbound_tag} ({o_type} 节点)");
                     }
                     other if !other.is_empty() => {
-                        return format!("{} ({})", outbound_tag, other);
+                        return format!("{outbound_tag} ({other})");
                     }
                     _ => return outbound_tag.to_string(),
                 }
@@ -550,7 +551,7 @@ pub fn parse_target_url(url_str: &str) -> (String, Option<IpAddr>, u16, String, 
     let full_url = if has_scheme {
         raw.to_string()
     } else {
-        format!("http://{}", raw)
+        format!("http://{raw}")
     };
 
     if let Ok(parsed) = url::Url::parse(&full_url) {
@@ -702,7 +703,7 @@ pub fn load_active_config(db_path: &str) -> Option<Value> {
     None
 }
 
-/// Convenient helper for `test_site_reachability` to evaluate trace given AppState and URL.
+/// Convenient helper for `test_site_reachability` to evaluate trace given `AppState` and URL.
 pub fn evaluate_site_trace(state: &crate::web::AppState, url_str: &str) -> Option<RouteTraceResult> {
     let config_val = load_active_config(&state.db_path)?;
     Some(trace_rules_for_url(&config_val, url_str))

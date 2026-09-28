@@ -12,7 +12,7 @@ pub fn hash_password(password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    format!("{result:x}")
 }
 
 pub fn init_db(db_path: &str) -> Result<Connection> {
@@ -219,8 +219,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         let has_col: i64 = conn
             .query_row(
                 &format!(
-                    "SELECT COUNT(*) FROM pragma_table_info('outbound_groups') WHERE name='{}'",
-                    col
+                    "SELECT COUNT(*) FROM pragma_table_info('outbound_groups') WHERE name='{col}'"
                 ),
                 [],
                 |r| r.get(0),
@@ -228,7 +227,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
             .unwrap_or(0);
         if has_col == 0 {
             let _ = conn.execute(
-                &format!("ALTER TABLE outbound_groups ADD COLUMN {} TEXT", col),
+                &format!("ALTER TABLE outbound_groups ADD COLUMN {col} TEXT"),
                 [],
             );
         }
@@ -344,7 +343,7 @@ pub fn add_subscription(
     filter_keywords: &str,
     delete_on_update: bool,
 ) -> Result<i64> {
-    let delete_val = if delete_on_update { 1 } else { 0 };
+    let delete_val = i32::from(delete_on_update);
     conn.execute(
         "INSERT INTO subscriptions (url, label, enabled, filter_keywords, delete_on_update) VALUES (?, ?, 1, ?, ?)",
         params![url, label, filter_keywords, delete_val],
@@ -361,8 +360,8 @@ pub fn update_subscription(
     enabled: bool,
     delete_on_update: bool,
 ) -> Result<()> {
-    let enabled_int = if enabled { 1 } else { 0 };
-    let delete_val = if delete_on_update { 1 } else { 0 };
+    let enabled_int = i32::from(enabled);
+    let delete_val = i32::from(delete_on_update);
     conn.execute(
         "UPDATE subscriptions SET url = ?, label = ?, filter_keywords = ?, enabled = ?, delete_on_update = ? WHERE id = ?",
         params![url, label, filter_keywords, enabled_int, delete_val, id],
@@ -378,11 +377,11 @@ pub fn delete_subscription(conn: &Connection, id: i64) -> Result<()> {
 
 fn apply_latency_filter(column: &str, filter: &str, query_parts: &mut Vec<String>) {
     match filter {
-        "success" => query_parts.push(format!(" (n.{} >= 0 AND n.{} < 100) ", column, column)),
-        "info" => query_parts.push(format!(" (n.{} >= 100 AND n.{} < 300) ", column, column)),
-        "warn" => query_parts.push(format!(" (n.{} >= 300) ", column)),
-        "danger" => query_parts.push(format!(" (n.{} = -1) ", column)),
-        "untested" => query_parts.push(format!(" (n.{} IS NULL) ", column)),
+        "success" => query_parts.push(format!(" (n.{column} >= 0 AND n.{column} < 100) ")),
+        "info" => query_parts.push(format!(" (n.{column} >= 100 AND n.{column} < 300) ")),
+        "warn" => query_parts.push(format!(" (n.{column} >= 300) ")),
+        "danger" => query_parts.push(format!(" (n.{column} = -1) ")),
+        "untested" => query_parts.push(format!(" (n.{column} IS NULL) ")),
         _ => {}
     }
 }
@@ -403,7 +402,7 @@ pub fn get_nodes_paginated(
 
     if !search.is_empty() {
         query_parts.push(" (n.tag LIKE ?1 OR n.server LIKE ?1) ".to_string());
-        params_vec.push(Box::new(format!("%{}%", search)));
+        params_vec.push(Box::new(format!("%{search}%")));
     }
 
     if let Some(sub_id) = subscription_id {
@@ -411,7 +410,7 @@ pub fn get_nodes_paginated(
         if sub_id == -1 {
             query_parts.push(" n.is_custom = 1 ".to_string());
         } else {
-            query_parts.push(format!(" n.subscription_id = ?{} ", param_index));
+            query_parts.push(format!(" n.subscription_id = ?{param_index} "));
             params_vec.push(Box::new(sub_id));
         }
     }
@@ -424,14 +423,14 @@ pub fn get_nodes_paginated(
     }
 
     let filter_clause = if query_parts.is_empty() {
-        "".to_string()
+        String::new()
     } else {
         format!("WHERE {}", query_parts.join(" AND "))
     };
 
-    let count_query = format!("SELECT COUNT(*) FROM nodes n {}", filter_clause);
+    let count_query = format!("SELECT COUNT(*) FROM nodes n {filter_clause}");
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(std::convert::AsRef::as_ref).collect();
     let total_count: i64 = conn.query_row(&count_query, params_slice.as_slice(), |r| r.get(0))?;
 
     let query_str = format!(
@@ -449,7 +448,7 @@ pub fn get_nodes_paginated(
     params_vec.push(Box::new(limit));
     params_vec.push(Box::new(offset));
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(std::convert::AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(&query_str)?;
     let nodes = stmt
@@ -612,8 +611,8 @@ pub fn save_node(
     enabled: bool,
     is_custom: bool,
 ) -> Result<()> {
-    let enabled_int = if enabled { 1 } else { 0 };
-    let is_custom_int = if is_custom { 1 } else { 0 };
+    let enabled_int = i32::from(enabled);
+    let is_custom_int = i32::from(is_custom);
     conn.execute(
         "INSERT OR REPLACE INTO nodes (subscription_id, tag, node_type, server, port, raw_json, enabled, is_custom) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         params![subscription_id, tag, node_type, server, port, raw_json, enabled_int, is_custom_int],
@@ -643,7 +642,7 @@ pub fn delete_node(conn: &Connection, id: i64) -> Result<()> {
 }
 
 pub fn update_node_status(conn: &Connection, id: i64, enabled: bool) -> Result<()> {
-    let enabled_int = if enabled { 1 } else { 0 };
+    let enabled_int = i32::from(enabled);
     conn.execute(
         "UPDATE nodes SET enabled = ? WHERE id = ?",
         params![enabled_int, id],
@@ -660,7 +659,7 @@ pub fn get_outbound_groups(conn: &Connection) -> Result<Vec<OutboundGroup>> {
             let id: i64 = row.get(0)?;
             let tag: String = row
                 .get::<_, Option<String>>(1)?
-                .unwrap_or_else(|| format!("group-{}", id));
+                .unwrap_or_else(|| format!("group-{id}"));
             let group_type: String = row
                 .get::<_, Option<String>>(2)?
                 .unwrap_or_else(|| "selector".to_string());
@@ -1105,7 +1104,7 @@ mod tests {
         assert_eq!(summary.available_nodes, 0);
         assert_eq!(summary.failed_nodes, 0);
         assert_eq!(summary.untested_nodes, 0);
-        assert_eq!(summary.availability_rate, 0.0);
+        assert!((summary.availability_rate - 0.0).abs() < f64::EPSILON);
         assert_eq!(summary.avg_web_latency, None);
         assert_eq!(summary.avg_tcp_latency, None);
         assert_eq!(summary.fastest_node, None);
@@ -1141,7 +1140,7 @@ mod tests {
         assert_eq!(summary.available_nodes, 3);
         assert_eq!(summary.failed_nodes, 1);
         assert_eq!(summary.untested_nodes, 1);
-        assert_eq!(summary.availability_rate, 75.0); // 3 / 4 = 75.0%
+        assert!((summary.availability_rate - 75.0).abs() < f64::EPSILON); // 3 / 4 = 75.0%
 
         // Web avg: (60 + 180 + 420) / 3 = 660 / 3 = 220
         assert_eq!(summary.avg_web_latency, Some(220));

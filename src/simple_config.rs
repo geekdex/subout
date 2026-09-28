@@ -235,10 +235,10 @@ pub fn build_dns_server(tag: &str, address_str: &str, detour: Option<&str>) -> V
     }
 
     let (host, port) = if let Some((h, p_str)) = s.split_once(':') {
-        if !h.contains(':') {
-            (h, p_str.parse::<u16>().ok())
-        } else {
+        if h.contains(':') {
             (s, None)
+        } else {
+            (h, p_str.parse::<u16>().ok())
         }
     } else {
         (s, None)
@@ -404,41 +404,38 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     });
 
     // 4. Inbounds section
-    let inbounds_val = match cfg.inbound.inbound_type.as_str() {
-        "tun" => {
-            let platform = crate::platform::current_platform();
-            let effective_stack = platform.effective_tun_stack(cfg.inbound.tun_stack.as_str());
-            let iface_name = platform.default_tun_interface_name();
-            let strict_route = platform.default_tun_strict_route();
-            let mut tun_obj = json!({
-                "type": "tun",
-                "tag": "tun-in",
-                "address": ["172.19.0.1/30"],
-                "auto_route": cfg.inbound.tun_auto_route,
-                "strict_route": strict_route,
-                "stack": effective_stack
-            });
-            if !iface_name.is_empty() {
-                tun_obj["interface_name"] = json!(iface_name);
+    let inbounds_val = if cfg.inbound.inbound_type.as_str() == "tun" {
+        let platform = crate::platform::current_platform();
+        let effective_stack = platform.effective_tun_stack(cfg.inbound.tun_stack.as_str());
+        let iface_name = platform.default_tun_interface_name();
+        let strict_route = platform.default_tun_strict_route();
+        let mut tun_obj = json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "address": ["172.19.0.1/30"],
+            "auto_route": cfg.inbound.tun_auto_route,
+            "strict_route": strict_route,
+            "stack": effective_stack
+        });
+        if !iface_name.is_empty() {
+            tun_obj["interface_name"] = json!(iface_name);
+        }
+        json!([tun_obj])
+    } else {
+        // Mixed port HTTP / SOCKS5
+        let listen_addr = if cfg.inbound.allow_lan {
+            "0.0.0.0"
+        } else {
+            "127.0.0.1"
+        };
+        json!([
+            {
+                "type": "mixed",
+                "tag": "mixed-in",
+                "listen": listen_addr,
+                "listen_port": cfg.inbound.mixed_port
             }
-            json!([tun_obj])
-        }
-        _ => {
-            // Mixed port HTTP / SOCKS5
-            let listen_addr = if cfg.inbound.allow_lan {
-                "0.0.0.0"
-            } else {
-                "127.0.0.1"
-            };
-            json!([
-                {
-                    "type": "mixed",
-                    "tag": "mixed-in",
-                    "listen": listen_addr,
-                    "listen_port": cfg.inbound.mixed_port
-                }
-            ])
-        }
+        ])
     };
 
     // 5. Outbounds section

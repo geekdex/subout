@@ -59,7 +59,7 @@ pub async fn kill_external_service(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("终止外部进程失败: {}", e),
+                format!("终止外部进程失败: {e}"),
             )
         })?;
 
@@ -104,7 +104,7 @@ pub async fn takeover_service(
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("一键接管并启动服务失败: {}", e),
+                    format!("一键接管并启动服务失败: {e}"),
                 )
             })?;
 
@@ -120,7 +120,7 @@ pub async fn takeover_service(
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("接管外部进程失败: {}", e),
+                    format!("接管外部进程失败: {e}"),
                 )
             })?;
 
@@ -164,11 +164,11 @@ pub async fn start_service(
             if err_str.contains("外部 sing-box 服务正在运行")
                 || err_str.contains("外部独立的 sing-box")
             {
-                (StatusCode::CONFLICT, format!("启动服务失败: {}", err_str))
+                (StatusCode::CONFLICT, format!("启动服务失败: {err_str}"))
             } else {
                 (
                     StatusCode::BAD_REQUEST,
-                    format!("启动服务失败: {}", err_str),
+                    format!("启动服务失败: {err_str}"),
                 )
             }
         })?;
@@ -190,7 +190,7 @@ pub async fn stop_service(
     state.service_manager.stop().await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("停止服务失败: {}", e),
+            format!("停止服务失败: {e}"),
         )
     })?;
 
@@ -231,7 +231,7 @@ pub async fn restart_service(
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("重启服务失败: {}", e),
+                format!("重启服务失败: {e}"),
             )
         })?;
 
@@ -268,7 +268,7 @@ pub fn get_config_for_mode(
         simple_config::generate_simple_singbox_config(conn, &simple_cfg).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("生成简单配置失败: {}", e),
+                format!("生成简单配置失败: {e}"),
             )
         })
     } else {
@@ -303,7 +303,7 @@ pub fn get_config_for_mode(
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("生成配置失败: {}", e),
+                    format!("生成配置失败: {e}"),
                 )
             });
         }
@@ -311,7 +311,7 @@ pub fn get_config_for_mode(
         generator::generate_config(conn).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("生成配置失败: {}", e),
+                format!("生成配置失败: {e}"),
             )
         })
     }

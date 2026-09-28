@@ -67,8 +67,7 @@ pub async fn get_groups(
     })?;
     let groups = db::get_outbound_groups(&conn).map_err(|e| {
         eprintln!(
-            "[groups::get_groups] Failed to query outbound_groups: {:?}",
-            e
+            "[groups::get_groups] Failed to query outbound_groups: {e:?}"
         );
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -174,7 +173,7 @@ pub async fn add_group(
         &conn,
         "出站组管理",
         "添加出站组",
-        &format!("添加出站组: {}", tag),
+        &format!("添加出站组: {tag}"),
         final_static_nodes.as_deref(),
     );
 
@@ -274,7 +273,7 @@ pub async fn update_group(
         &conn,
         "出站组管理",
         "修改出站组",
-        &format!("修改出站组: {}", tag),
+        &format!("修改出站组: {tag}"),
         final_static_nodes.as_deref(),
     );
 

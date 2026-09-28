@@ -16,7 +16,7 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
-    /// Initialize global AppPaths with optional explicit CLI overrides.
+    /// Initialize global `AppPaths` with optional explicit CLI overrides.
     pub fn init(
         cli_config_dir: Option<PathBuf>,
         cli_data_dir: Option<PathBuf>,
@@ -40,7 +40,7 @@ impl AppPaths {
             .expect("Global paths must be initialized")
     }
 
-    /// Get the global AppPaths instance (or initialize with defaults if not already initialized).
+    /// Get the global `AppPaths` instance (or initialize with defaults if not already initialized).
     pub fn get() -> &'static AppPaths {
         GLOBAL_PATHS.get_or_init(|| {
             let paths = Self::resolve(None, None, None, None, None, false);
@@ -78,8 +78,7 @@ impl AppPaths {
 
         let is_portable = cli_portable
             || std::env::var("SUBOUT_PORTABLE")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
+                .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
 
         let is_dev = !is_portable && Self::detect_dev_environment();
 
@@ -235,15 +234,14 @@ impl AppPaths {
         self.kernel_dir().join(binary_name)
     }
 
-    /// Helper to generate a unique temporary file path inside `runtime_dir` (fallback to data_dir)
+    /// Helper to generate a unique temporary file path inside `runtime_dir` (fallback to `data_dir`)
     pub fn temp_file_path(&self, prefix: &str, suffix: &str) -> PathBuf {
         let count = TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let pid = std::process::id();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let filename = format!("{}_{}_{}_{}{}", prefix, pid, timestamp, count, suffix);
+            .map_or(0, |d| d.as_millis());
+        let filename = format!("{prefix}_{pid}_{timestamp}_{count}{suffix}");
 
         let target_dir =
             if self.runtime_dir.is_dir() || std::fs::create_dir_all(&self.runtime_dir).is_ok() {
@@ -291,23 +289,25 @@ impl AppPaths {
                 if src.exists() && src != target_db {
                     if std::fs::rename(&src, &target_db).is_ok() {
                         println!(
-                            "[Info] Migrated database file from {:?} to {:?}",
-                            src, target_db
+                            "[Info] Migrated database file from {} to {}",
+                            src.display(),
+                            target_db.display()
                         );
                         break;
                     } else if std::fs::copy(&src, &target_db).is_ok() {
                         let _ = std::fs::remove_file(&src);
                         println!(
-                            "[Info] Migrated database file from {:?} to {:?}",
-                            src, target_db
+                            "[Info] Migrated database file from {} to {}",
+                            src.display(),
+                            target_db.display()
                         );
                         break;
-                    } else {
-                        eprintln!(
-                            "[Warning] Failed to migrate database from {:?} to {:?}",
-                            src, target_db
-                        );
                     }
+                    eprintln!(
+                        "[Warning] Failed to migrate database from {} to {}",
+                        src.display(),
+                        target_db.display()
+                    );
                 }
             }
         }
@@ -370,10 +370,10 @@ impl AppPaths {
             .extend(crate::platform::current_platform().standard_singbox_candidates(binary_name));
 
         // 5. Dev / local directories
-        candidates.push(PathBuf::from(format!("./runtime/data/bin/{}", binary_name)));
-        candidates.push(PathBuf::from(format!("./data/bin/{}", binary_name)));
-        candidates.push(PathBuf::from(format!("./bin/{}", binary_name)));
-        candidates.push(PathBuf::from(format!("./{}", binary_name)));
+        candidates.push(PathBuf::from(format!("./runtime/data/bin/{binary_name}")));
+        candidates.push(PathBuf::from(format!("./data/bin/{binary_name}")));
+        candidates.push(PathBuf::from(format!("./bin/{binary_name}")));
+        candidates.push(PathBuf::from(format!("./{binary_name}")));
 
         // Pass 1: Deduplicate and look for candidates meeting version >= min_version
         let mut seen = std::collections::HashSet::new();

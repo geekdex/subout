@@ -179,7 +179,7 @@ pub async fn fetch_subscriptions(
 
     let results = if let Some(sub_id) = payload.subscription_id {
         match fetcher::fetch_and_update_subscription(&state.db_path, sub_id).await {
-            Ok(_) => vec![format!("Successfully fetched subscription ID {}.", sub_id)],
+            Ok(()) => vec![format!("Successfully fetched subscription ID {}.", sub_id)],
             Err(e) => vec![format!("Failed to fetch subscription ID {}: {}", sub_id, e)],
         }
     } else {

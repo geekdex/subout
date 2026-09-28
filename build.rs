@@ -57,7 +57,7 @@ fn main() {
                         .arg("build")
                         .status()
                 });
-            if status.map(|s| s.success()).unwrap_or(false) {
+            if status.is_ok_and(|s| s.success()) {
                 let mod_path = Path::new("src/web/mod.rs");
                 if mod_path.exists() {
                     let _ = fs::copy(mod_path, "src/web/mod.rs.tmp");

@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Cursor;
@@ -155,23 +156,19 @@ pub struct KernelInfoResponse {
 pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
     let target = detect_current_target();
     let maybe_exec = get_singbox_executable();
-    let (is_installed, binary_path, version) = match maybe_exec {
-        Some(ref p) => {
-            let ver = get_installed_kernel_version(p);
-            (true, p.to_string_lossy().to_string(), ver)
-        }
-        None => {
-            let default_path = get_kernel_binary_path();
-            (false, default_path.to_string_lossy().to_string(), None)
-        }
+    let (is_installed, binary_path, version) = if let Some(ref p) = maybe_exec {
+        let ver = get_installed_kernel_version(p);
+        (true, p.to_string_lossy().to_string(), ver)
+    } else {
+        let default_path = get_kernel_binary_path();
+        (false, default_path.to_string_lossy().to_string(), None)
     };
 
     let min_ver = std::env::var("SUBOUT_MIN_SINGBOX_VERSION")
         .unwrap_or_else(|_| MIN_SUPPORTED_SINGBOX_VERSION.to_string());
     let is_version_satisfies = version
         .as_deref()
-        .map(|v| crate::paths::is_version_ge(v, &min_ver))
-        .unwrap_or(false);
+        .is_some_and(|v| crate::paths::is_version_ge(v, &min_ver));
 
     let os = std::env::consts::OS.to_string();
     let arch = std::env::consts::ARCH.to_string();
@@ -215,7 +212,7 @@ pub fn extract_archive(
     if archive_type == "zip" {
         let cursor = Cursor::new(archive_bytes);
         let mut zip_archive =
-            zip::ZipArchive::new(cursor).map_err(|e| anyhow!("解析 Zip 压缩包失败: {}", e))?;
+            zip::ZipArchive::new(cursor).map_err(|e| anyhow!("解析 Zip 压缩包失败: {e}"))?;
 
         let mut extracted = false;
         for i in 0..zip_archive.len() {
@@ -230,7 +227,7 @@ pub fn extract_archive(
         }
 
         if !extracted {
-            return Err(anyhow!("在 Zip 压缩包中未找到可执行文件 {}", binary_name));
+            return Err(anyhow!("在 Zip 压缩包中未找到可执行文件 {binary_name}"));
         }
     } else if archive_type == "tar.gz" {
         let cursor = Cursor::new(archive_bytes);
@@ -252,10 +249,10 @@ pub fn extract_archive(
         }
 
         if !extracted {
-            return Err(anyhow!("在 Tar 压缩包中未找到可执行文件 {}", binary_name));
+            return Err(anyhow!("在 Tar 压缩包中未找到可执行文件 {binary_name}"));
         }
     } else {
-        return Err(anyhow!("不支持的压缩格式: {}", archive_type));
+        return Err(anyhow!("不支持的压缩格式: {archive_type}"));
     }
 
     #[cfg(unix)]
@@ -302,7 +299,7 @@ pub async fn download_and_install_kernel(
             res
         }
         Err(e) => {
-            let err_msg = format!("发起内核下载请求失败: {}", e);
+            let err_msg = format!("发起内核下载请求失败: {e}");
             let mut st = status_lock.write().await;
             st.status = "error".to_string();
             st.error = Some(err_msg.clone());
@@ -317,7 +314,6 @@ pub async fn download_and_install_kernel(
     }
 
     let mut stream = response.bytes_stream();
-    use futures_util::StreamExt;
 
     let mut downloaded_data = Vec::with_capacity(if total_size > 0 {
         total_size as usize
@@ -340,7 +336,7 @@ pub async fn download_and_install_kernel(
         let chunk = match chunk_res {
             Ok(c) => c,
             Err(e) => {
-                let err_msg = format!("下载数据流中断: {}", e);
+                let err_msg = format!("下载数据流中断: {e}");
                 let mut st = status_lock.write().await;
                 st.status = "error".to_string();
                 st.error = Some(err_msg.clone());
@@ -424,7 +420,7 @@ pub async fn download_and_install_kernel(
     ) {
         Ok(p) => p,
         Err(e) => {
-            let err_msg = format!("解压内核文件失败: {}", e);
+            let err_msg = format!("解压内核文件失败: {e}");
             let mut st = status_lock.write().await;
             st.status = "error".to_string();
             st.error = Some(err_msg.clone());

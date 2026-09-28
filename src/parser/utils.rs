@@ -23,8 +23,8 @@ pub fn decode_base64(mut input: String) -> Option<String> {
     None
 }
 
-pub fn parse_transport_params(
-    params: &std::collections::HashMap<String, String>,
+pub fn parse_transport_params<S: std::hash::BuildHasher>(
+    params: &std::collections::HashMap<String, String, S>,
 ) -> Option<serde_json::Value> {
     let t_type = params.get("type")?.as_str();
     match t_type {
