@@ -721,7 +721,6 @@ function quickAddDefaultHttpClient() {
   if (!props.configData.http_clients.some((c) => c && c.tag === "direct")) {
     props.configData.http_clients.push({
       tag: "direct",
-      detour: "direct",
     });
   }
   props.configData.route.default_http_client = "direct";

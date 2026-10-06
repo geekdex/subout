@@ -109,14 +109,18 @@ pub fn sanitize_dns_value(dns: &mut Value) {
         }
         if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for server in servers {
-                if let Some(srv_obj) = server.as_object_mut()
-                    && srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip")
-                {
-                    if !srv_obj.contains_key("inet4_range") {
-                        srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
+                if let Some(srv_obj) = server.as_object_mut() {
+                    // Detouring to an empty direct outbound triggers sing-box fatal error
+                    if srv_obj.get("detour").and_then(|d| d.as_str()) == Some("direct") {
+                        srv_obj.remove("detour");
                     }
-                    if !srv_obj.contains_key("inet6_range") {
-                        srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
+                    if srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
+                        if !srv_obj.contains_key("inet4_range") {
+                            srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
+                        }
+                        if !srv_obj.contains_key("inet6_range") {
+                            srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
+                        }
                     }
                 }
             }
@@ -129,6 +133,32 @@ pub fn sanitize_route_value(route: &mut Value) {
         // Ensure auto_detect_interface is true to prevent routing loops if not specified
         if !obj.contains_key("auto_detect_interface") {
             obj.insert("auto_detect_interface".to_string(), json!(true));
+        }
+        // Remove empty direct detour from rule_sets to avoid "detour to empty direct outbound" error
+        if let Some(rule_sets) = obj.get_mut("rule_set").and_then(|rs| rs.as_array_mut()) {
+            for rs in rule_sets {
+                if let Some(rs_obj) = rs.as_object_mut() {
+                    if rs_obj.get("download_detour").and_then(|d| d.as_str()) == Some("direct") {
+                        rs_obj.remove("download_detour");
+                    }
+                    if rs_obj.get("detour").and_then(|d| d.as_str()) == Some("direct") {
+                        rs_obj.remove("detour");
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn sanitize_http_clients_value(http_clients: &mut Value) {
+    if let Some(arr) = http_clients.as_array_mut() {
+        for client in arr {
+            if let Some(obj) = client.as_object_mut() {
+                // Detour to direct outbound makes no sense in sing-box and causes fatal startup failure
+                if obj.get("detour").and_then(|d| d.as_str()) == Some("direct") {
+                    obj.remove("detour");
+                }
+            }
         }
     }
 }
@@ -153,7 +183,8 @@ pub fn sanitize_log_value(log: &mut Value) {
 
 /// Sanitize and prepare the runtime sing-box configuration to adhere to best practices:
 /// 1. Remove deprecated `independent_cache` from `dns` (deprecated in 1.14.0, removed in 1.16.0).
-/// 2. Sanitize inbounds, outbounds, route, and log defaults without implicit mutations.
+/// 2. Remove redundant `detour: "direct"` from DNS, rule sets, and `http_clients` to avoid "detour to an empty direct outbound makes no sense".
+/// 3. Sanitize inbounds, outbounds, route, and log defaults without implicit mutations.
 pub fn sanitize_runtime_config(config: &mut Value) {
     let Some(root) = config.as_object_mut() else { return; };
 
@@ -171,6 +202,9 @@ pub fn sanitize_runtime_config(config: &mut Value) {
     }
     if let Some(route) = root.get_mut("route") {
         sanitize_route_value(route);
+    }
+    if let Some(http_clients) = root.get_mut("http_clients") {
+        sanitize_http_clients_value(http_clients);
     }
 }
 
@@ -499,7 +533,7 @@ mod tests {
         let experimental = json!({});
 
         let http_clients = json!([
-            { "tag": "direct", "detour": "direct" },
+            { "tag": "direct" },
             { "tag": "proxy", "detour": "proxy" }
         ]);
 
@@ -716,12 +750,47 @@ mod tests {
     fn test_generate_config_preserves_explicit_http_clients() {
         let conn = db::init_db(":memory:").unwrap();
         let hc = json!([
-            { "tag": "direct", "detour": "direct" },
+            { "tag": "direct" },
             { "tag": "proxy", "detour": "proxy" }
         ]);
         db::save_base_config_section(&conn, "http_clients", &serde_json::to_string(&hc).unwrap()).unwrap();
 
         let cfg = generate_config(&conn).unwrap();
         assert_eq!(cfg.get("http_clients"), Some(&hc));
+    }
+
+    #[test]
+    fn test_sanitize_runtime_config_cleans_direct_detours() {
+        let mut cfg = json!({
+            "dns": {
+                "servers": [
+                    { "tag": "dns-direct", "address": "223.5.5.5", "detour": "direct" },
+                    { "tag": "dns-proxy", "address": "8.8.8.8", "detour": "proxy" }
+                ]
+            },
+            "route": {
+                "rule_set": [
+                    { "tag": "geoip-cn", "download_detour": "direct" },
+                    { "tag": "geosite-google", "download_detour": "proxy" }
+                ]
+            },
+            "http_clients": [
+                { "tag": "direct", "detour": "direct" },
+                { "tag": "proxy", "detour": "proxy" }
+            ]
+        });
+        sanitize_runtime_config(&mut cfg);
+
+        let servers = cfg["dns"]["servers"].as_array().unwrap();
+        assert!(servers[0].get("detour").is_none());
+        assert_eq!(servers[1]["detour"], "proxy");
+
+        let rule_sets = cfg["route"]["rule_set"].as_array().unwrap();
+        assert!(rule_sets[0].get("download_detour").is_none());
+        assert_eq!(rule_sets[1]["download_detour"], "proxy");
+
+        let http_clients = cfg["http_clients"].as_array().unwrap();
+        assert!(http_clients[0].get("detour").is_none());
+        assert_eq!(http_clients[1]["detour"], "proxy");
     }
 }

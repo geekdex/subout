@@ -272,8 +272,31 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         )?;
         conn.execute(
             "INSERT INTO base_config (section, content) VALUES ('http_clients', ?)",
-            [r#"[{"tag":"direct","detour":"direct"},{"tag":"proxy","detour":"proxy"}]"#],
+            [r#"[{"tag":"direct"},{"tag":"proxy","detour":"proxy"}]"#],
         )?;
+    }
+
+    // Migration: fix direct http_client with empty direct detour in base_config
+    if let Ok(Some(existing_hc)) = get_base_config_section(conn, "http_clients")
+        && existing_hc.contains(r#""detour":"direct""#)
+        && let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&existing_hc)
+        && let Some(arr) = parsed.as_array_mut()
+    {
+        let mut modified = false;
+        for client in arr {
+            if client.get("tag").and_then(|t| t.as_str()) == Some("direct")
+                && client.get("detour").and_then(|d| d.as_str()) == Some("direct")
+                && let Some(obj) = client.as_object_mut()
+            {
+                obj.remove("detour");
+                modified = true;
+            }
+        }
+        if modified
+            && let Ok(cleaned) = serde_json::to_string(&parsed)
+        {
+            let _ = save_base_config_section(conn, "http_clients", &cleaned);
+        }
     }
 
     // Bootstrap default outbound groups

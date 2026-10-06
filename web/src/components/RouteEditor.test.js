@@ -317,7 +317,7 @@ describe("RouteEditor", () => {
       await flushPromises();
 
       expect(config.http_clients).toEqual([
-        { tag: "direct", detour: "direct" },
+        { tag: "direct" },
       ]);
       expect(config.route.default_http_client).toBe("direct");
     });

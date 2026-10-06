@@ -1719,17 +1719,27 @@
                                 v-model="hc.detour"
                                 class="input-control table-input"
                               >
+                                <option value="">(空 / 默认直连)</option>
                                 <option
                                   v-if="
                                     hc.detour &&
-                                    !allOutboundTags.includes(hc.detour)
+                                    !allOutboundTags
+                                      .filter((t) => t !== 'direct')
+                                      .includes(hc.detour)
                                   "
                                   :value="hc.detour"
                                 >
-                                  {{ hc.detour }} (当前值)
+                                  {{ hc.detour }}
+                                  {{
+                                    hc.detour === "direct"
+                                      ? "(空直连无需设置 Detour，已自动兼容)"
+                                      : "(当前值)"
+                                  }}
                                 </option>
                                 <option
-                                  v-for="outTag in allOutboundTags"
+                                  v-for="outTag in allOutboundTags.filter(
+                                    (t) => t !== 'direct',
+                                  )"
                                   :key="outTag"
                                   :value="outTag"
                                 >
@@ -3571,17 +3581,27 @@
                     v-model="itemModal.itemData.detour"
                     class="input-control"
                   >
+                    <option value="">(空 / 默认直连)</option>
                     <option
                       v-if="
                         itemModal.itemData.detour &&
-                        !allOutboundTags.includes(itemModal.itemData.detour)
+                        !allOutboundTags
+                          .filter((t) => t !== 'direct')
+                          .includes(itemModal.itemData.detour)
                       "
                       :value="itemModal.itemData.detour"
                     >
-                      {{ itemModal.itemData.detour }} (当前值)
+                      {{ itemModal.itemData.detour }}
+                      {{
+                        itemModal.itemData.detour === "direct"
+                          ? "(空直连无需设置 Detour，已自动兼容)"
+                          : "(当前值)"
+                      }}
                     </option>
                     <option
-                      v-for="tag in allOutboundTags"
+                      v-for="tag in allOutboundTags.filter(
+                        (t) => t !== 'direct',
+                      )"
                       :key="tag"
                       :value="tag"
                     >
@@ -6091,7 +6111,7 @@ const configData = reactive({
     rule_set: [],
   },
   http_clients: [
-    { tag: "direct", detour: "direct" },
+    { tag: "direct" },
     { tag: "proxy", detour: "proxy" },
   ],
   experimental: {
@@ -7697,6 +7717,11 @@ const parseHttpClients = (json) => {
   } else if (json && Array.isArray(json.http_clients)) {
     list = JSON.parse(JSON.stringify(json.http_clients));
   }
+  list.forEach((item) => {
+    if (!item.detour || item.detour === "direct") {
+      item.detour = "";
+    }
+  });
   configData.http_clients = list;
 };
 
@@ -7830,7 +7855,13 @@ const serializeRoute = () => {
 };
 
 const serializeHttpClients = () => {
-  return JSON.parse(JSON.stringify(configData.http_clients || []));
+  return (configData.http_clients || []).map((client) => {
+    const item = { ...client };
+    if (!item.detour || !item.detour.trim() || item.detour === "direct") {
+      delete item.detour;
+    }
+    return item;
+  });
 };
 
 const serializeExperimental = () => {
@@ -9301,8 +9332,12 @@ const syncVisualToItemData = () => {
       itemModal.validating = false;
       return;
     }
-    if (!itemModal.itemData.detour || !itemModal.itemData.detour.trim()) {
-      itemModal.itemData.detour = "direct";
+    if (
+      !itemModal.itemData.detour ||
+      !itemModal.itemData.detour.trim() ||
+      itemModal.itemData.detour === "direct"
+    ) {
+      delete itemModal.itemData.detour;
     }
   }
   if (itemModal.itemType === "outbound") {
@@ -9484,12 +9519,9 @@ const getListByType = (type) => {
 };
 
 const addHttpClient = () => {
-  const defaultDetour = allOutboundTags.value.includes("direct")
-    ? "direct"
-    : allOutboundTags.value[0] || "direct";
   const newItem = {
     tag: `client-${(configData.http_clients || []).length + 1}`,
-    detour: defaultDetour,
+    detour: "",
   };
   editItem(newItem, "http_client", (parsed) => {
     if (!configData.http_clients) configData.http_clients = [];

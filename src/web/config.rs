@@ -799,7 +799,7 @@ pub async fn create_history_config(
                 "default_http_client": "direct"
             },
             "http_clients": [
-                { "tag": "direct", "detour": "direct" },
+                { "tag": "direct" },
                 { "tag": "proxy", "detour": "proxy" }
             ],
             "experimental": {}

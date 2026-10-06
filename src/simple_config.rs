@@ -599,8 +599,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     });
 
     let mut http_clients = vec![json!({
-        "tag": "direct",
-        "detour": "direct"
+        "tag": "direct"
     })];
     if has_nodes && target_proxy != "direct" {
         http_clients.push(json!({
@@ -818,11 +817,11 @@ mod tests {
             .unwrap()
             .as_array()
             .unwrap();
-        assert!(
-            http_clients
-                .iter()
-                .any(|hc| hc.get("tag").and_then(|t| t.as_str()) == Some("direct"))
-        );
+        let direct_client = http_clients
+            .iter()
+            .find(|hc| hc.get("tag").and_then(|t| t.as_str()) == Some("direct"))
+            .expect("direct http_client must exist");
+        assert!(direct_client.get("detour").is_none());
         assert!(
             http_clients
                 .iter()
