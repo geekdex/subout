@@ -297,4 +297,46 @@ describe("RouteEditor", () => {
       ]);
     });
   });
+
+  describe("HTTP Client integration", () => {
+    it("shows warning and supports quickAddDefaultHttpClient when no http_clients exist", async () => {
+      const config = {
+        dns: { servers: [] },
+        route: { rules: [], rule_set: [] },
+        http_clients: [],
+      };
+      const wrapper = mountRouteEditor(config, { allHttpClientTags: [] });
+      expect(wrapper.text()).toContain("当前配置尚未添加任何 HTTP 客户端");
+
+      const quickBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("快捷创建 direct 客户端"));
+      expect(quickBtn).toBeTruthy();
+
+      await quickBtn.trigger("click");
+      await flushPromises();
+
+      expect(config.http_clients).toEqual([
+        { tag: "direct", detour: "direct" },
+      ]);
+      expect(config.route.default_http_client).toBe("direct");
+    });
+
+    it("emits switchTab when clicking manage link", async () => {
+      const config = {
+        dns: { servers: [] },
+        route: { rules: [], rule_set: [] },
+        http_clients: [],
+      };
+      const wrapper = mountRouteEditor(config, { allHttpClientTags: [] });
+      const manageLink = wrapper
+        .findAll("a")
+        .find((a) => a.text().includes("前往管理"));
+      expect(manageLink).toBeTruthy();
+
+      await manageLink.trigger("click");
+      expect(wrapper.emitted("switchTab")).toBeTruthy();
+      expect(wrapper.emitted("switchTab")[0]).toEqual(["http_clients"]);
+    });
+  });
 });

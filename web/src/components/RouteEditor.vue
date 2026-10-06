@@ -129,6 +129,42 @@
               {{ tag }}
             </option>
           </select>
+          <div
+            v-if="availableHttpClientTags.length === 0"
+            style="
+              margin-top: 6px;
+              font-size: 0.825rem;
+              color: var(--warning, #e6a23c);
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              flex-wrap: wrap;
+              gap: 6px;
+            "
+          >
+            <span>⚠️ 当前配置尚未添加任何 HTTP 客户端。</span>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                style="padding: 2px 8px; font-size: 0.75rem"
+                @click="quickAddDefaultHttpClient"
+              >
+                + 快捷创建 direct 客户端
+              </button>
+              <a
+                href="javascript:void(0)"
+                style="
+                  color: var(--primary);
+                  text-decoration: underline;
+                  font-size: 0.8rem;
+                "
+                @click="$emit('switchTab', 'http_clients')"
+              >
+                前往管理
+              </a>
+            </div>
+          </div>
         </div>
       </div>
       <div style="margin-top: 0.75rem">
@@ -676,7 +712,20 @@ const availableHttpClientTags = computed(() => {
     .filter(Boolean);
 });
 
-defineEmits(["syncRule", "openDomainWizard"]);
+defineEmits(["syncRule", "openDomainWizard", "switchTab"]);
+
+function quickAddDefaultHttpClient() {
+  if (!props.configData.http_clients) {
+    props.configData.http_clients = [];
+  }
+  if (!props.configData.http_clients.some((c) => c && c.tag === "direct")) {
+    props.configData.http_clients.push({
+      tag: "direct",
+      detour: "direct",
+    });
+  }
+  props.configData.route.default_http_client = "direct";
+}
 
 const searchQuery = ref("");
 const openSections = ref(["rules", "rulesets"]);

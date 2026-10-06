@@ -1659,6 +1659,7 @@
                     :duplicate-check-fn="hasDuplicateInField"
                     @sync-rule="openSyncModal"
                     @open-domain-wizard="openDomainWizard"
+                    @switch-tab="activeSection = $event"
                   />
                 </div>
 
