@@ -752,7 +752,31 @@ const vFocusSelect = {
   },
 };
 
-const currentView = ref("dashboard");
+const VALID_VIEWS = [
+  "dashboard",
+  "subscriptions",
+  "nodes",
+  "groups",
+  "configs",
+  "simpleConfig",
+  "serviceLogs",
+  "siteTest",
+  "settings",
+];
+
+const parseHashView = () => {
+  if (typeof window === "undefined") return "dashboard";
+  const rawHash = (window.location.hash || "").replace(/^[#/]+/, "");
+  const [pathPart] = rawHash.split("?");
+  const parts = pathPart.split("/").filter(Boolean);
+  let viewName = parts[0];
+  if (viewName === "history" || viewName === "config") {
+    viewName = "configs";
+  }
+  return VALID_VIEWS.includes(viewName) ? viewName : "dashboard";
+};
+
+const currentView = ref(token.value ? parseHashView() : "dashboard");
 const activeTheme = ref("system");
 const loginPassword = ref("");
 const loggingIn = ref(false);
@@ -879,32 +903,27 @@ const onModeConfirmed = () => {
 const handleRouting = () => {
   if (!token.value) return;
 
-  const hash = window.location.hash.substring(1);
-  const parts = hash.split("/");
+  const rawHash = (window.location.hash || "").replace(/^[#/]+/, "");
+  const [pathPart] = rawHash.split("?");
+  const parts = pathPart.split("/").filter(Boolean);
   let viewName = parts[0];
 
+  let canonicalHash = "";
   if (viewName === "history" || viewName === "config") {
     viewName = "configs";
     const rest = parts.slice(1).join("/");
-    const newHash = rest ? `#configs/${rest}` : "#configs";
-    window.history.replaceState(null, null, newHash);
+    canonicalHash = rest ? `#configs/${rest}` : "#configs";
   }
 
-  const validViews = [
-    "dashboard",
-    "subscriptions",
-    "nodes",
-    "groups",
-    "configs",
-    "simpleConfig",
-    "serviceLogs",
-    "siteTest",
-    "settings",
-  ];
-
-  if (!viewName || !validViews.includes(viewName)) {
+  if (!viewName || !VALID_VIEWS.includes(viewName)) {
     viewName = "dashboard";
-    window.history.replaceState(null, null, `#${viewName}`);
+    window.history.replaceState(null, null, "#dashboard");
+  } else if (canonicalHash && window.location.hash !== canonicalHash) {
+    window.history.replaceState(null, null, canonicalHash);
+  } else if (window.location.hash.startsWith("#/")) {
+    const rest = parts.slice(1).join("/");
+    const normalized = rest ? `#${viewName}/${rest}` : `#${viewName}`;
+    window.history.replaceState(null, null, normalized);
   }
   currentView.value = viewName;
 };
@@ -951,6 +970,7 @@ onMounted(() => {
   mediaQuery.addEventListener("change", handleSystemThemeChange);
 
   if (token.value) {
+    handleRouting();
     verifyToken();
   }
 

@@ -109,18 +109,6 @@
       <div class="dns-toggle-grid">
         <div class="toggle-item">
           <label class="switch">
-            <input v-model="configData.dns.independent_cache" type="checkbox" />
-            <span class="slider"></span>
-          </label>
-          <span class="toggle-label">独立缓存 (independent_cache)</span>
-          <span
-            title="启用后 DNS 缓存与系统缓存独立"
-            style="cursor: help; color: var(--text-muted); font-size: 0.85rem"
-            >⚠️</span
-          >
-        </div>
-        <div class="toggle-item">
-          <label class="switch">
             <input v-model="configData.dns.disable_cache" type="checkbox" />
             <span class="slider"></span>
           </label>

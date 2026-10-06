@@ -734,6 +734,19 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(wrapper.text()).toContain("编辑中 #1");
     });
 
+    it("带前导斜杠 URL #/configs/edit/1/log -> 正确进入配置 #1 编辑页并在 log tab", async () => {
+      window.location.hash = "#/configs/edit/1/log";
+      vi.spyOn(global, "fetch").mockImplementation(createMockFetch());
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("编辑中 #1");
+      expect(wrapper.text()).toContain("log 配置");
+    });
+
     it("在编辑模式下点击'返回列表' -> URL Hash 恢复为 #configs 并返回列表", async () => {
       window.location.hash = "#configs";
       const wrapper = await mountConfigEditor();

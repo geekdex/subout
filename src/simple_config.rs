@@ -399,8 +399,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         "servers": dns_servers,
         "rules": dns_rules,
         "final": "dns_local",
-        "strategy": "ipv4_only",
-        "independent_cache": true
+        "strategy": "ipv4_only"
     });
 
     // 4. Inbounds section
@@ -558,7 +557,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "type": "remote",
             "format": "binary",
             "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
-            "download_detour": "direct",
+            "http_client": "direct",
             "update_interval": "1d"
         }),
         json!({
@@ -566,7 +565,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "type": "remote",
             "format": "binary",
             "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-geolocation-!cn.srs",
-            "download_detour": download_detour_remote,
+            "http_client": download_detour_remote,
             "update_interval": "1d"
         }),
         json!({
@@ -574,7 +573,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "type": "remote",
             "format": "binary",
             "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
-            "download_detour": "direct",
+            "http_client": "direct",
             "update_interval": "1d"
         }),
     ];
@@ -585,7 +584,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "type": "remote",
             "format": "binary",
             "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
-            "download_detour": download_detour_remote,
+            "http_client": download_detour_remote,
             "update_interval": "1d"
         }));
     }
@@ -593,10 +592,22 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     let route_val = json!({
         "auto_detect_interface": true,
         "default_domain_resolver": "dns_local",
+        "default_http_client": "direct",
         "rules": route_rules,
         "rule_set": rule_sets,
         "final": target_proxy
     });
+
+    let mut http_clients = vec![json!({
+        "tag": "direct",
+        "detour": "direct"
+    })];
+    if has_nodes && target_proxy != "direct" {
+        http_clients.push(json!({
+            "tag": "proxy",
+            "detour": "proxy"
+        }));
+    }
 
     let experimental_val = json!({});
 
@@ -606,6 +617,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         "inbounds": inbounds_val,
         "outbounds": outbounds_val,
         "route": route_val,
+        "http_clients": http_clients,
         "experimental": experimental_val
     }))
 }
@@ -783,16 +795,38 @@ mod tests {
             .find(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geosite-geolocation-!cn"))
             .unwrap();
         assert_eq!(
-            foreign_rs.get("download_detour").and_then(|d| d.as_str()),
+            foreign_rs
+                .get("http_client")
+                .and_then(|d| d.as_str()),
             Some("proxy")
         );
+        assert!(foreign_rs.get("download_detour").is_none());
         let cn_rs = rule_sets
             .iter()
             .find(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geosite-cn"))
             .unwrap();
         assert_eq!(
-            cn_rs.get("download_detour").and_then(|d| d.as_str()),
+            cn_rs
+                .get("http_client")
+                .and_then(|d| d.as_str()),
             Some("direct")
+        );
+        assert!(cn_rs.get("download_detour").is_none());
+
+        let http_clients = generated_with_nodes
+            .get("http_clients")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(
+            http_clients
+                .iter()
+                .any(|hc| hc.get("tag").and_then(|t| t.as_str()) == Some("direct"))
+        );
+        assert!(
+            http_clients
+                .iter()
+                .any(|hc| hc.get("tag").and_then(|t| t.as_str()) == Some("proxy"))
         );
     }
 
@@ -917,6 +951,7 @@ mod tests {
             &outbounds,
             &route,
             &experimental,
+            generated_cfg.get("http_clients"),
         );
         assert!(res.is_ok(), "Validation failed: {:?}", res.err());
     }

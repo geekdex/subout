@@ -674,6 +674,7 @@ impl SingBoxServiceManager {
         }
 
         let mut final_config_json = config_json.clone();
+        crate::generator::sanitize_runtime_config(&mut final_config_json);
         if let Some(ref out_path) = log_output_file
             && let Some(log_obj) = final_config_json
                 .get_mut("log")

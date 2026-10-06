@@ -157,8 +157,8 @@
             v-else-if="hasDownloadError && !isDownloading"
             class="btn btn-sm btn-secondary"
             style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
-            @click="refreshStatusCheck"
             title="手动检测内核状态，可修复僵尸状态"
+            @click="refreshStatusCheck"
           >
             🔄 重新检测
           </button>

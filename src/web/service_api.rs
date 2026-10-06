@@ -291,14 +291,15 @@ pub fn get_config_for_mode(
                 .get("experimental")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
+            let http_clients = c.get("http_clients").cloned();
             return generator::generate_config_with_base(
-                conn,
                 log,
                 dns,
                 inbounds,
                 outbounds,
                 route,
                 experimental,
+                http_clients,
             )
             .map_err(|e| {
                 (

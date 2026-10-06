@@ -19,6 +19,8 @@ pub struct BaseConfigResponse {
     pub outbounds: Value,
     pub route: Value,
     pub experimental: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_clients: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +37,7 @@ pub struct FullConfigSaveRequest {
     pub outbounds: Value,
     pub route: Value,
     pub experimental: Value,
+    pub http_clients: Option<Value>,
     pub save_history: Option<bool>,
     pub description: Option<String>,
 }
@@ -47,6 +50,7 @@ pub struct GeneratedConfigPreviewRequest {
     pub outbounds: Value,
     pub route: Value,
     pub experimental: Value,
+    pub http_clients: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -84,6 +88,10 @@ pub async fn get_base_config(
     let experimental_str = db::get_base_config_section(&conn, "experimental")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .unwrap_or_default();
+    let http_clients_str = db::get_base_config_section(&conn, "http_clients")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .unwrap_or_default();
+    let http_clients: Option<Value> = serde_json::from_str(&http_clients_str).ok();
 
     Ok(Json(BaseConfigResponse {
         log: serde_json::from_str(&log_str).unwrap_or(json!({})),
@@ -92,6 +100,7 @@ pub async fn get_base_config(
         outbounds: serde_json::from_str(&outbounds_str).unwrap_or(json!([])),
         route: serde_json::from_str(&route_str).unwrap_or(json!({})),
         experimental: serde_json::from_str(&experimental_str).unwrap_or(json!({})),
+        http_clients,
     }))
 }
 
@@ -124,6 +133,8 @@ pub async fn save_base_config(
     let experimental_str = db::get_base_config_section(&conn, "experimental")
         .unwrap_or(None)
         .unwrap_or_else(|| "{}".to_string());
+    let http_clients_str = db::get_base_config_section(&conn, "http_clients")
+        .unwrap_or(None);
 
     let mut log_val: Value = serde_json::from_str(&log_str).unwrap_or(json!({}));
     let mut dns_val: Value = serde_json::from_str(&dns_str).unwrap_or(json!({}));
@@ -131,6 +142,8 @@ pub async fn save_base_config(
     let mut outbounds_val: Value = serde_json::from_str(&outbounds_str).unwrap_or(json!([]));
     let mut route_val: Value = serde_json::from_str(&route_str).unwrap_or(json!({}));
     let mut experimental_val: Value = serde_json::from_str(&experimental_str).unwrap_or(json!({}));
+    let mut http_clients_val: Option<Value> =
+        http_clients_str.and_then(|s| serde_json::from_str(&s).ok());
 
     match payload.section.as_str() {
         "log" => log_val = payload.content.clone(),
@@ -139,6 +152,7 @@ pub async fn save_base_config(
         "outbounds" => outbounds_val = payload.content.clone(),
         "route" => route_val = payload.content.clone(),
         "experimental" => experimental_val = payload.content.clone(),
+        "http_clients" => http_clients_val = Some(payload.content.clone()),
         _ => {}
     }
 
@@ -149,6 +163,7 @@ pub async fn save_base_config(
         &outbounds_val,
         &route_val,
         &experimental_val,
+        http_clients_val.as_ref(),
     ) {
         return Err((StatusCode::BAD_REQUEST, err_msg));
     }
@@ -199,6 +214,7 @@ pub async fn save_full_config(
         &sanitized_outbounds,
         &sanitized_route,
         &payload.experimental,
+        payload.http_clients.as_ref(),
     ) {
         return Err((StatusCode::BAD_REQUEST, err_msg));
     }
@@ -248,9 +264,23 @@ pub async fn save_full_config(
             "保存experimental失败".to_string(),
         )
     })?;
+    if let Some(ref hc) = payload.http_clients {
+        let http_clients_str = serde_json::to_string(hc).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                "http_clients序列化失败".to_string(),
+            )
+        })?;
+        db::save_base_config_section(&conn, "http_clients", &http_clients_str).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "保存http_clients失败".to_string(),
+            )
+        })?;
+    }
 
     if payload.save_history.unwrap_or(false) {
-        let full_config = json!({
+        let mut full_config = json!({
             "log": payload.log,
             "dns": sanitized_dns,
             "inbounds": sanitized_inbounds,
@@ -258,6 +288,9 @@ pub async fn save_full_config(
             "route": sanitized_route,
             "experimental": payload.experimental,
         });
+        if let Some(ref hc) = payload.http_clients {
+            full_config["http_clients"] = hc.clone();
+        }
         let full_config_str = serde_json::to_string(&full_config).unwrap_or_default();
         let desc = payload
             .description
@@ -307,6 +340,7 @@ pub async fn restore_history_config(
             "outbounds",
             "route",
             "experimental",
+            "http_clients",
         ];
         for sec in &sections {
             if let Some(sec_val) = config_val.get(*sec) {
@@ -436,15 +470,15 @@ pub async fn post_generated_config(
     Json(payload): Json<GeneratedConfigPreviewRequest>,
 ) -> Result<Json<Value>, StatusCode> {
     check_auth(&state, &headers).await?;
-    let conn = get_db_conn(&state.db_path)?;
+    let _conn = get_db_conn(&state.db_path)?;
     let config = generator::generate_config_with_base(
-        &conn,
         payload.log,
         payload.dns,
         payload.inbounds,
         payload.outbounds,
         payload.route,
         payload.experimental,
+        payload.http_clients,
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(config))
@@ -472,7 +506,7 @@ pub async fn validate_full_config(
     generator::sanitize_outbounds_value(&mut sanitized_outbounds);
 
     // Configs are self-contained snapshots — no DB lookup needed.
-    let config = json!({
+    let mut config = json!({
         "log": payload.log,
         "dns": payload.dns,
         "inbounds": payload.inbounds,
@@ -480,6 +514,9 @@ pub async fn validate_full_config(
         "route": payload.route,
         "experimental": payload.experimental
     });
+    if let Some(hc) = payload.http_clients {
+        config["http_clients"] = hc;
+    }
 
     let temp_file_path = crate::paths::AppPaths::get().temp_file_path("singbox_val", ".json");
 
@@ -551,6 +588,7 @@ pub async fn validate_full_config(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_config_with_singbox(
     log: &Value,
     dns: &Value,
@@ -558,15 +596,16 @@ pub fn validate_config_with_singbox(
     outbounds: &Value,
     route: &Value,
     experimental: &Value,
+    http_clients: Option<&Value>,
 ) -> Result<(), String> {
     let mut sanitized_log = log.clone();
     generator::sanitize_log_value(&mut sanitized_log);
     let mut sanitized_outbounds = outbounds.clone();
     generator::sanitize_outbounds_value(&mut sanitized_outbounds);
 
-    // Configs are self-contained snapshots — merge the 6 sections directly
+    // Configs are self-contained snapshots — merge the sections directly
     // without any database lookup.
-    let config = json!({
+    let mut config = json!({
         "log": sanitized_log,
         "dns": dns,
         "inbounds": inbounds,
@@ -574,6 +613,10 @@ pub fn validate_config_with_singbox(
         "route": route,
         "experimental": experimental
     });
+    if let Some(hc) = http_clients {
+        config["http_clients"] = hc.clone();
+    }
+    generator::sanitize_runtime_config(&mut config);
 
     let temp_file_path = crate::paths::AppPaths::get().temp_file_path("singbox_val", ".json");
 
@@ -727,11 +770,38 @@ pub async fn create_history_config(
 
     let content_str = if let Some(c) = payload.content { serde_json::to_string(&c).unwrap_or_else(|_| "{}".to_string()) } else {
         let default_cfg = json!({
-            "log": {},
-            "dns": {},
+            "log": {
+                "level": "info",
+                "timestamp": true
+            },
+            "dns": {
+                "strategy": "prefer_ipv4",
+                "servers": [
+                    {
+                        "tag": "dns-remote",
+                        "address": "tls://1.1.1.1",
+                        "address_resolver": "dns-direct"
+                    },
+                    {
+                        "tag": "dns-direct",
+                        "address": "local",
+                        "detour": "direct"
+                    }
+                ]
+            },
             "inbounds": [],
-            "outbounds": [],
-            "route": {},
+            "outbounds": [
+                { "type": "direct", "tag": "direct" },
+                { "type": "block", "tag": "block" }
+            ],
+            "route": {
+                "auto_detect_interface": true,
+                "default_http_client": "direct"
+            },
+            "http_clients": [
+                { "tag": "direct", "detour": "direct" },
+                { "tag": "proxy", "detour": "proxy" }
+            ],
             "experimental": {}
         });
         serde_json::to_string(&default_cfg).unwrap_or_else(|_| "{}".to_string())
@@ -758,6 +828,7 @@ pub async fn create_history_config(
                 "outbounds",
                 "route",
                 "experimental",
+                "http_clients",
             ];
             for sec in &sections {
                 if let Some(sec_val) = c.get(*sec)
@@ -825,6 +896,7 @@ pub async fn update_history_config(
         .get("experimental")
         .cloned()
         .unwrap_or(json!({}));
+    let http_clients_val = payload.content.get("http_clients");
 
     if let Err(err_msg) = validate_config_with_singbox(
         &log_val,
@@ -833,6 +905,7 @@ pub async fn update_history_config(
         &outbounds_val,
         &route_val,
         &experimental_val,
+        http_clients_val,
     ) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -880,6 +953,7 @@ pub async fn update_history_config(
             "outbounds",
             "route",
             "experimental",
+            "http_clients",
         ];
         for sec in &sections {
             if let Some(sec_val) = payload.content.get(*sec)
@@ -973,6 +1047,7 @@ pub async fn sync_history_config_resources(
         .get("experimental")
         .cloned()
         .unwrap_or(json!({}));
+    let http_clients_val = updated_config.get("http_clients");
 
     if let Err(err_msg) = validate_config_with_singbox(
         &log_val,
@@ -981,6 +1056,7 @@ pub async fn sync_history_config_resources(
         &outbounds_val,
         &route_val,
         &experimental_val,
+        http_clients_val,
     ) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1015,6 +1091,7 @@ pub async fn sync_history_config_resources(
             "outbounds",
             "route",
             "experimental",
+            "http_clients",
         ];
         for sec in &sections {
             if let Some(sec_val) = updated_config.get(*sec)
@@ -1185,6 +1262,7 @@ pub async fn save_running_config(
                 "outbounds",
                 "route",
                 "experimental",
+                "http_clients",
             ];
             for sec in &sections {
                 if let Some(sec_val) = c.get(*sec)
@@ -1345,6 +1423,7 @@ pub async fn save_running_config(
         let outbounds = config_val.get("outbounds").cloned().unwrap_or(json!([]));
         let route = config_val.get("route").cloned().unwrap_or(json!({}));
         let experimental = config_val.get("experimental").cloned().unwrap_or(json!({}));
+        let http_clients = config_val.get("http_clients").cloned();
 
         // STEP 3: Sing-Box 语法校验
         logs.push(ExecutionStepLog {
@@ -1354,9 +1433,15 @@ pub async fn save_running_config(
             timestamp: get_execution_timestamp(),
         });
 
-        if let Err(err_msg) =
-            validate_config_with_singbox(&log, &dns, &inbounds, &outbounds, &route, &experimental)
-        {
+        if let Err(err_msg) = validate_config_with_singbox(
+            &log,
+            &dns,
+            &inbounds,
+            &outbounds,
+            &route,
+            &experimental,
+            http_clients.as_ref(),
+        ) {
             logs.push(ExecutionStepLog {
                 step: "语法校验".to_string(),
                 status: "error".to_string(),
@@ -1378,13 +1463,13 @@ pub async fn save_running_config(
         });
 
         let generated = match generator::generate_config_with_base(
-            &conn,
             log,
             dns,
             inbounds,
             outbounds,
             route,
             experimental,
+            http_clients,
         ) {
             Ok(g) => g,
             Err(e) => {

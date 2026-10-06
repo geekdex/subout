@@ -17,6 +17,7 @@ pub fn generate_config(conn: &Connection) -> Result<Value> {
     let route_str = db::get_base_config_section(conn, "route")?.unwrap_or_else(|| "{}".to_string());
     let experimental_str =
         db::get_base_config_section(conn, "experimental")?.unwrap_or_else(|| "{}".to_string());
+    let http_clients_str = db::get_base_config_section(conn, "http_clients")?;
 
     let log: Value = serde_json::from_str(&log_str).unwrap_or_else(|_| serde_json::json!({}));
     let dns: Value = serde_json::from_str(&dns_str).unwrap_or_else(|_| serde_json::json!({}));
@@ -27,8 +28,18 @@ pub fn generate_config(conn: &Connection) -> Result<Value> {
     let route: Value = serde_json::from_str(&route_str).unwrap_or_else(|_| serde_json::json!({}));
     let experimental: Value =
         serde_json::from_str(&experimental_str).unwrap_or_else(|_| serde_json::json!({}));
+    let http_clients: Option<Value> =
+        http_clients_str.and_then(|s| serde_json::from_str(&s).ok());
 
-    generate_config_with_base(conn, log, dns, inbounds, outbounds, route, experimental)
+    generate_config_with_base(
+        log,
+        dns,
+        inbounds,
+        outbounds,
+        route,
+        experimental,
+        http_clients,
+    )
 }
 
 /// Merge the 6 sections into a complete sing-box config.
@@ -85,6 +96,9 @@ pub fn sanitize_outbounds_value(outbounds: &mut Value) {
 
 pub fn sanitize_dns_value(dns: &mut Value) {
     if let Some(obj) = dns.as_object_mut() {
+        // `independent_cache` is deprecated in sing-box 1.14.0 and removed in 1.16.0
+        obj.remove("independent_cache");
+
         if !obj.contains_key("strategy")
             || obj
                 .get("strategy")
@@ -137,29 +151,52 @@ pub fn sanitize_log_value(log: &mut Value) {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+/// Sanitize and prepare the runtime sing-box configuration to adhere to best practices:
+/// 1. Remove deprecated `independent_cache` from `dns` (deprecated in 1.14.0, removed in 1.16.0).
+/// 2. Sanitize inbounds, outbounds, route, and log defaults without implicit mutations.
+pub fn sanitize_runtime_config(config: &mut Value) {
+    let Some(root) = config.as_object_mut() else { return; };
+
+    if let Some(log) = root.get_mut("log") {
+        sanitize_log_value(log);
+    }
+    if let Some(dns) = root.get_mut("dns") {
+        sanitize_dns_value(dns);
+    }
+    if let Some(inbounds) = root.get_mut("inbounds") {
+        sanitize_inbounds_value(inbounds);
+    }
+    if let Some(outbounds) = root.get_mut("outbounds") {
+        sanitize_outbounds_value(outbounds);
+    }
+    if let Some(route) = root.get_mut("route") {
+        sanitize_route_value(route);
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub fn generate_config_with_base(
-    _conn: &Connection,
-    mut log: Value,
-    mut dns: Value,
-    mut inbounds: Value,
-    mut outbounds: Value,
-    mut route: Value,
+    log: Value,
+    dns: Value,
+    inbounds: Value,
+    outbounds: Value,
+    route: Value,
     experimental: Value,
+    http_clients: Option<Value>,
 ) -> Result<Value> {
-    sanitize_log_value(&mut log);
-    sanitize_dns_value(&mut dns);
-    sanitize_inbounds_value(&mut inbounds);
-    sanitize_outbounds_value(&mut outbounds);
-    sanitize_route_value(&mut route);
-    Ok(json!({
+    let mut config = json!({
         "log": log,
         "dns": dns,
         "inbounds": inbounds,
         "outbounds": outbounds,
         "route": route,
         "experimental": experimental
-    }))
+    });
+    if let Some(hc) = http_clients {
+        config["http_clients"] = hc;
+    }
+    sanitize_runtime_config(&mut config);
+    Ok(config)
 }
 
 /// Synchronize the given configuration with the latest resources in the database (enabled nodes and outbound groups),
@@ -438,8 +475,6 @@ mod tests {
 
     #[test]
     fn test_passthrough_merges_sections_as_is() {
-        let conn = db::init_db(":memory:").unwrap();
-
         let log = json!({ "level": "warn", "timestamp": true });
         let dns = json!({ "final": "local-dns", "strategy": "prefer_ipv4" });
         let inbounds = json!([{ "type": "mixed", "tag": "mixed-in" }]);
@@ -463,24 +498,30 @@ mod tests {
         let route = json!({ "final": "direct", "auto_detect_interface": true });
         let experimental = json!({});
 
+        let http_clients = json!([
+            { "tag": "direct", "detour": "direct" },
+            { "tag": "proxy", "detour": "proxy" }
+        ]);
+
         let result = generate_config_with_base(
-            &conn,
             log.clone(),
             dns.clone(),
             inbounds.clone(),
             outbounds.clone(),
             route.clone(),
             experimental.clone(),
+            Some(http_clients.clone()),
         )
         .unwrap();
 
-        // The generated config should be the sanitized merge of the 6 sections
+        // The generated config should be the sanitized merge of the sections
         assert_eq!(result.get("log"), Some(&log));
         assert_eq!(result.get("dns"), Some(&dns));
         assert_eq!(result.get("inbounds"), Some(&inbounds));
         assert_eq!(result.get("outbounds"), Some(&outbounds));
         assert_eq!(result.get("route"), Some(&route));
         assert_eq!(result.get("experimental"), Some(&experimental));
+        assert_eq!(result.get("http_clients"), Some(&http_clients));
 
         let outbounds_arr = result.get("outbounds").unwrap().as_array().unwrap();
         assert_eq!(outbounds_arr.len(), 3);
@@ -656,5 +697,31 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(servers[0].get("detour").unwrap().as_str(), Some("direct"));
+    }
+
+    #[test]
+    fn test_sanitize_runtime_config_removes_independent_cache() {
+        let mut cfg = json!({
+            "dns": {
+                "independent_cache": true,
+                "strategy": "ipv4_only"
+            }
+        });
+        sanitize_runtime_config(&mut cfg);
+        assert!(cfg["dns"].get("independent_cache").is_none());
+        assert_eq!(cfg["dns"]["strategy"], "ipv4_only");
+    }
+
+    #[test]
+    fn test_generate_config_preserves_explicit_http_clients() {
+        let conn = db::init_db(":memory:").unwrap();
+        let hc = json!([
+            { "tag": "direct", "detour": "direct" },
+            { "tag": "proxy", "detour": "proxy" }
+        ]);
+        db::save_base_config_section(&conn, "http_clients", &serde_json::to_string(&hc).unwrap()).unwrap();
+
+        let cfg = generate_config(&conn).unwrap();
+        assert_eq!(cfg.get("http_clients"), Some(&hc));
     }
 }

@@ -529,6 +529,13 @@
           </div>
           <div
             class="tab"
+            :class="{ active: activeSection === 'http_clients' }"
+            @click="activeSection = 'http_clients'"
+          >
+            HTTP 客户端
+          </div>
+          <div
+            class="tab"
             :class="{ active: activeSection === 'experimental' }"
             @click="activeSection = 'experimental'"
           >
@@ -1646,12 +1653,132 @@
                   <RouteEditor
                     :config-data="configData"
                     :all-outbound-tags="allOutboundTags"
+                    :all-http-client-tags="allHttpClientTags"
                     :duplicate-route-rules-info="duplicateRouteRulesInfo"
                     :edit-item="editItem"
                     :duplicate-check-fn="hasDuplicateInField"
                     @sync-rule="openSyncModal"
                     @open-domain-wizard="openDomainWizard"
                   />
+                </div>
+
+                <!-- HTTP_CLIENTS VISUAL -->
+                <div v-if="section === 'http_clients'">
+                  <div class="visual-section-box">
+                    <div class="flex justify-between items-center mb-2">
+                      <div>
+                        <span class="visual-section-title"
+                          >HTTP 客户端列表 (http_clients)</span
+                        >
+                        <p
+                          style="
+                            margin: 4px 0 0 0;
+                            font-size: 0.825rem;
+                            color: var(--text-muted);
+                          "
+                        >
+                          sing-box 1.14+ 核心架构：用于远端规则集 (rule_set) 下载等网络出站的 HTTP 客户端实例集合。
+                        </p>
+                      </div>
+                      <button
+                        class="btn btn-secondary"
+                        style="padding: 0.3rem 0.6rem; font-size: 0.8rem"
+                        @click="addHttpClient"
+                      >
+                        + 添加客户端
+                      </button>
+                    </div>
+                    <div class="table-container">
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th style="width: 35%">客户端 Tag</th>
+                            <th style="width: 45%">底层出站代理 (Detour)</th>
+                            <th style="text-align: right; width: 140px">
+                              操作
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr
+                            v-for="(hc, idx) in configData.http_clients"
+                            :key="idx"
+                          >
+                            <td>
+                              <input
+                                v-model="hc.tag"
+                                type="text"
+                                class="input-control table-input"
+                                style="font-weight: 600"
+                                placeholder="direct"
+                              />
+                            </td>
+                            <td>
+                              <select
+                                v-model="hc.detour"
+                                class="input-control table-input"
+                              >
+                                <option
+                                  v-if="
+                                    hc.detour &&
+                                    !allOutboundTags.includes(hc.detour)
+                                  "
+                                  :value="hc.detour"
+                                >
+                                  {{ hc.detour }} (当前值)
+                                </option>
+                                <option
+                                  v-for="outTag in allOutboundTags"
+                                  :key="outTag"
+                                  :value="outTag"
+                                >
+                                  {{ outTag }}
+                                </option>
+                              </select>
+                            </td>
+                            <td style="text-align: right">
+                              <div
+                                class="flex gap-2"
+                                style="justify-content: flex-end"
+                              >
+                                <button
+                                  class="btn btn-secondary table-btn"
+                                  title="弹窗编辑"
+                                  @click="editHttpClient(hc, idx)"
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  class="btn btn-danger table-btn"
+                                  title="删除"
+                                  @click="deleteHttpClient(idx)"
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          <tr
+                            v-if="
+                              !configData.http_clients ||
+                              configData.http_clients.length === 0
+                            "
+                          >
+                            <td
+                              colspan="3"
+                              style="
+                                text-align: center;
+                                color: var(--text-muted);
+                                padding: 2rem;
+                              "
+                            >
+                              暂无 HTTP 客户端配置。点击上方「+ 添加客户端」创建（建议配置 direct 和 proxy）。
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- EXPERIMENTAL VISUAL -->
@@ -2959,24 +3086,25 @@
                 style="margin-top: 1rem"
               >
                 <div class="input-group">
-                  <label>下载出站代理 Tag (download_detour)</label>
+                  <label>HTTP 客户端 Tag (http_client)</label>
                   <select
-                    v-model="itemModal.itemData.download_detour"
+                    v-model="itemModal.itemData.http_client"
                     class="input-control"
                   >
+                    <option value="">-- 使用路由默认客户端 (default_http_client) --</option>
                     <option
                       v-if="
-                        itemModal.itemData.download_detour &&
-                        !allOutboundTags.includes(
-                          itemModal.itemData.download_detour,
+                        itemModal.itemData.http_client &&
+                        !allHttpClientTags.includes(
+                          itemModal.itemData.http_client,
                         )
                       "
-                      :value="itemModal.itemData.download_detour"
+                      :value="itemModal.itemData.http_client"
                     >
-                      {{ itemModal.itemData.download_detour }} (当前值)
+                      {{ itemModal.itemData.http_client }} (当前值)
                     </option>
                     <option
-                      v-for="tag in allOutboundTags"
+                      v-for="tag in allHttpClientTags"
                       :key="tag"
                       :value="tag"
                     >
@@ -3419,6 +3547,46 @@
                       placeholder="例如: grpc-service"
                     />
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 7. HTTP Client fields -->
+            <div v-if="itemModal.itemType === 'http_client'">
+              <div class="grid-2">
+                <div class="input-group">
+                  <label>客户端 Tag 标签</label>
+                  <input
+                    v-model="itemModal.itemData.tag"
+                    type="text"
+                    class="input-control"
+                    placeholder="direct"
+                    required
+                  />
+                </div>
+                <div class="input-group">
+                  <label>底层出站代理 (Detour)</label>
+                  <select
+                    v-model="itemModal.itemData.detour"
+                    class="input-control"
+                  >
+                    <option
+                      v-if="
+                        itemModal.itemData.detour &&
+                        !allOutboundTags.includes(itemModal.itemData.detour)
+                      "
+                      :value="itemModal.itemData.detour"
+                    >
+                      {{ itemModal.itemData.detour }} (当前值)
+                    </option>
+                    <option
+                      v-for="tag in allOutboundTags"
+                      :key="tag"
+                      :value="tag"
+                    >
+                      {{ tag }}
+                    </option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -5678,6 +5846,7 @@ const sections = [
   "inbounds",
   "outbounds",
   "route",
+  "http_clients",
   "experimental",
 ];
 
@@ -5685,7 +5854,7 @@ const getInitialActiveSection = () => {
   const hash = window.location.hash.substring(1);
   const [pathPart] = hash.split("?");
   const parts = pathPart.split("/").filter(Boolean);
-  if (parts[0] === "config") {
+  if (parts[0] === "configs" || parts[0] === "config") {
     let tabCandidate = null;
     if (parts[1] === "edit" && parts[2] && parts[3]) {
       tabCandidate = parts[3];
@@ -5883,6 +6052,7 @@ const sectionModes = reactive({
   inbounds: "visual",
   outbounds: "visual",
   route: "visual",
+  http_clients: "visual",
   experimental: "visual",
 });
 
@@ -5892,6 +6062,7 @@ const rawJson = reactive({
   inbounds: "",
   outbounds: "",
   route: "",
+  http_clients: "",
   experimental: "",
 });
 
@@ -5900,7 +6071,6 @@ const configData = reactive({
   dns: {
     strategy: "ipv4_only",
     final: "local-dns",
-    independent_cache: true,
     disable_cache: false,
     disable_expire: false,
     reverse_mapping: false,
@@ -5915,9 +6085,14 @@ const configData = reactive({
     final: "direct",
     auto_detect_interface: true,
     default_domain_resolver: "",
+    default_http_client: "direct",
     rules: [],
     rule_set: [],
   },
+  http_clients: [
+    { tag: "direct", detour: "direct" },
+    { tag: "proxy", detour: "proxy" },
+  ],
   experimental: {
     cache_file: {
       enabled: false,
@@ -6164,6 +6339,18 @@ const allOutboundTags = computed(() => {
     configData.outbounds.forEach((o) => {
       if (o.tag && !tags.includes(o.tag)) {
         tags.push(o.tag);
+      }
+    });
+  }
+  return tags;
+});
+
+const allHttpClientTags = computed(() => {
+  const tags = [];
+  if (configData.http_clients && Array.isArray(configData.http_clients)) {
+    configData.http_clients.forEach((c) => {
+      if (c && c.tag && !tags.includes(c.tag)) {
+        tags.push(c.tag);
       }
     });
   }
@@ -7385,7 +7572,6 @@ const parseLog = (json) => {
 const parseDns = (json) => {
   configData.dns.strategy = json.strategy || "ipv4_only";
   configData.dns.final = json.final || "";
-  configData.dns.independent_cache = json.independent_cache !== false;
   configData.dns.disable_cache = !!json.disable_cache;
   configData.dns.disable_expire = !!json.disable_expire;
   configData.dns.reverse_mapping = !!json.reverse_mapping;
@@ -7440,7 +7626,6 @@ const parseDns = (json) => {
   configData.dns._extra = { ...json };
   delete configData.dns._extra.strategy;
   delete configData.dns._extra.final;
-  delete configData.dns._extra.independent_cache;
   delete configData.dns._extra.disable_cache;
   delete configData.dns._extra.disable_expire;
   delete configData.dns._extra.reverse_mapping;
@@ -7480,18 +7665,38 @@ const parseRoute = (json) => {
   configData.route.final = json.final || "direct";
   configData.route.auto_detect_interface = json.auto_detect_interface !== false;
   configData.route.default_domain_resolver = json.default_domain_resolver || "";
+  configData.route.default_http_client = json.default_http_client || "";
   configData.route.rules = Array.isArray(json.rules)
     ? JSON.parse(JSON.stringify(json.rules))
     : [];
   configData.route.rule_set = Array.isArray(json.rule_set)
-    ? JSON.parse(JSON.stringify(json.rule_set))
+    ? JSON.parse(JSON.stringify(json.rule_set)).map((rs) => {
+        if (rs && typeof rs === "object") {
+          if (!rs.http_client && rs.download_detour) {
+            rs.http_client = rs.download_detour;
+          }
+          delete rs.download_detour;
+        }
+        return rs;
+      })
     : [];
   configData.route._extra = { ...json };
   delete configData.route._extra.final;
   delete configData.route._extra.auto_detect_interface;
   delete configData.route._extra.default_domain_resolver;
+  delete configData.route._extra.default_http_client;
   delete configData.route._extra.rules;
   delete configData.route._extra.rule_set;
+};
+
+const parseHttpClients = (json) => {
+  let list = [];
+  if (Array.isArray(json)) {
+    list = JSON.parse(JSON.stringify(json));
+  } else if (json && Array.isArray(json.http_clients)) {
+    list = JSON.parse(JSON.stringify(json.http_clients));
+  }
+  configData.http_clients = list;
 };
 
 const parseExperimental = (json) => {
@@ -7553,7 +7758,6 @@ const serializeDns = () => {
   const obj = {
     strategy: configData.dns.strategy,
     final: configData.dns.final,
-    independent_cache: configData.dns.independent_cache,
     disable_cache: configData.dns.disable_cache,
     disable_expire: configData.dns.disable_expire,
     reverse_mapping: configData.dns.reverse_mapping,
@@ -7561,6 +7765,7 @@ const serializeDns = () => {
     rules: JSON.parse(JSON.stringify(configData.dns.rules)),
     ...(configData.dns._extra || {}),
   };
+  delete obj.independent_cache;
   if (configData.dns.client_subnet) {
     obj.client_subnet = configData.dns.client_subnet.trim();
   }
@@ -7598,16 +7803,33 @@ const serializeOutbounds = () => {
 };
 
 const serializeRoute = () => {
+  const ruleSet = JSON.parse(
+    JSON.stringify(configData.route.rule_set || []),
+  ).map((rs) => {
+    if (rs && typeof rs === "object") {
+      delete rs.download_detour;
+      if (!rs.http_client) {
+        delete rs.http_client;
+      }
+    }
+    return rs;
+  });
   const obj = {
     final: configData.route.final,
     auto_detect_interface: configData.route.auto_detect_interface,
     default_domain_resolver:
       configData.route.default_domain_resolver || undefined,
+    default_http_client:
+      configData.route.default_http_client || undefined,
     rules: JSON.parse(JSON.stringify(configData.route.rules)),
-    rule_set: JSON.parse(JSON.stringify(configData.route.rule_set)),
+    rule_set: ruleSet,
     ...(configData.route._extra || {}),
   };
   return obj;
+};
+
+const serializeHttpClients = () => {
+  return JSON.parse(JSON.stringify(configData.http_clients || []));
 };
 
 const serializeExperimental = () => {
@@ -7683,6 +7905,7 @@ const confirmImport = async () => {
     const inboundsSec = parsed.inbounds || [];
     const outboundsSec = parsed.outbounds || [];
     const routeSec = parsed.route || {};
+    const httpClientsSec = parsed.http_clients || [];
     const experimentalSec = parsed.experimental || {};
 
     // Support direct servers or array configuration at root
@@ -7773,6 +7996,7 @@ const confirmImport = async () => {
         inbounds: inboundsSec,
         outbounds: outboundsSec,
         route: routeSec,
+        http_clients: httpClientsSec,
         experimental: experimentalSec,
       }),
     });
@@ -7800,6 +8024,7 @@ const confirmImport = async () => {
     parseInbounds(inboundsSec);
     parseOutbounds(outboundsSec);
     parseRoute(routeSec);
+    parseHttpClients(httpClientsSec);
     parseExperimental(experimentalSec);
 
     rawJson.log = JSON.stringify(logSec, null, 2);
@@ -7807,6 +8032,7 @@ const confirmImport = async () => {
     rawJson.inbounds = JSON.stringify(inboundsSec, null, 2);
     rawJson.outbounds = JSON.stringify(outboundsSec, null, 2);
     rawJson.route = JSON.stringify(routeSec, null, 2);
+    rawJson.http_clients = JSON.stringify(httpClientsSec, null, 2);
     rawJson.experimental = JSON.stringify(experimentalSec, null, 2);
 
     showToast(
@@ -7831,6 +8057,7 @@ const getFullConfigData = () => {
     "inbounds",
     "outbounds",
     "route",
+    "http_clients",
     "experimental",
   ];
   for (const sec of sectionsList) {
@@ -7840,6 +8067,7 @@ const getFullConfigData = () => {
       else if (sec === "inbounds") data[sec] = serializeInbounds();
       else if (sec === "outbounds") data[sec] = serializeOutbounds();
       else if (sec === "route") data[sec] = serializeRoute();
+      else if (sec === "http_clients") data[sec] = serializeHttpClients();
       else if (sec === "experimental") data[sec] = serializeExperimental();
     } else {
       try {
@@ -8235,6 +8463,7 @@ const loadHistoryConfig = async (id) => {
       rawJson.inbounds = JSON.stringify(base.inbounds || [], null, 2);
       rawJson.outbounds = JSON.stringify(base.outbounds || [], null, 2);
       rawJson.route = JSON.stringify(base.route || {}, null, 2);
+      rawJson.http_clients = JSON.stringify(base.http_clients || [], null, 2);
       rawJson.experimental = JSON.stringify(base.experimental || {}, null, 2);
 
       parseLog(base.log || {});
@@ -8242,6 +8471,7 @@ const loadHistoryConfig = async (id) => {
       parseInbounds(base.inbounds || []);
       parseOutbounds(base.outbounds || []);
       parseRoute(base.route || {});
+      parseHttpClients(base.http_clients || []);
       parseExperimental(base.experimental || {});
 
       // 旧配置迁移：把 selector/urltest 的引用展开为自包含快照
@@ -8444,23 +8674,27 @@ const duplicateConfigItem = async (id) => {
 };
 
 const loadAllSections = async () => {
-  await fetchSystemInfo();
-  try {
-    const resGroups = await fetch(`${API_BASE}/api/groups`, {
-      headers: { Authorization: `Bearer ${token.value}` },
-    });
-    if (resGroups.ok) {
-      outboundGroups.value = await resGroups.json();
-    }
-  } catch (e) {
-    console.error("加载出站组失败", e);
-  }
+  // 并发拉取核心首屏数据（系统信息、出站组、运行设置与配置列表），大幅提升 Armbian 等低功耗设备上的响应速度
+  await Promise.allSettled([
+    fetchSystemInfo(),
+    (async () => {
+      try {
+        const resGroups = await fetch(`${API_BASE}/api/groups`, {
+          headers: { Authorization: `Bearer ${token.value}` },
+        });
+        if (resGroups.ok) {
+          outboundGroups.value = await resGroups.json();
+        }
+      } catch (e) {
+        console.error("加载出站组失败", e);
+      }
+    })(),
+    loadRunningConfigSettings(),
+    loadConfigList(),
+  ]);
 
-  // 加载节点池缓存（用于出站组完整展开导入与旧配置迁移）
-  await loadNodePoolCache();
-
-  await loadRunningConfigSettings();
-  await loadConfigList();
+  // 异步加载节点池缓存（用于出站组完整展开导入与旧配置迁移），后台执行不阻塞首屏渲染与路由恢复
+  loadNodePoolCache();
 
   const routeState = parseConfigRoute();
   if (routeState.isEditing && routeState.configId) {
@@ -8508,6 +8742,7 @@ const loadAllSections = async () => {
     rawJson.inbounds = "";
     rawJson.outbounds = "";
     rawJson.route = "";
+    rawJson.http_clients = "";
     rawJson.experimental = "";
 
     parseLog({});
@@ -8515,6 +8750,7 @@ const loadAllSections = async () => {
     parseInbounds([]);
     parseOutbounds([]);
     parseRoute({});
+    parseHttpClients([]);
     parseExperimental({});
   }
 };
@@ -8530,6 +8766,7 @@ const setSectionMode = (section, mode) => {
       else if (section === "inbounds") parseInbounds(parsed);
       else if (section === "outbounds") parseOutbounds(parsed);
       else if (section === "route") parseRoute(parsed);
+      else if (section === "http_clients") parseHttpClients(parsed);
       else if (section === "experimental") parseExperimental(parsed);
       sectionModes[section] = mode;
     } catch (e) {
@@ -8545,6 +8782,7 @@ const setSectionMode = (section, mode) => {
     else if (section === "inbounds") obj = serializeInbounds();
     else if (section === "outbounds") obj = serializeOutbounds();
     else if (section === "route") obj = serializeRoute();
+    else if (section === "http_clients") obj = serializeHttpClients();
     else if (section === "experimental") obj = serializeExperimental();
 
     rawJson[section] = JSON.stringify(obj, null, 2);
@@ -8561,6 +8799,7 @@ const saveVueConfigSection = async (section) => {
     else if (section === "inbounds") finalObj = serializeInbounds();
     else if (section === "outbounds") finalObj = serializeOutbounds();
     else if (section === "route") finalObj = serializeRoute();
+    else if (section === "http_clients") finalObj = serializeHttpClients();
     else if (section === "experimental") finalObj = serializeExperimental();
   } else {
     try {
@@ -8685,17 +8924,20 @@ const onRuleSetTypeChange = (rs) => {
   if (rs.type === "remote") {
     rs.url = rs.url || "";
     rs.format = rs.format || "binary";
-    rs.download_detour =
-      rs.download_detour ||
-      (allOutboundTags.value.includes("proxy")
-        ? "proxy"
-        : allOutboundTags.value[0] || "direct");
+    rs.http_client =
+      rs.http_client ||
+      configData.route.default_http_client ||
+      (allHttpClientTags.value.includes("direct")
+        ? "direct"
+        : allHttpClientTags.value[0] || "");
     rs.update_interval = rs.update_interval || "1d";
     delete rs.path;
+    delete rs.download_detour;
   } else {
     rs.path = rs.path || "";
     delete rs.url;
     delete rs.download_detour;
+    delete rs.http_client;
     delete rs.update_interval;
     delete rs.format;
   }
@@ -8735,6 +8977,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
   else if (type === "outbound") itemModal.title = "编辑出站连接 (Outbound)";
   else if (type === "route_rule") itemModal.title = "编辑分流路由规则";
   else if (type === "route_ruleset") itemModal.title = "编辑规则集 (RuleSet)";
+  else if (type === "http_client") itemModal.title = "编辑 HTTP 客户端";
 
   itemModal.itemData = JSON.parse(JSON.stringify(item));
 
@@ -9040,10 +9283,25 @@ const syncVisualToItemData = () => {
     if (itemModal.itemData.type === "local") {
       delete itemModal.itemData.url;
       delete itemModal.itemData.download_detour;
+      delete itemModal.itemData.http_client;
       delete itemModal.itemData.update_interval;
       delete itemModal.itemData.format;
     } else {
       delete itemModal.itemData.path;
+      delete itemModal.itemData.download_detour;
+      if (!itemModal.itemData.http_client) {
+        delete itemModal.itemData.http_client;
+      }
+    }
+  }
+  if (itemModal.itemType === "http_client") {
+    if (!itemModal.itemData.tag || !itemModal.itemData.tag.trim()) {
+      itemModal.error = "请输入客户端标签 (Tag)";
+      itemModal.validating = false;
+      return;
+    }
+    if (!itemModal.itemData.detour || !itemModal.itemData.detour.trim()) {
+      itemModal.itemData.detour = "direct";
     }
   }
   if (itemModal.itemType === "outbound") {
@@ -9220,7 +9478,37 @@ const getListByType = (type) => {
   if (type === "outbound") return configData.outbounds;
   if (type === "route_rule") return configData.route.rules;
   if (type === "route_ruleset") return configData.route.rule_set;
+  if (type === "http_client") return configData.http_clients;
   return null;
+};
+
+const addHttpClient = () => {
+  const defaultDetour = allOutboundTags.value.includes("direct")
+    ? "direct"
+    : allOutboundTags.value[0] || "direct";
+  const newItem = {
+    tag: `client-${(configData.http_clients || []).length + 1}`,
+    detour: defaultDetour,
+  };
+  editItem(newItem, "http_client", (parsed) => {
+    if (!configData.http_clients) configData.http_clients = [];
+    configData.http_clients.push(parsed);
+  });
+};
+
+const editHttpClient = (hc, idx) => {
+  editItem(
+    hc,
+    "http_client",
+    (parsed) => {
+      configData.http_clients[idx] = parsed;
+    },
+    idx,
+  );
+};
+
+const deleteHttpClient = (idx) => {
+  configData.http_clients.splice(idx, 1);
 };
 
 const addBasicOutbound = () => {
@@ -9694,6 +9982,7 @@ const getSerializedState = () => {
       else if (sec === "inbounds") state[sec] = serializeInbounds();
       else if (sec === "outbounds") state[sec] = serializeOutbounds();
       else if (sec === "route") state[sec] = serializeRoute();
+      else if (sec === "http_clients") state[sec] = serializeHttpClients();
       else if (sec === "experimental") state[sec] = serializeExperimental();
     } else {
       try {

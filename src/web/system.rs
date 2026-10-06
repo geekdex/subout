@@ -200,6 +200,7 @@ pub async fn set_system_mode(
         .get("experimental")
         .cloned()
         .unwrap_or_default();
+    let http_clients = target_config.get("http_clients");
 
     if let Err(err_msg) = crate::web::config::validate_config_with_singbox(
         &log,
@@ -208,6 +209,7 @@ pub async fn set_system_mode(
         &outbounds,
         &route,
         &experimental,
+        http_clients,
     ) {
         return Err((
             StatusCode::BAD_REQUEST,

@@ -689,14 +689,21 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn standard_singbox_candidates(&self, _binary_name: &str) -> Vec<PathBuf> {
-        vec![
+        let mut candidates = vec![
             PathBuf::from("/usr/local/bin/sing-box"),
             PathBuf::from("/usr/bin/sing-box"),
             PathBuf::from("/bin/sing-box"),
             PathBuf::from("/usr/sbin/sing-box"),
             PathBuf::from("/var/lib/subout/sing-box/sing-box"),
             PathBuf::from("/var/lib/subout/bin/sing-box"),
-        ]
+            PathBuf::from("/opt/bin/sing-box"),
+            PathBuf::from("/opt/sing-box/sing-box"),
+            PathBuf::from("/snap/bin/sing-box"),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            candidates.push(PathBuf::from(home).join(".local/bin/sing-box"));
+        }
+        candidates
     }
 
     fn legacy_db_candidates(&self, _config_dir: &Path) -> Vec<PathBuf> {
@@ -704,6 +711,29 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
+        // 1. Direct PATH traversal (POSIX-compliant, does not depend on `which` being installed)
+        if let Some(paths) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&paths) {
+                let p = dir.join(cmd_name);
+                if p.is_file() {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(meta) = p.metadata()
+                            && meta.permissions().mode() & 0o111 != 0
+                        {
+                            return Some(p);
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to `which` command if available
         if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output()
             && output.status.success()
         {

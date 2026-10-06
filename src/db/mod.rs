@@ -270,6 +270,10 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
             "INSERT INTO base_config (section, content) VALUES ('experimental', ?)",
             ["{}"],
         )?;
+        conn.execute(
+            "INSERT INTO base_config (section, content) VALUES ('http_clients', ?)",
+            [r#"[{"tag":"direct","detour":"direct"},{"tag":"proxy","detour":"proxy"}]"#],
+        )?;
     }
 
     // Bootstrap default outbound groups

@@ -95,6 +95,42 @@
           </select>
         </div>
       </div>
+      <div class="grid-2" style="margin-top: 1rem">
+        <div class="input-group">
+          <label>
+            默认 HTTP 客户端 (default_http_client)
+            <span
+              title="sing-box 1.14+ 规范：指定下载远端规则集等 HTTP 请求的默认客户端（对应 HTTP 客户端集合中的 Tag）"
+              style="margin-left: 4px; cursor: help; color: var(--text-muted)"
+              >ℹ️</span
+            >
+          </label>
+          <select
+            v-model="configData.route.default_http_client"
+            class="input-control w-full"
+          >
+            <option value="">-- 无 (未指定) --</option>
+            <option
+              v-if="
+                configData.route.default_http_client &&
+                !availableHttpClientTags.includes(
+                  configData.route.default_http_client,
+                )
+              "
+              :value="configData.route.default_http_client"
+            >
+              {{ configData.route.default_http_client }} (当前值)
+            </option>
+            <option
+              v-for="tag in availableHttpClientTags"
+              :key="tag"
+              :value="tag"
+            >
+              {{ tag }}
+            </option>
+          </select>
+        </div>
+      </div>
       <div style="margin-top: 0.75rem">
         <div class="toggle-item">
           <label class="switch">
@@ -570,9 +606,9 @@
                         <span class="detail-value">{{ rs.path || "-" }}</span>
                       </div>
                       <div class="rule-card-detail">
-                        <span>下载代理:</span>
+                        <span>HTTP 客户端:</span>
                         <span class="detail-value">{{
-                          rs.download_detour || "默认"
+                          rs.http_client || "默认"
                         }}</span>
                       </div>
                       <div class="rule-card-detail">
@@ -625,9 +661,19 @@ import RuleCriteriaTags from "./RuleCriteriaTags.vue";
 const props = defineProps({
   configData: { type: Object, required: true },
   allOutboundTags: { type: Array, default: () => [] },
+  allHttpClientTags: { type: Array, default: () => [] },
   duplicateRouteRulesInfo: { type: Array, default: () => [] },
   duplicateCheckFn: { type: Function, default: null },
   editItem: { type: Function, default: null },
+});
+
+const availableHttpClientTags = computed(() => {
+  if (props.allHttpClientTags && props.allHttpClientTags.length > 0) {
+    return props.allHttpClientTags;
+  }
+  return (props.configData.http_clients || [])
+    .map((c) => c.tag)
+    .filter(Boolean);
 });
 
 defineEmits(["syncRule", "openDomainWizard"]);
@@ -829,14 +875,17 @@ function editRouteRule(rule, idx) {
 }
 
 function addRuleSet() {
+  const defaultHc =
+    props.configData.route?.default_http_client ||
+    (availableHttpClientTags.value.includes("direct")
+      ? "direct"
+      : availableHttpClientTags.value[0] || "");
   const newItem = {
     tag: "ruleset-" + ((props.configData.route.rule_set || []).length + 1),
     type: "remote",
     format: "binary",
     url: "",
-    download_detour: props.allOutboundTags.includes("proxy")
-      ? "proxy"
-      : props.allOutboundTags[0] || "",
+    http_client: defaultHc,
     update_interval: "1d",
   };
   if (props.editItem) {
