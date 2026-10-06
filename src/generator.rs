@@ -575,21 +575,28 @@ mod tests {
     fn test_sanitize_inbounds_strategies() {
         use crate::platform::PlatformStrategy;
 
-        // Test Linux strategy
+        // Test Linux strategy: 所见即所得，保持不变
         let mut linux_inbound = json!({
             "type": "tun",
             "tag": "tun-in",
+            "address": ["172.19.0.1/30"],
             "interface_name": "tun0",
             "auto_redirect": true
         });
         crate::platform::linux_platform().sanitize_inbound(&mut linux_inbound);
         assert_eq!(linux_inbound.get("auto_redirect"), Some(&json!(true)));
         assert_eq!(linux_inbound.get("interface_name"), Some(&json!("tun0")));
+        assert_eq!(
+            linux_inbound.get("address"),
+            Some(&json!(["172.19.0.1/30"]))
+        );
+        assert_eq!(linux_inbound.get("strict_route"), None);
 
-        // Test macOS strategy
+        // Test macOS strategy: 移除系统不兼容字段，不做隐式增加
         let mut macos_inbound = json!({
             "type": "tun",
             "tag": "tun-in",
+            "address": ["172.19.0.1/30"],
             "interface_name": "tun0",
             "auto_redirect": true
         });
@@ -598,15 +605,15 @@ mod tests {
         assert_eq!(macos_inbound.get("interface_name"), None);
         assert_eq!(
             macos_inbound.get("address"),
-            Some(&json!(["172.19.0.1/30", "fd00::1/126"]))
+            Some(&json!(["172.19.0.1/30"]))
         );
-        assert_eq!(macos_inbound.get("strict_route"), Some(&json!(true)));
-        assert_eq!(macos_inbound.get("stack"), Some(&json!("mixed")));
+        assert_eq!(macos_inbound.get("strict_route"), None);
 
-        // Test Windows strategy
+        // Test Windows strategy: 适配系统网卡命名，不做隐式增加
         let mut win_inbound = json!({
             "type": "tun",
             "tag": "tun-in",
+            "address": ["172.19.0.1/30"],
             "interface_name": "tun0",
             "auto_redirect": true
         });
@@ -616,12 +623,11 @@ mod tests {
             win_inbound.get("interface_name"),
             Some(&json!("subout-tun"))
         );
-        assert_eq!(win_inbound.get("stack"), Some(&json!("mixed")));
         assert_eq!(
             win_inbound.get("address"),
-            Some(&json!(["172.19.0.1/30", "fd00::1/126"]))
+            Some(&json!(["172.19.0.1/30"]))
         );
-        assert_eq!(win_inbound.get("strict_route"), Some(&json!(true)));
+        assert_eq!(win_inbound.get("strict_route"), None);
     }
 
     #[test]

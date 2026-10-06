@@ -8,4 +8,4 @@ web/dist
 *.db
 .temp_singbox_*
 .kiro
-
+.cargo

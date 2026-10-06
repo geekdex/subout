@@ -742,6 +742,7 @@
                                 <option value="http">http</option>
                                 <option value="tproxy">tproxy</option>
                                 <option value="redirect">redirect</option>
+                                <option value="direct">direct</option>
                               </select>
                             </td>
                             <td>
@@ -796,6 +797,65 @@
                                     <option value="mixed">mixed</option>
                                     <option value="system">system</option>
                                   </select>
+                                </div>
+                                <div
+                                  style="
+                                    display: flex;
+                                    gap: 0.5rem;
+                                    align-items: center;
+                                  "
+                                >
+                                  <span
+                                    style="
+                                      width: 60px;
+                                      color: var(--text-muted);
+                                      flex-shrink: 0;
+                                      text-align: right;
+                                    "
+                                    >IP 网段:</span
+                                  >
+                                  <input
+                                    v-model="inb._table_address"
+                                    type="text"
+                                    class="input-control table-input"
+                                    style="
+                                      flex: 1;
+                                      min-width: 80px;
+                                      padding: 0.15rem 0.3rem;
+                                    "
+                                    placeholder="默认 (点击右侧按钮填入推荐)"
+                                    @input="onTableInboundAddressChange(inb)"
+                                  />
+                                  <button
+                                    type="button"
+                                    class="btn btn-secondary table-btn"
+                                    style="
+                                      padding: 0.15rem 0.4rem;
+                                      font-size: 0.75rem;
+                                      white-space: nowrap;
+                                    "
+                                    title="一键填入推荐 IPv4 地址 (172.19.0.1/30)"
+                                    @click="
+                                      applyTableRecommendedIp(inb, 'ipv4')
+                                    "
+                                  >
+                                    IPv4
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="btn btn-secondary table-btn"
+                                    style="
+                                      padding: 0.15rem 0.4rem;
+                                      font-size: 0.75rem;
+                                      white-space: nowrap;
+                                    "
+                                    title="一键填入推荐双栈地址 (172.19.0.1/30, fd00::1/126)"
+                                    @click="
+                                      applyTableRecommendedIp(inb, 'dual')
+                                    "
+                                  >
+                                    双栈
+                                  </button>
                                 </div>
                                 <div
                                   style="
@@ -890,8 +950,23 @@
                                   type="text"
                                   class="input-control table-input"
                                   style="flex: 1; min-width: 80px"
-                                  placeholder="监听地址"
+                                  :placeholder="primaryLanIp || '监听地址'"
+                                  :title="primaryLanIp ? '建议绑定内网 IP (如 ' + primaryLanIp + ') 或 :: 全网卡' : '监听地址'"
                                 />
+                                <button
+                                  v-if="primaryLanIp && inb.listen !== primaryLanIp"
+                                  type="button"
+                                  class="btn btn-secondary table-btn"
+                                  style="
+                                    padding: 0.1rem 0.4rem;
+                                    font-size: 0.72rem;
+                                    white-space: nowrap;
+                                  "
+                                  title="一键填入推荐内网 IP"
+                                  @click="inb.listen = primaryLanIp"
+                                >
+                                  填入IP
+                                </button>
                                 <input
                                   v-model.number="inb.listen_port"
                                   type="number"
@@ -1678,7 +1753,8 @@
                             color: var(--text-muted);
                           "
                         >
-                          sing-box 1.14+ 核心架构：用于远端规则集 (rule_set) 下载等网络出站的 HTTP 客户端实例集合。
+                          sing-box 1.14+ 核心架构：用于远端规则集 (rule_set)
+                          下载等网络出站的 HTTP 客户端实例集合。
                         </p>
                       </div>
                       <button
@@ -1783,7 +1859,8 @@
                                 padding: 2rem;
                               "
                             >
-                              暂无 HTTP 客户端配置。点击上方「+ 添加客户端」创建（建议配置 direct 和 proxy）。
+                              暂无 HTTP 客户端配置。点击上方「+
+                              添加客户端」创建（建议配置 direct 和 proxy）。
                             </td>
                           </tr>
                         </tbody>
@@ -2526,6 +2603,7 @@
                     <option value="http">http</option>
                     <option value="tproxy">tproxy</option>
                     <option value="redirect">redirect</option>
+                    <option value="direct">direct</option>
                   </select>
                 </div>
               </div>
@@ -2535,14 +2613,94 @@
                 style="margin-top: 1rem"
               >
                 <div class="input-group">
-                  <label>监听地址</label>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      flex-wrap: wrap;
+                      gap: 0.4rem;
+                      margin-bottom: 0.4rem;
+                    "
+                  >
+                    <label style="margin-bottom: 0; font-weight: 500"
+                      >监听地址 (listen)</label
+                    >
+                    <div
+                      style="
+                        display: flex;
+                        gap: 0.35rem;
+                        align-items: center;
+                        flex-wrap: wrap;
+                      "
+                    >
+                      <button
+                        v-if="primaryLanIp"
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.15rem 0.5rem; font-size: 0.75rem"
+                        :title="
+                          '绑定本机推荐局域网 IP (' +
+                          primaryLanIp +
+                          ')，避免 Linux 53 端口冲突并允许局域网设备访问'
+                        "
+                        @click="itemModal.itemData.listen = primaryLanIp"
+                      >
+                        🏠 推荐内网 IP ({{ primaryLanIp }})
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.15rem 0.45rem; font-size: 0.75rem"
+                        title="监听所有 IPv4 与 IPv6 网络接口 (::)"
+                        @click="itemModal.itemData.listen = '::'"
+                      >
+                        🌐 全网卡 (::)
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.15rem 0.45rem; font-size: 0.75rem"
+                        title="仅限本机回路访问 (127.0.0.1)"
+                        @click="itemModal.itemData.listen = '127.0.0.1'"
+                      >
+                        🔒 本地 (127.0.0.1)
+                      </button>
+                    </div>
+                  </div>
                   <input
                     v-model="itemModal.itemData.listen"
                     type="text"
                     class="input-control"
-                    placeholder="::"
+                    :placeholder="primaryLanIp || '::'"
                     required
                   />
+                  <div
+                    v-if="systemLanIps.length > 1"
+                    style="
+                      display: flex;
+                      gap: 0.3rem;
+                      margin-top: 0.35rem;
+                      align-items: center;
+                      flex-wrap: wrap;
+                      font-size: 0.75rem;
+                      color: var(--text-muted);
+                    "
+                  >
+                    <span>其他可用网卡 IP:</span>
+                    <button
+                      v-for="ip in systemLanIps.filter(
+                        (i) => i !== primaryLanIp,
+                      )"
+                      :key="ip"
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      style="padding: 0.1rem 0.4rem; font-size: 0.75rem"
+                      @click="itemModal.itemData.listen = ip"
+                    >
+                      {{ ip }}
+                    </button>
+                  </div>
                 </div>
                 <div class="input-group">
                   <label>监听端口</label>
@@ -2625,6 +2783,74 @@
                       placeholder="9000"
                     />
                   </div>
+                </div>
+                <div class="input-group" style="margin-top: 1rem">
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      flex-wrap: wrap;
+                      gap: 0.5rem;
+                      margin-bottom: 0.4rem;
+                    "
+                  >
+                    <label style="margin-bottom: 0; font-weight: 500">
+                      虚拟网卡 IP 地址 / 网段 (address)
+                    </label>
+                    <div
+                      style="display: flex; gap: 0.4rem; align-items: center"
+                    >
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
+                        title="填入最通用的 IPv4 推荐地址，兼容性最佳（避免 Linux 禁用 IPv6 时启动报错）"
+                        @click="applyRecommendedInboundIp('ipv4')"
+                      >
+                        ⚡ 推荐 IPv4 (172.19.0.1/30)
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
+                        title="填入 IPv4 + IPv6 双栈推荐地址，适合启用 IPv6 并需防泄漏的网络"
+                        @click="applyRecommendedInboundIp('dual')"
+                      >
+                        🌐 推荐双栈 (IPv4 + IPv6)
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.5rem; font-size: 0.75rem"
+                        title="清空当前地址（留空使用 sing-box 内核默认行为）"
+                        @click="applyRecommendedInboundIp('empty')"
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    v-model="itemModal.tempFields.address"
+                    type="text"
+                    class="input-control"
+                    placeholder="例如: 172.19.0.1/30 或 172.19.0.1/30, fd00::1/126 (支持直接编辑，逗号分隔)"
+                  />
+                  <small
+                    style="
+                      color: var(--text-muted);
+                      margin-top: 4px;
+                      display: block;
+                      line-height: 1.4;
+                    "
+                  >
+                    💡 <b>最佳实践建议</b>：若当前系统（如云服务器、VPS 或特定
+                    Linux 环境）禁用了 IPv6，请选择
+                    <b>推荐 IPv4 (172.19.0.1/30)</b>，避免内核分配 IPv6
+                    地址时触发 <code>permission denied</code>；若网络环境支持
+                    IPv6 并需要接管防止泄漏，请选用
+                    <b>推荐双栈</b>。你也可以直接编辑输入任意合法的 CIDR 网段。
+                  </small>
                 </div>
                 <div
                   style="
@@ -3102,7 +3328,9 @@
                     v-model="itemModal.itemData.http_client"
                     class="input-control"
                   >
-                    <option value="">-- 使用路由默认客户端 (default_http_client) --</option>
+                    <option value="">
+                      -- 使用路由默认客户端 (default_http_client) --
+                    </option>
                     <option
                       v-if="
                         itemModal.itemData.http_client &&
@@ -5013,7 +5241,14 @@
           <!-- 同步模式选择：新建 vs 覆盖 vs 追加 -->
           <div class="input-group" style="margin-bottom: 1rem">
             <label>同步目标方式 (Target Action)</label>
-            <div style="display: flex; gap: 1rem; margin-top: 0.35rem; flex-wrap: wrap">
+            <div
+              style="
+                display: flex;
+                gap: 1rem;
+                margin-top: 0.35rem;
+                flex-wrap: wrap;
+              "
+            >
               <label
                 style="
                   display: flex;
@@ -5060,7 +5295,10 @@
 
           <!-- 覆盖或追加目标选择 -->
           <div
-            v-if="ruleSyncModal.mode === 'overwrite' || ruleSyncModal.mode === 'append'"
+            v-if="
+              ruleSyncModal.mode === 'overwrite' ||
+              ruleSyncModal.mode === 'append'
+            "
             class="input-group"
             style="margin-bottom: 1rem"
           >
@@ -5184,7 +5422,16 @@
       :class="{ active: domainWizardModal.show }"
       @click.self="domainWizardModal.show = false"
     >
-      <div class="modal-card" style="max-width: 800px; width: 95%; max-height: 90vh; display: flex; flex-direction: column;">
+      <div
+        class="modal-card"
+        style="
+          max-width: 800px;
+          width: 95%;
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+        "
+      >
         <div class="modal-header">
           <span>⚡ 快捷域名 / IP 分流推荐 (最佳实践)</span>
           <svg
@@ -5202,7 +5449,7 @@
           </svg>
         </div>
 
-        <div class="modal-body" style="overflow-y: auto; flex: 1;">
+        <div class="modal-body" style="overflow-y: auto; flex: 1">
           <!-- Description & Tip -->
           <div
             style="
@@ -5217,7 +5464,8 @@
             "
           >
             <strong>💡 最佳实践建议:</strong>
-            输入一个或多个域名或 IP/CIDR（例如用于 SSH 或代理访问的 IP）。系统将智能分析并测试您选定的节点延迟，然后为您推荐最合适的
+            输入一个或多个域名或 IP/CIDR（例如用于 SSH 或代理访问的
+            IP）。系统将智能分析并测试您选定的节点延迟，然后为您推荐最合适的
             <strong>URLTest 策略组</strong> 或 <strong>特定代理节点</strong>。
           </div>
 
@@ -5328,8 +5576,11 @@
                 v-else-if="domainWizardModal.detectedType === 'multi_domain'"
                 style="color: var(--text-muted)"
               >
-                检测到 {{ (domainWizardModal.detectedDomains || []).length }} 个域名：
-                <strong>{{ (domainWizardModal.detectedDomains || []).join(", ") }}</strong>
+                检测到
+                {{ (domainWizardModal.detectedDomains || []).length }} 个域名：
+                <strong>{{
+                  (domainWizardModal.detectedDomains || []).join(", ")
+                }}</strong>
                 (匹配规则字段: <code>domain</code>)
                 <div
                   style="
@@ -5347,8 +5598,11 @@
                 v-else-if="domainWizardModal.detectedType === 'ip'"
                 style="color: var(--text-muted)"
               >
-                检测到 {{ (domainWizardModal.detectedIps || []).length }} 个目标 IP / CIDR：
-                <strong>{{ (domainWizardModal.detectedIps || []).join(", ") }}</strong>
+                检测到 {{ (domainWizardModal.detectedIps || []).length }} 个目标
+                IP / CIDR：
+                <strong>{{
+                  (domainWizardModal.detectedIps || []).join(", ")
+                }}</strong>
                 (匹配规则字段: <code>ip_cidr</code>)
                 <div
                   style="
@@ -5357,7 +5611,10 @@
                     color: var(--text-muted);
                   "
                 >
-                  测试测速所用基准服务：<code>{{ domainWizardModal.testUrl }}</code> (测试节点对外部网络传输与连接质量)
+                  测试测速所用基准服务：<code>{{
+                    domainWizardModal.testUrl
+                  }}</code>
+                  (测试节点对外部网络传输与连接质量)
                 </div>
               </div>
 
@@ -5367,11 +5624,21 @@
                 style="color: var(--text-muted)"
               >
                 <div>
-                  域名：<strong>{{ (domainWizardModal.detectedDomains || []).join(", ") }}</strong>
-                  (匹配字段: <code>{{ domainWizardModal.extractedSuffix ? 'domain_suffix' : 'domain' }}</code>)
+                  域名：<strong>{{
+                    (domainWizardModal.detectedDomains || []).join(", ")
+                  }}</strong>
+                  (匹配字段:
+                  <code>{{
+                    domainWizardModal.extractedSuffix
+                      ? "domain_suffix"
+                      : "domain"
+                  }}</code
+                  >)
                 </div>
                 <div style="margin-top: 0.2rem">
-                  IP / CIDR：<strong>{{ (domainWizardModal.detectedIps || []).join(", ") }}</strong>
+                  IP / CIDR：<strong>{{
+                    (domainWizardModal.detectedIps || []).join(", ")
+                  }}</strong>
                   (匹配字段: <code>ip_cidr</code>)
                 </div>
                 <div
@@ -5408,7 +5675,9 @@
               "
             >
               <div style="display: flex; align-items: center; gap: 0.5rem">
-                <span style="font-size: 0.88rem; font-weight: 600">🎯 待测试节点范围</span>
+                <span style="font-size: 0.88rem; font-weight: 600"
+                  >🎯 待测试节点范围</span
+                >
                 <span
                   class="badge"
                   :class="
@@ -5426,7 +5695,11 @@
                 <a
                   href="javascript:void(0)"
                   class="wizard-select-filtered-btn"
-                  style="color: var(--primary); text-decoration: none; font-weight: 500"
+                  style="
+                    color: var(--primary);
+                    text-decoration: none;
+                    font-weight: 500;
+                  "
                   @click="selectAllFilteredWizardNodes"
                 >
                   全选当前筛选
@@ -5548,8 +5821,15 @@
               >
                 <input
                   type="checkbox"
-                  :checked="domainWizardModal.selectedNodeTags.includes(node.tag)"
-                  style="pointer-events: none; width: 13px; height: 13px; margin: 0"
+                  :checked="
+                    domainWizardModal.selectedNodeTags.includes(node.tag)
+                  "
+                  style="
+                    pointer-events: none;
+                    width: 13px;
+                    height: 13px;
+                    margin: 0;
+                  "
                 />
                 <span
                   style="
@@ -5927,6 +6207,8 @@ const runningConfigForm = reactive({
 
 // 当前运行 subout 服务的宿主机操作系统环境（由 /api/system/info 接口获取，默认预设为 'linux'）
 const systemOs = ref("linux");
+const systemLanIps = ref([]);
+const primaryLanIp = ref("");
 const isLinux = computed(() => systemOs.value === "linux");
 const isApplePlatform = computed(
   () => systemOs.value === "macos" || systemOs.value === "darwin",
@@ -6061,6 +6343,12 @@ const fetchSystemInfo = async () => {
       if (data && data.os) {
         systemOs.value = data.os;
       }
+      if (data && Array.isArray(data.lan_ips)) {
+        systemLanIps.value = data.lan_ips;
+      }
+      if (data && data.primary_lan_ip) {
+        primaryLanIp.value = data.primary_lan_ip;
+      }
     }
   } catch {
     // keep fallback
@@ -6110,10 +6398,7 @@ const configData = reactive({
     rules: [],
     rule_set: [],
   },
-  http_clients: [
-    { tag: "direct" },
-    { tag: "proxy", detour: "proxy" },
-  ],
+  http_clients: [{ tag: "direct" }, { tag: "proxy", detour: "proxy" }],
   experimental: {
     cache_file: {
       enabled: false,
@@ -6563,7 +6848,9 @@ const isIPv6OrCIDR = (str) => {
 
 const isDomainName = (str) => {
   if (isIPv4(str) || isIPv4CIDR(str) || isIPv6OrCIDR(str)) return false;
-  return /^[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+$/.test(str);
+  return /^[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+$/.test(
+    str,
+  );
 };
 
 const getCommonSuffix = (domains) => {
@@ -6732,7 +7019,10 @@ const availableNodesForWizard = computed(() => {
   });
 
   (configData.outbounds || []).forEach((o) => {
-    if (["selector", "urltest"].includes(o.type) && Array.isArray(o.outbounds)) {
+    if (
+      ["selector", "urltest"].includes(o.type) &&
+      Array.isArray(o.outbounds)
+    ) {
       o.outbounds.forEach((memberTag) => {
         if (!addedTags.has(memberTag)) {
           const memberOutbound = (configData.outbounds || []).find(
@@ -7480,8 +7770,42 @@ const itemModal = reactive({
     process_path_regex: "",
     package_name: "",
     user: "",
+    address: "",
   },
 });
+
+const applyRecommendedInboundIp = (preset) => {
+  if (preset === "ipv4") {
+    itemModal.tempFields.address = "172.19.0.1/30";
+  } else if (preset === "dual") {
+    itemModal.tempFields.address = "172.19.0.1/30, fd00::1/126";
+  } else if (preset === "empty") {
+    itemModal.tempFields.address = "";
+  }
+};
+
+const onTableInboundAddressChange = (inb) => {
+  const raw = (inb._table_address || "").trim();
+  if (raw) {
+    inb.address = raw
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  } else {
+    delete inb.address;
+  }
+};
+
+const applyTableRecommendedIp = (inb, preset) => {
+  if (preset === "ipv4") {
+    inb._table_address = "172.19.0.1/30";
+  } else if (preset === "dual") {
+    inb._table_address = "172.19.0.1/30, fd00::1/126";
+  } else {
+    inb._table_address = "";
+  }
+  onTableInboundAddressChange(inb);
+};
 
 const presetUrlSelectConfig = ref("http://cp.cloudflare.com/generate_204");
 const onPresetUrlChangeConfig = () => {
@@ -7659,6 +7983,18 @@ const parseDns = (json) => {
 const parseInbounds = (json, notifyOnRemove = false) => {
   const list = Array.isArray(json) ? JSON.parse(JSON.stringify(json)) : [];
 
+  list.forEach((inb) => {
+    if (inb && typeof inb === "object" && inb.type === "tun") {
+      if (Array.isArray(inb.address)) {
+        inb._table_address = inb.address.join(", ");
+      } else if (typeof inb.address === "string") {
+        inb._table_address = inb.address;
+      } else {
+        inb._table_address = "";
+      }
+    }
+  });
+
   if (!isLinux.value && Array.isArray(list)) {
     let hasAutoRedirect = false;
     list.forEach((inb) => {
@@ -7806,13 +8142,27 @@ const serializeDns = () => {
 
 const serializeInbounds = () => {
   const list = JSON.parse(JSON.stringify(configData.inbounds));
-  if (!isLinux.value && Array.isArray(list)) {
-    list.forEach((inb) => {
-      if (inb && typeof inb === "object") {
+  list.forEach((inb) => {
+    if (inb && typeof inb === "object") {
+      if (!isLinux.value) {
         delete inb.auto_redirect;
       }
-    });
-  }
+      if (inb.type === "tun") {
+        if (inb._table_address !== undefined) {
+          const raw = inb._table_address.trim();
+          if (raw) {
+            inb.address = raw
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+          } else {
+            delete inb.address;
+          }
+          delete inb._table_address;
+        }
+      }
+    }
+  });
   return list;
 };
 
@@ -7845,8 +8195,7 @@ const serializeRoute = () => {
     auto_detect_interface: configData.route.auto_detect_interface,
     default_domain_resolver:
       configData.route.default_domain_resolver || undefined,
-    default_http_client:
-      configData.route.default_http_client || undefined,
+    default_http_client: configData.route.default_http_client || undefined,
     rules: JSON.parse(JSON.stringify(configData.route.rules)),
     rule_set: ruleSet,
     ...(configData.route._extra || {}),
@@ -8926,8 +9275,29 @@ const onModalDnsServerTypeChange = () => {
   }
 };
 
+const defaultInboundPorts = [2334, 1080, 8080, 7890, 7892, 7895];
+const defaultInboundTags = [
+  "mixed-in",
+  "socks-in",
+  "http-in",
+  "tproxy-in",
+  "redirect-in",
+  "tun-in",
+  "mixed",
+  "socks",
+  "http",
+  "tproxy",
+  "redirect",
+  "tun",
+];
+
 const onInboundTypeChange = (inb) => {
+  const isDefaultTag = !inb.tag || defaultInboundTags.includes(inb.tag);
+
   if (inb.type === "tun") {
+    if (isDefaultTag) {
+      inb.tag = "tun-in";
+    }
     if (isApplePlatform.value || isWindowsPlatform.value) {
       inb.interface_name = "";
     } else {
@@ -8942,13 +9312,27 @@ const onInboundTypeChange = (inb) => {
     }
   } else {
     inb.listen = inb.listen || "::";
-    inb.listen_port = inb.listen_port || 2334;
+    if (!inb.listen_port || defaultInboundPorts.includes(inb.listen_port)) {
+      if (inb.type === "socks") inb.listen_port = 1080;
+      else if (inb.type === "http") inb.listen_port = 8080;
+      else if (inb.type === "tproxy") inb.listen_port = 7895;
+      else if (inb.type === "redirect") inb.listen_port = 7892;
+      else inb.listen_port = 2334;
+    }
+    if (isDefaultTag) {
+      inb.tag = inb.type + "-in";
+    }
     delete inb.interface_name;
     delete inb.stack;
     delete inb.auto_route;
     delete inb.strict_route;
     delete inb.mtu;
     delete inb.auto_redirect;
+    delete inb.address;
+    delete inb._table_address;
+    if (itemModal.show && itemModal.itemType === "inbound") {
+      itemModal.tempFields.address = "";
+    }
   }
 };
 
@@ -9112,8 +9496,20 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
     });
   }
 
-  if (type === "inbound" && !itemModal.itemData.type) {
-    itemModal.itemData.type = "mixed";
+  if (type === "inbound") {
+    if (!itemModal.itemData.type) {
+      itemModal.itemData.type = "mixed";
+    }
+    if (itemModal.itemData.address) {
+      const addr = itemModal.itemData.address;
+      itemModal.tempFields.address = Array.isArray(addr)
+        ? addr.join(", ")
+        : String(addr);
+    } else if (itemModal.itemData._table_address) {
+      itemModal.tempFields.address = itemModal.itemData._table_address;
+    } else {
+      itemModal.tempFields.address = "";
+    }
   }
   if (type === "dns_server" && !itemModal.itemData.type) {
     itemModal.itemData.type = "udp";
@@ -9302,6 +9698,20 @@ const syncVisualToItemData = () => {
       if (!isLinux.value) {
         delete itemModal.itemData.auto_redirect;
       }
+      if (itemModal.tempFields.address !== undefined) {
+        const rawAddr = itemModal.tempFields.address.trim();
+        if (rawAddr) {
+          itemModal.itemData.address = rawAddr
+            .split(/[\n,]+/)
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          itemModal.itemData._table_address =
+            itemModal.itemData.address.join(", ");
+        } else {
+          delete itemModal.itemData.address;
+          delete itemModal.itemData._table_address;
+        }
+      }
     } else {
       delete itemModal.itemData.interface_name;
       delete itemModal.itemData.stack;
@@ -9309,6 +9719,8 @@ const syncVisualToItemData = () => {
       delete itemModal.itemData.strict_route;
       delete itemModal.itemData.mtu;
       delete itemModal.itemData.auto_redirect;
+      delete itemModal.itemData.address;
+      delete itemModal.itemData._table_address;
     }
   }
   if (itemModal.itemType === "route_ruleset") {

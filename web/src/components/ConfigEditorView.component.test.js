@@ -1189,7 +1189,9 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       ];
 
       await wrapper.vm.openDomainWizard();
-      expect(wrapper.vm.domainWizardModal.selectedNodeTags.length).toBeGreaterThan(0);
+      expect(
+        wrapper.vm.domainWizardModal.selectedNodeTags.length,
+      ).toBeGreaterThan(0);
 
       // 清空节点
       const clearBtn = wrapper.find(".wizard-clear-nodes-btn");
@@ -1222,7 +1224,10 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       wrapper.vm.domainWizardModal.inputText = "1.2.3.4";
       await flushPromises();
       await wrapper.vm.startLatencyTest();
-      expect(mockShowToast).toHaveBeenCalledWith("请至少选择一个待测试节点", "warning");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "请至少选择一个待测试节点",
+        "warning",
+      );
     });
   });
 
@@ -1619,6 +1624,120 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       await flushPromises();
 
       expect(wrapper.vm.configData.inbounds[0].auto_redirect).toBe(true);
+    });
+
+    it("TUN 入站连接 IP 地址 (address) 编辑与一键使用推荐 IP 功能测试", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      // 1. 测试 parseInbounds 正确将 address 解析到 _table_address
+      wrapper.vm.parseInbounds([
+        {
+          type: "tun",
+          tag: "tun-in",
+          address: ["172.19.0.1/30"],
+        },
+      ]);
+      await flushPromises();
+
+      expect(wrapper.vm.configData.inbounds[0]._table_address).toBe(
+        "172.19.0.1/30",
+      );
+
+      // 2. 测试编辑弹窗 editItem 时正确回显 address 到 tempFields.address
+      wrapper.vm.editItem(
+        wrapper.vm.configData.inbounds[0],
+        "inbound",
+        (parsed) => {
+          wrapper.vm.configData.inbounds[0] = parsed;
+        },
+        0,
+      );
+      await flushPromises();
+
+      expect(wrapper.vm.itemModal.tempFields.address).toBe("172.19.0.1/30");
+
+      // 3. 测试一键应用双栈推荐 IP
+      wrapper.vm.applyRecommendedInboundIp("dual");
+      expect(wrapper.vm.itemModal.tempFields.address).toBe(
+        "172.19.0.1/30, fd00::1/126",
+      );
+
+      // 4. 测试自定义修改并保存
+      wrapper.vm.itemModal.tempFields.address = "10.0.0.1/30";
+      wrapper.vm.syncVisualToItemData();
+      expect(wrapper.vm.itemModal.itemData.address).toEqual(["10.0.0.1/30"]);
+
+      // 5. 测试一键推荐 IPv4
+      wrapper.vm.applyRecommendedInboundIp("ipv4");
+      wrapper.vm.syncVisualToItemData();
+      expect(wrapper.vm.itemModal.itemData.address).toEqual(["172.19.0.1/30"]);
+
+      // 6. 测试 serializeInbounds 正确序列化为 JSON 数组并清除 _table_address
+      wrapper.vm.configData.inbounds[0].address = ["172.19.0.1/30"];
+      wrapper.vm.configData.inbounds[0]._table_address = "172.19.0.1/30";
+      const serialized = wrapper.vm.serializeInbounds();
+      expect(serialized[0].address).toEqual(["172.19.0.1/30"]);
+      expect(serialized[0]._table_address).toBeUndefined();
+    });
+
+    it("入站连接切换协议类型时，智能更新默认端口与标签 (mixed -> socks -> http)", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      const inb = {
+        tag: "mixed-in",
+        type: "mixed",
+        listen: "::",
+        listen_port: 2334,
+      };
+
+      // 切换为 socks 类型
+      inb.type = "socks";
+      wrapper.vm.onInboundTypeChange(inb);
+
+      expect(inb.listen_port).toBe(1080);
+      expect(inb.tag).toBe("socks-in");
+
+      // 切换为 http 类型
+      inb.type = "http";
+      wrapper.vm.onInboundTypeChange(inb);
+
+      expect(inb.listen_port).toBe(8080);
+      expect(inb.tag).toBe("http-in");
+
+      // 切换回 mixed 类型
+      inb.type = "mixed";
+      wrapper.vm.onInboundTypeChange(inb);
+
+      expect(inb.listen_port).toBe(2334);
+      expect(inb.tag).toBe("mixed-in");
+    });
+
+    it("检测到本机局域网 IP 时，入站连接支持一键快捷绑定推荐内网 IP 与全网卡", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      wrapper.vm.primaryLanIp = "192.168.1.2";
+      wrapper.vm.systemLanIps = ["192.168.1.2", "10.0.0.5"];
+
+      const inb = {
+        tag: "mixed-in",
+        type: "mixed",
+        listen: "::",
+        listen_port: 2334,
+      };
+
+      // 在弹窗中可一键选择推荐内网 IP 或 :: 或 127.0.0.1
+      wrapper.vm.itemModal.itemData = inb;
+      wrapper.vm.itemModal.itemData.listen = wrapper.vm.primaryLanIp;
+      expect(wrapper.vm.itemModal.itemData.listen).toBe("192.168.1.2");
+
+      wrapper.vm.itemModal.itemData.listen = "::";
+      expect(wrapper.vm.itemModal.itemData.listen).toBe("::");
+
+      wrapper.vm.itemModal.itemData.listen = "127.0.0.1";
+      expect(wrapper.vm.itemModal.itemData.listen).toBe("127.0.0.1");
     });
   });
 });

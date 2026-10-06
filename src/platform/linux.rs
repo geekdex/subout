@@ -120,9 +120,15 @@ impl PlatformStrategy for LinuxPlatform {
 
     fn tun_permission_error_guide(&self, err: &str, singbox_bin: &Path) -> String {
         let bin_display = singbox_bin.display();
-        format!(
-            "TUN 模式启动失败 ({err}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行，或在终端执行 sudo setcap cap_net_admin=+ep {bin_display} (Linux) 授权免密运行。"
-        )
+        if err.contains("add address") && (err.contains("permission denied") || err.contains("operation not permitted")) {
+            format!(
+                "TUN 模式配置网卡地址失败 ({err}): 可能是系统禁用了 IPv6 导致无法分配 IPv6 地址。请检查并开启系统 IPv6 (执行 sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0)，或在入站 (inbounds) 配置中移除 IPv6 地址。"
+            )
+        } else {
+            format!(
+                "TUN 模式启动失败 ({err}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行，或在终端执行 sudo setcap cap_net_admin=+ep {bin_display} (Linux) 授权免密运行。"
+            )
+        }
     }
 
     fn is_pid_alive(&self, pid: u32) -> bool {
@@ -632,28 +638,8 @@ impl PlatformStrategy for LinuxPlatform {
         clean_linux_tun_network(sudo_pass);
     }
 
-    fn sanitize_inbound(&self, inbound: &mut Value) {
-        if let Some(obj) = inbound.as_object_mut() {
-            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun {
-                if !obj.contains_key("strict_route") {
-                    obj.insert("strict_route".to_string(), serde_json::json!(false));
-                }
-                if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr
-                        .iter()
-                        .any(|a| a.as_str().is_some_and(|s| s.contains(':')));
-                    if !has_ipv6 {
-                        addr_arr.push(serde_json::json!("fd00::1/126"));
-                    }
-                } else if !obj.contains_key("address") {
-                    obj.insert(
-                        "address".to_string(),
-                        serde_json::json!(["172.19.0.1/30", "fd00::1/126"]),
-                    );
-                }
-            }
-        }
+    fn sanitize_inbound(&self, _inbound: &mut Value) {
+        // 所见即所得：遵循用户原始入站配置，不做任何隐式增加或修改
     }
 
     fn default_tun_interface_name(&self) -> &'static str {

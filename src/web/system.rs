@@ -17,6 +17,65 @@ pub struct DirQuery {
 pub struct SystemInfoResponse {
     pub os: String,
     pub is_linux: bool,
+    pub primary_lan_ip: Option<String>,
+    pub lan_ips: Vec<String>,
+}
+
+/// Discovers LAN IPv4 addresses of the current host machine:
+/// 1. Primary egress LAN IP via UDP route lookup to public DNS (no actual network packets transmitted).
+/// 2. Additional local network interface IPv4 addresses on Unix/Linux (excluding loopback, link-local, broadcast).
+pub fn discover_host_lan_ips() -> Vec<String> {
+    let mut ips = Vec::new();
+
+    // 1. Primary active route lookup via UDP connect
+    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        let targets = ["223.5.5.5:80", "1.1.1.1:80", "114.114.114.114:80"];
+        for target in targets {
+            if socket.connect(target).is_ok()
+                && let Ok(local_addr) = socket.local_addr()
+            {
+                let ip = local_addr.ip();
+                if !ip.is_loopback() && !ip.is_unspecified() {
+                    let s = ip.to_string();
+                    if !ips.contains(&s) {
+                        ips.push(s);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. Discover additional network interfaces on Unix/Linux via `ip -4 -o addr show`
+    #[cfg(unix)]
+    {
+        if let Ok(output) = std::process::Command::new("ip")
+            .args(["-4", "-o", "addr", "show"])
+            .output()
+            && output.status.success()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if let Some(pos) = parts.iter().position(|&p| p == "inet")
+                    && let Some(cidr) = parts.get(pos + 1)
+                    && let Some((ip_str, _)) = cidr.split_once('/')
+                    && let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>()
+                    && !ip.is_loopback()
+                    && !ip.is_link_local()
+                    && !ip.is_broadcast()
+                    && !ip.is_documentation()
+                {
+                    let s = ip.to_string();
+                    if !ips.contains(&s) {
+                        ips.push(s);
+                    }
+                }
+            }
+        }
+    }
+
+    ips
 }
 
 pub async fn get_system_info(
@@ -27,7 +86,14 @@ pub async fn get_system_info(
     let platform = crate::platform::current_platform();
     let os = platform.os_name().to_string();
     let is_linux = platform.is_linux();
-    Ok(Json(SystemInfoResponse { os, is_linux }))
+    let lan_ips = discover_host_lan_ips();
+    let primary_lan_ip = lan_ips.first().cloned();
+    Ok(Json(SystemInfoResponse {
+        os,
+        is_linux,
+        primary_lan_ip,
+        lan_ips,
+    }))
 }
 
 #[derive(Serialize)]
@@ -257,3 +323,18 @@ pub async fn set_system_mode(
         "service_restarted": should_restart && is_running
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_discover_host_lan_ips_format() {
+        let ips = discover_host_lan_ips();
+        for ip in &ips {
+            assert!(ip.parse::<std::net::Ipv4Addr>().is_ok());
+            assert!(!ip.starts_with("127."));
+        }
+    }
+}
+
