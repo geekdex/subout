@@ -161,4 +161,38 @@ describe("RuleCriteriaTags", () => {
     expect(wrapper.text()).toContain("Package: com.microsoft.emmx");
     expect(wrapper.text()).toContain("User: root");
   });
+
+  it("renders nested logical DNS rules with query_type and sub-logical groups", () => {
+    const nestedDnsRule = {
+      type: "logical",
+      mode: "and",
+      server: "remote-dns",
+      rules: [
+        {
+          query_type: ["A", "AAAA"],
+        },
+        {
+          type: "logical",
+          mode: "or",
+          rules: [
+            { domain: ["claude.ai"] },
+            { domain_suffix: [".io", ".google"] },
+            { rule_set: ["geosite-google"] },
+          ],
+        },
+      ],
+    };
+
+    const wrapper = mount(RuleCriteriaTags, {
+      props: { rule: nestedDnsRule, type: "dns" },
+      global: { stubs: globalStubs },
+    });
+
+    expect(wrapper.text()).toContain("AND");
+    expect(wrapper.text()).toContain("QueryType: A, AAAA");
+    expect(wrapper.text()).toContain("OR");
+    expect(wrapper.text()).toContain("Domain: claude.ai");
+    expect(wrapper.text()).toContain("Suffix: .io, .google");
+    expect(wrapper.text()).toContain("RuleSet: geosite-google");
+  });
 });

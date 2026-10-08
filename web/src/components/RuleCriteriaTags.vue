@@ -23,6 +23,20 @@
       ECS: {{ rule.client_subnet }}
     </span>
 
+    <!-- Query Type (DNS only) -->
+    <span
+      v-if="rule.query_type"
+      class="criteria-tag"
+      style="
+        font-weight: 600;
+        border-color: #3b82f6;
+        color: #3b82f6;
+        background: rgba(59, 130, 246, 0.1);
+      "
+    >
+      QueryType: {{ formatArray(rule.query_type) }}
+    </span>
+
     <!-- Standard root criteria -->
     <span v-if="rule.rule_set" class="criteria-tag rule-set-tag">
       RuleSet: {{ formatArray(rule.rule_set) }}
@@ -121,6 +135,43 @@
     <!-- Sub-rules for logical mode -->
     <template v-if="rule.type === 'logical' && Array.isArray(rule.rules)">
       <template v-for="(sub, sidx) in rule.rules" :key="sidx">
+        <!-- If sub is a nested logical rule: render recursively -->
+        <span
+          v-if="sub.type === 'logical'"
+          class="nested-logical-tag"
+          style="
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px dashed var(--primary);
+            background: rgba(99, 102, 241, 0.08);
+            margin: 2px 0;
+          "
+        >
+          <span class="criteria-tag rule-set-tag" style="margin: 0; font-weight: 600;">
+            子逻辑: {{ (sub.mode || "or").toUpperCase() }}
+          </span>
+          <RuleCriteriaTags
+            :rule="sub"
+            :type="type"
+            :duplicate-check-fn="duplicateCheckFn"
+          />
+        </span>
+
+        <span
+          v-if="sub.query_type"
+          class="criteria-tag"
+          style="
+            font-weight: 600;
+            border-color: #3b82f6;
+            color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+          "
+        >
+          QueryType: {{ formatArray(sub.query_type) }}
+        </span>
         <span v-if="sub.rule_set" class="criteria-tag rule-set-tag">
           RuleSet: {{ formatArray(sub.rule_set) }}
         </span>
@@ -227,6 +278,7 @@ const hasNoCriteria = computed(() => {
   const r = props.rule;
   return (
     !r.type &&
+    !r.query_type &&
     !r.rule_set &&
     !r.geosite &&
     !r.domain_suffix &&
@@ -243,7 +295,8 @@ const hasNoCriteria = computed(() => {
     !r.package_name &&
     !r.user &&
     !r.ip_is_private &&
-    !r.action
+    !r.action &&
+    !(Array.isArray(r.rules) && r.rules.length > 0)
   );
 });
 

@@ -2275,21 +2275,6 @@
             <div v-if="itemModal.itemType === 'dns_rule'">
               <div class="grid-2" style="margin-bottom: 1rem">
                 <div class="input-group">
-                  <label>规则匹配逻辑 (Rule Logic)</label>
-                  <select
-                    v-model="itemModal.routeRuleLogic"
-                    class="input-control"
-                  >
-                    <option value="or">
-                      逻辑或 OR (满足下方任意非空条件即可 - 建议默认)
-                    </option>
-                    <option value="standard">
-                      默认 AND 逻辑 (需同时满足下方所有非空条件)
-                    </option>
-                    <option value="and">逻辑与 AND (仅用于特殊嵌套逻辑)</option>
-                  </select>
-                </div>
-                <div class="input-group">
                   <label>目标 DNS 服务器 Tag (server)</label>
                   <select
                     v-model="itemModal.itemData.server"
@@ -2315,6 +2300,38 @@
                       {{ srv.tag }}
                     </option>
                   </select>
+                </div>
+                <div class="input-group">
+                  <label>规则配置模式</label>
+                  <div
+                    class="rule-mode-toggle"
+                    style="display: flex; gap: 0.5rem; margin-top: 0.25rem"
+                  >
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :class="
+                        itemModal.ruleType === 'logical'
+                          ? 'btn-primary'
+                          : 'btn-secondary'
+                      "
+                      @click="switchDnsRuleType('logical')"
+                    >
+                      🌲 逻辑嵌套规则 (AND / OR 树形)
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :class="
+                        itemModal.ruleType === 'standard'
+                          ? 'btn-primary'
+                          : 'btn-secondary'
+                      "
+                      @click="switchDnsRuleType('standard')"
+                    >
+                      📄 标准单一规则
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2350,8 +2367,57 @@
                 </div>
               </div>
 
-              <!-- Coexisting condition fields -->
-              <div style="display: flex; flex-direction: column; gap: 1rem">
+              <!-- A. Logical Tree Mode -->
+              <div v-if="itemModal.ruleType === 'logical'" style="margin-top: 0.75rem">
+                <RuleTreeEditor
+                  v-model="itemModal.itemData"
+                  rule-type="dns"
+                />
+              </div>
+
+              <!-- B. Standard Rule Mode -->
+              <div
+                v-else
+                style="display: flex; flex-direction: column; gap: 1rem"
+              >
+                <!-- query_type -->
+                <div class="input-group">
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      margin-bottom: 0.35rem;
+                      flex-wrap: wrap;
+                      gap: 0.4rem;
+                    "
+                  >
+                    <label style="margin-bottom: 0"
+                      >DNS 查询类型 (query_type, 每行一例)</label
+                    >
+                    <div
+                      style="display: flex; gap: 0.25rem; flex-wrap: wrap"
+                    >
+                      <button
+                        v-for="qt in ['A', 'AAAA', 'CNAME', 'HTTPS', 'TXT', 'PTR']"
+                        :key="qt"
+                        type="button"
+                        class="btn btn-xs btn-secondary"
+                        style="padding: 0.1rem 0.35rem; font-size: 0.72rem"
+                        @click="appendDnsQueryType(qt)"
+                      >
+                        + {{ qt }}
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    v-model="itemModal.tempFields.query_type"
+                    class="input-control"
+                    style="height: 60px"
+                    placeholder="A&#10;AAAA&#10;HTTPS"
+                  ></textarea>
+                </div>
+
                 <div class="input-group">
                   <label>规则集列表 (rule_set, 每行一例)</label>
                   <textarea
@@ -6140,6 +6206,8 @@ import {
 import JsonTreeView from "./JsonTreeView.vue";
 import DnsEditor from "./DnsEditor.vue";
 import RouteEditor from "./RouteEditor.vue";
+import RuleTreeEditor from "./RuleTreeEditor.vue";
+import { cleanRuleTree } from "../utils/ruleTree.js";
 
 const sections = [
   "log",
@@ -7752,7 +7820,9 @@ const itemModal = reactive({
   validating: false,
   routeRuleLogic: "standard",
   dnsRuleType: "domain_suffix",
+  ruleType: "logical",
   tempFields: {
+    query_type: "",
     domain: "",
     domain_suffix: "",
     domain_keyword: "",
@@ -7781,6 +7851,92 @@ const applyRecommendedInboundIp = (preset) => {
     itemModal.tempFields.address = "172.19.0.1/30, fd00::1/126";
   } else if (preset === "empty") {
     itemModal.tempFields.address = "";
+  }
+};
+
+const appendDnsQueryType = (qt) => {
+  const current = (itemModal.tempFields.query_type || "")
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!current.includes(qt)) {
+    current.push(qt);
+    itemModal.tempFields.query_type = current.join("\n");
+  }
+};
+
+const switchDnsRuleType = (mode) => {
+  if (itemModal.ruleType === mode) return;
+  itemModal.ruleType = mode;
+  if (mode === "logical") {
+    itemModal.itemData.type = "logical";
+    itemModal.itemData.mode = itemModal.itemData.mode || "and";
+    if (!Array.isArray(itemModal.itemData.rules)) {
+      itemModal.itemData.rules = [];
+    }
+    // Migrate standard fields if any had values
+    const migrated = [];
+    if (itemModal.tempFields.query_type?.trim()) {
+      migrated.push({
+        query_type: itemModal.tempFields.query_type
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      });
+    }
+    const standardFields = [
+      "rule_set",
+      "domain_suffix",
+      "geosite",
+      "domain",
+      "domain_keyword",
+      "domain_regex",
+      "geoip",
+      "ip_cidr",
+    ];
+    const subCriteria = [];
+    standardFields.forEach((f) => {
+      if (itemModal.tempFields[f]?.trim()) {
+        subCriteria.push({
+          [f]: itemModal.tempFields[f]
+            .split(/[\n,]+/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        });
+      }
+    });
+    if (subCriteria.length > 0) {
+      if (migrated.length > 0) {
+        migrated.push({
+          type: "logical",
+          mode: "or",
+          rules: subCriteria,
+        });
+      } else {
+        migrated.push(...subCriteria);
+      }
+    }
+    if (itemModal.itemData.rules.length === 0 && migrated.length > 0) {
+      itemModal.itemData.rules = migrated;
+    }
+    if (itemModal.itemData.rules.length === 0) {
+      itemModal.itemData.rules = [
+        { query_type: ["A", "AAAA"] },
+        {
+          type: "logical",
+          mode: "or",
+          rules: [
+            { domain: [] },
+            { domain_suffix: [] },
+            { rule_set: [] },
+          ],
+        },
+      ];
+    }
+  } else {
+    delete itemModal.itemData.type;
+    delete itemModal.itemData.mode;
+    delete itemModal.itemData.rules;
   }
 };
 
@@ -9397,7 +9553,18 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
 
   itemModal.itemData = JSON.parse(JSON.stringify(item));
 
-  if (["route_rule", "dns_rule"].includes(type)) {
+  if (type === "dns_rule") {
+    if (itemModal.itemData.type === "logical") {
+      itemModal.ruleType = "logical";
+      itemModal.routeRuleLogic = itemModal.itemData.mode || "and";
+      if (!Array.isArray(itemModal.itemData.rules)) {
+        itemModal.itemData.rules = [];
+      }
+    } else {
+      itemModal.ruleType = "standard";
+      itemModal.routeRuleLogic = "standard";
+    }
+  } else if (type === "route_rule") {
     if (itemModal.itemData.type === "logical") {
       itemModal.routeRuleLogic = itemModal.itemData.mode || "or";
     } else {
@@ -9414,6 +9581,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
       itemModal.dnsRuleType = "domain_suffix";
     } else {
       const hasOtherFields = [
+        "query_type",
         "domain",
         "domain_keyword",
         "domain_regex",
@@ -9434,6 +9602,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
   }
 
   const arrayFields = [
+    "query_type",
     "domain",
     "domain_suffix",
     "domain_keyword",
@@ -9466,7 +9635,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
   });
 
   if (
-    ["route_rule", "dns_rule"].includes(type) &&
+    type === "route_rule" &&
     itemModal.itemData.type === "logical" &&
     Array.isArray(itemModal.itemData.rules)
   ) {
@@ -9569,6 +9738,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
 
 const syncVisualToItemData = () => {
   const arrayFields = [
+    "query_type",
     "domain",
     "domain_suffix",
     "domain_keyword",
@@ -9597,58 +9767,123 @@ const syncVisualToItemData = () => {
         delete itemModal.itemData.client_subnet;
       }
     }
-  }
 
-  if (
-    ["route_rule", "dns_rule"].includes(itemModal.itemType) &&
-    itemModal.routeRuleLogic &&
-    itemModal.routeRuleLogic !== "standard"
-  ) {
-    itemModal.itemData.type = "logical";
-    itemModal.itemData.mode = itemModal.routeRuleLogic;
-
-    const rules = [];
-    arrayFields.forEach((f) => {
-      delete itemModal.itemData[f];
-      if (
-        itemModal.tempFields[f] !== undefined &&
-        itemModal.tempFields[f] !== null
-      ) {
-        const val = itemModal.tempFields[f].trim();
-        if (val) {
-          const list = val
-            .split(/[\n,]+/)
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-          if (list.length > 0) {
-            rules.push({ [f]: list });
-          }
-        }
-      }
-    });
-
-    delete itemModal.itemData.port;
-    if (itemModal.tempFields.port) {
-      const val = itemModal.tempFields.port.trim();
-      if (val) {
-        const list = val
-          .split(/[\n,]+/)
-          .map((s) => parseInt(s.trim()))
-          .filter((n) => !isNaN(n));
-        if (list.length > 0) {
-          rules.push({ port: list });
-        }
-      }
-    }
-
-    itemModal.itemData.rules = rules;
-  } else {
-    if (["route_rule", "dns_rule"].includes(itemModal.itemType)) {
+    if (itemModal.ruleType === "logical" || itemModal.itemData.type === "logical") {
+      itemModal.itemData.type = "logical";
+      itemModal.itemData.mode = itemModal.itemData.mode || "and";
+      itemModal.itemData.rules = cleanRuleTree(itemModal.itemData.rules || []);
+      arrayFields.forEach((f) => {
+        delete itemModal.itemData[f];
+      });
+      delete itemModal.itemData.port;
+    } else {
       delete itemModal.itemData.type;
       delete itemModal.itemData.mode;
       delete itemModal.itemData.rules;
-    }
 
+      arrayFields.forEach((f) => {
+        if (
+          itemModal.tempFields[f] !== undefined &&
+          itemModal.tempFields[f] !== null
+        ) {
+          const val = itemModal.tempFields[f].trim();
+          if (val) {
+            itemModal.itemData[f] = val
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+          } else {
+            delete itemModal.itemData[f];
+          }
+        }
+      });
+      if (itemModal.tempFields.port) {
+        const val = itemModal.tempFields.port.trim();
+        if (val) {
+          itemModal.itemData.port = val
+            .split(/[\n,]+/)
+            .map((s) => parseInt(s.trim()))
+            .filter((n) => !isNaN(n));
+        } else {
+          delete itemModal.itemData.port;
+        }
+      }
+    }
+  } else if (itemModal.itemType === "route_rule") {
+    if (itemModal.routeRuleLogic && itemModal.routeRuleLogic !== "standard") {
+      itemModal.itemData.type = "logical";
+      itemModal.itemData.mode = itemModal.routeRuleLogic;
+
+      const rules = [];
+      arrayFields.forEach((f) => {
+        delete itemModal.itemData[f];
+        if (
+          itemModal.tempFields[f] !== undefined &&
+          itemModal.tempFields[f] !== null
+        ) {
+          const val = itemModal.tempFields[f].trim();
+          if (val) {
+            const list = val
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+            if (list.length > 0) {
+              rules.push({ [f]: list });
+            }
+          }
+        }
+      });
+
+      delete itemModal.itemData.port;
+      if (itemModal.tempFields.port) {
+        const val = itemModal.tempFields.port.trim();
+        if (val) {
+          const list = val
+            .split(/[\n,]+/)
+            .map((s) => parseInt(s.trim()))
+            .filter((n) => !isNaN(n));
+          if (list.length > 0) {
+            rules.push({ port: list });
+          }
+        }
+      }
+
+      itemModal.itemData.rules = rules;
+    } else {
+      delete itemModal.itemData.type;
+      delete itemModal.itemData.mode;
+      delete itemModal.itemData.rules;
+
+      arrayFields.forEach((f) => {
+        if (
+          itemModal.tempFields[f] !== undefined &&
+          itemModal.tempFields[f] !== null
+        ) {
+          const val = itemModal.tempFields[f].trim();
+          if (val) {
+            itemModal.itemData[f] = val
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+          } else {
+            delete itemModal.itemData[f];
+          }
+        }
+      });
+
+      if (itemModal.tempFields.port) {
+        const val = itemModal.tempFields.port.trim();
+        if (val) {
+          itemModal.itemData.port = val
+            .split(/[\n,]+/)
+            .map((s) => parseInt(s.trim()))
+            .filter((n) => !isNaN(n));
+        } else {
+          delete itemModal.itemData.port;
+        }
+      }
+    }
+  } else {
     arrayFields.forEach((f) => {
       if (
         itemModal.tempFields[f] !== undefined &&
@@ -9868,14 +10103,20 @@ const setItemModalMode = (mode) => {
       }
       if (itemModal.itemType === "dns_rule") {
         if (parsed.type === "logical") {
-          itemModal.routeRuleLogic = parsed.mode || "or";
+          itemModal.ruleType = "logical";
+          itemModal.routeRuleLogic = parsed.mode || "and";
+          if (!Array.isArray(parsed.rules)) {
+            parsed.rules = [];
+          }
         } else {
+          itemModal.ruleType = "standard";
           itemModal.routeRuleLogic = "standard";
         }
       }
       itemModal.itemData = parsed;
 
       const arrayFields = [
+        "query_type",
         "domain",
         "domain_suffix",
         "domain_keyword",
@@ -10319,6 +10560,7 @@ const validateItemModal = () => {
   if (itemModal.mode === "visual") {
     let tempObj = JSON.parse(JSON.stringify(itemModal.itemData));
     const arrayFields = [
+      "query_type",
       "domain",
       "domain_suffix",
       "domain_keyword",
@@ -10366,8 +10608,14 @@ const validateItemModal = () => {
       tempObj.server_port = parseInt(tempObj.port);
       delete tempObj.port;
     }
-    if (
-      ["route_rule", "dns_rule"].includes(itemModal.itemType) &&
+    if (itemModal.itemType === "dns_rule") {
+      if (itemModal.ruleType === "logical" || tempObj.type === "logical") {
+        tempObj.type = "logical";
+        tempObj.mode = tempObj.mode || "and";
+        tempObj.rules = cleanRuleTree(tempObj.rules || []);
+      }
+    } else if (
+      itemModal.itemType === "route_rule" &&
       itemModal.routeRuleLogic &&
       itemModal.routeRuleLogic !== "standard"
     ) {
@@ -10891,6 +11139,7 @@ const getRuleSummaryText = (rule, index, type) => {
 
   const criteria = [];
   const fields = [
+    "query_type",
     "rule_set",
     "domain_suffix",
     "geosite",
@@ -10904,13 +11153,22 @@ const getRuleSummaryText = (rule, index, type) => {
     "process_path_regex",
     "package_name",
   ];
+
+  const extractVals = (targetRule, fName) => {
+    if (!targetRule) return [];
+    if (targetRule[fName]) {
+      return Array.isArray(targetRule[fName]) ? targetRule[fName] : [targetRule[fName]];
+    }
+    if (targetRule.type === "logical" && Array.isArray(targetRule.rules)) {
+      return targetRule.rules.map((sub) => extractVals(sub, fName)).flat().filter(Boolean);
+    }
+    return [];
+  };
+
   fields.forEach((f) => {
     let val = rule[f];
     if (!val && rule.type === "logical" && Array.isArray(rule.rules)) {
-      const subVals = rule.rules
-        .map((sub) => sub[f])
-        .filter(Boolean)
-        .flat();
+      const subVals = extractVals(rule, f);
       if (subVals.length > 0) val = subVals;
     }
     if (val) {

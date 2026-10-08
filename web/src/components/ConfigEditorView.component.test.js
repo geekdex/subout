@@ -1739,5 +1739,95 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       wrapper.vm.itemModal.itemData.listen = "127.0.0.1";
       expect(wrapper.vm.itemModal.itemData.listen).toBe("127.0.0.1");
     });
+
+    it("DNS 规则模态框：支持嵌套逻辑规则 (AND/OR) 的可视化编辑与数据保存", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      const userNestedRule = {
+        type: "logical",
+        mode: "and",
+        server: "remote-dns",
+        rules: [
+          {
+            query_type: ["A", "AAAA"],
+          },
+          {
+            type: "logical",
+            mode: "or",
+            rules: [
+              { domain: ["claude.ai"] },
+              { domain_suffix: [".io", ".google"] },
+              { rule_set: ["geosite-google"] },
+            ],
+          },
+        ],
+      };
+
+      let savedRule = null;
+      wrapper.vm.editItem(userNestedRule, "dns_rule", (parsed) => {
+        savedRule = parsed;
+      });
+      await flushPromises();
+
+      expect(wrapper.vm.itemModal.show).toBe(true);
+      expect(wrapper.vm.itemModal.itemType).toBe("dns_rule");
+      expect(wrapper.vm.itemModal.ruleType).toBe("logical");
+      expect(wrapper.vm.itemModal.itemData.server).toBe("remote-dns");
+      expect(wrapper.vm.itemModal.itemData.rules).toHaveLength(2);
+
+      // 保存
+      wrapper.vm.saveItem();
+      await flushPromises();
+      expect(savedRule).toBeTruthy();
+      expect(savedRule.type).toBe("logical");
+      expect(savedRule.mode).toBe("and");
+      expect(savedRule.server).toBe("remote-dns");
+      expect(savedRule.rules).toHaveLength(2);
+      expect(savedRule.rules[0].query_type).toEqual(["A", "AAAA"]);
+      expect(savedRule.rules[1].type).toBe("logical");
+      expect(savedRule.rules[1].mode).toBe("or");
+      expect(savedRule.rules[1].rules).toHaveLength(3);
+      expect(savedRule.rules[1].rules[0].domain).toEqual(["claude.ai"]);
+    });
+
+    it("DNS 规则模态框：在可视化与 JSON 源码模式之间切换时无损保留嵌套规则结构", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      const userNestedRule = {
+        type: "logical",
+        mode: "and",
+        server: "remote-dns",
+        rules: [
+          { query_type: ["A", "AAAA"] },
+          {
+            type: "logical",
+            mode: "or",
+            rules: [
+              { domain: ["claude.ai"] },
+              { domain_suffix: [".io"] },
+            ],
+          },
+        ],
+      };
+
+      wrapper.vm.editItem(userNestedRule, "dns_rule", () => {});
+      await flushPromises();
+
+      // 切换到 JSON 源码模式
+      wrapper.vm.setItemModalMode("json");
+      expect(wrapper.vm.itemModal.mode).toBe("json");
+      const parsedFromText = JSON.parse(wrapper.vm.itemModal.jsonText);
+      expect(parsedFromText.type).toBe("logical");
+      expect(parsedFromText.rules).toHaveLength(2);
+
+      // 切换回可视化表单模式
+      wrapper.vm.setItemModalMode("visual");
+      expect(wrapper.vm.itemModal.mode).toBe("visual");
+      expect(wrapper.vm.itemModal.ruleType).toBe("logical");
+      expect(wrapper.vm.itemModal.itemData.rules).toHaveLength(2);
+      expect(wrapper.vm.itemModal.itemData.rules[1].rules[0].domain).toEqual(["claude.ai"]);
+    });
   });
 });

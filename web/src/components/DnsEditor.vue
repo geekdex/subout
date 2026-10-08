@@ -645,6 +645,7 @@
 import { computed, ref } from "vue";
 import draggable from "vuedraggable";
 import RuleCriteriaTags from "./RuleCriteriaTags.vue";
+import { ruleMatchesQuery } from "../utils/ruleTree.js";
 
 const props = defineProps({
   configData: { type: Object, required: true },
@@ -652,6 +653,10 @@ const props = defineProps({
   duplicateCheckFn: { type: Function, default: null },
   editItem: { type: Function, default: null },
 });
+
+if (!props.configData.dns.fakeip) {
+  props.configData.dns.fakeip = { enabled: false, inet4_range: "", inet6_range: "" };
+}
 
 defineEmits(["syncRule"]);
 
@@ -686,14 +691,25 @@ const getServerTypeTag = (type) => {
 };
 
 const serverKey = (item) => item.tag || Math.random();
-const ruleKey = (item) =>
-  item.server +
-  "_" +
-  (item.geosite?.join(",") || "") +
-  "_" +
-  (item.domain_suffix?.join(",") || "") +
-  "_" +
-  (item.ip_cidr?.join(",") || "");
+const ruleKey = (item) => {
+  if (item._key) return item._key;
+  if (item.type === "logical") {
+    return `logical_${item.mode}_${item.server || ""}_${item.rules?.length || 0}_${(item.rules || [])
+      .map((r) => (r.type === "logical" ? "sub_" + r.mode : Object.keys(r).join("-")))
+      .join("_")}`;
+  }
+  return (
+    (item.server || "") +
+    "_" +
+    (item.query_type?.join(",") || "") +
+    "_" +
+    (item.geosite?.join(",") || "") +
+    "_" +
+    (item.domain_suffix?.join(",") || "") +
+    "_" +
+    (item.ip_cidr?.join(",") || "")
+  );
+};
 
 const addDnsServer = () => {
   if (!props.configData.dns.servers) props.configData.dns.servers = [];
@@ -826,62 +842,7 @@ const mergeDnsRules = () => {
 const filteredRules = computed(() => {
   const rules = props.configData.dns.rules || [];
   if (!searchQuery.value.trim()) return rules;
-  const q = searchQuery.value.trim().toLowerCase();
-  return rules.filter((rule) => {
-    if (rule.server && rule.server.toLowerCase().includes(q)) return true;
-    if (rule.geosite && rule.geosite.some((s) => s.toLowerCase().includes(q)))
-      return true;
-    if (
-      rule.domain_suffix &&
-      rule.domain_suffix.some((s) => s.toLowerCase().includes(q))
-    )
-      return true;
-    if (rule.domain && rule.domain.some((s) => s.toLowerCase().includes(q)))
-      return true;
-    if (
-      rule.domain_keyword &&
-      rule.domain_keyword.some((s) => s.toLowerCase().includes(q))
-    )
-      return true;
-    if (
-      rule.domain_regex &&
-      rule.domain_regex.some((s) => s.toLowerCase().includes(q))
-    )
-      return true;
-    if (rule.geoip && rule.geoip.some((s) => s.toLowerCase().includes(q)))
-      return true;
-    if (rule.ip_cidr && rule.ip_cidr.some((s) => s.toLowerCase().includes(q)))
-      return true;
-    if (rule.rule_set && rule.rule_set.some((s) => s.toLowerCase().includes(q)))
-      return true;
-    if (rule.outbound && rule.outbound.some((s) => s.toLowerCase().includes(q)))
-      return true;
-    if (rule.clash_mode && rule.clash_mode.toLowerCase().includes(q))
-      return true;
-    if (
-      rule.process_name &&
-      rule.process_name.some((s) => s.toLowerCase().includes(q))
-    )
-      return true;
-    if (
-      rule.process_path &&
-      rule.process_path.some((s) => s.toLowerCase().includes(q))
-    )
-      return true;
-    if (
-      rule.process_path_regex &&
-      rule.process_path_regex.some((s) => s.toLowerCase().includes(q))
-    )
-      return true;
-    if (
-      rule.package_name &&
-      rule.package_name.some((s) => s.toLowerCase().includes(q))
-    )
-      return true;
-    if (rule.user && rule.user.some((s) => s.toLowerCase().includes(q)))
-      return true;
-    return false;
-  });
+  return rules.filter((rule) => ruleMatchesQuery(rule, searchQuery.value));
 });
 
 const getRealIndex = (rule) => {
