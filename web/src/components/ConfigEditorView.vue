@@ -5721,15 +5721,7 @@
           </div>
 
           <!-- 待测试节点范围与筛选面板 (参考 GroupsView) -->
-          <div
-            style="
-              margin-bottom: 1.25rem;
-              padding: 0.85rem 1rem;
-              background: rgba(255, 255, 255, 0.02);
-              border: 1px solid var(--border-color);
-              border-radius: 6px;
-            "
-          >
+          <div class="wizard-section-box">
             <div
               style="
                 display: flex;
@@ -5760,30 +5752,23 @@
               <div class="flex gap-2" style="font-size: 0.8rem">
                 <a
                   href="javascript:void(0)"
-                  class="wizard-select-filtered-btn"
-                  style="
-                    color: var(--primary);
-                    text-decoration: none;
-                    font-weight: 500;
-                  "
+                  class="wizard-select-filtered-btn wizard-link-btn"
                   @click="selectAllFilteredWizardNodes"
                 >
                   全选当前筛选
                 </a>
-                <span style="color: var(--border-color)">|</span>
+                <span class="wizard-link-divider">|</span>
                 <a
                   href="javascript:void(0)"
-                  class="wizard-select-all-btn"
-                  style="color: var(--primary); text-decoration: none"
+                  class="wizard-select-all-btn wizard-link-btn"
                   @click="selectAllWizardNodes"
                 >
                   全选全部
                 </a>
-                <span style="color: var(--border-color)">|</span>
+                <span class="wizard-link-divider">|</span>
                 <a
                   href="javascript:void(0)"
-                  class="wizard-clear-nodes-btn"
-                  style="color: var(--text-muted); text-decoration: none"
+                  class="wizard-clear-nodes-btn wizard-link-btn wizard-link-danger"
                   @click="clearWizardNodes"
                 >
                   清空
@@ -5849,39 +5834,17 @@
             </div>
 
             <!-- 节点可选列表预览 -->
-            <div
-              style="
-                max-height: 135px;
-                overflow-y: auto;
-                border: 1px solid var(--border-color);
-                border-radius: 4px;
-                padding: 0.4rem;
-                background: rgba(0, 0, 0, 0.15);
-                display: flex;
-                flex-wrap: wrap;
-                gap: 0.35rem;
-                align-content: flex-start;
-              "
-            >
+            <div class="wizard-node-list">
               <div
                 v-for="node in filteredNodesForWizard"
                 :key="node.tag"
-                style="
-                  display: inline-flex;
-                  align-items: center;
-                  gap: 0.3rem;
-                  padding: 0.2rem 0.45rem;
-                  border-radius: 4px;
-                  font-size: 0.78rem;
-                  cursor: pointer;
-                  user-select: none;
-                  transition: all 0.15s ease;
-                  border: 1px solid transparent;
-                "
-                :style="
-                  domainWizardModal.selectedNodeTags.includes(node.tag)
-                    ? 'background: rgba(99, 102, 241, 0.2); border-color: rgba(99, 102, 241, 0.4); color: var(--primary-light, #c7d2fe);'
-                    : 'background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.08); color: var(--text-muted);'
+                class="wizard-node-chip"
+                :class="{
+                  'is-selected': domainWizardModal.selectedNodeTags.includes(node.tag),
+                }"
+                :title="
+                  node.tag +
+                  (node.server ? ' (' + node.server + (node.port ? ':' + node.port : '') + ')' : '')
                 "
                 @click="toggleWizardNode(node.tag)"
               >
@@ -5890,45 +5853,21 @@
                   :checked="
                     domainWizardModal.selectedNodeTags.includes(node.tag)
                   "
-                  style="
-                    pointer-events: none;
-                    width: 13px;
-                    height: 13px;
-                    margin: 0;
-                  "
+                  class="wizard-node-checkbox"
                 />
-                <span
-                  style="
-                    max-width: 180px;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                  "
-                >
+                <span class="wizard-node-tag">
                   {{ node.tag }}
                 </span>
                 <span
                   v-if="node.type"
-                  style="
-                    font-size: 0.68rem;
-                    opacity: 0.7;
-                    background: rgba(0, 0, 0, 0.25);
-                    padding: 0.05rem 0.25rem;
-                    border-radius: 2px;
-                  "
+                  class="wizard-node-type"
                 >
                   {{ node.type }}
                 </span>
               </div>
               <div
                 v-if="filteredNodesForWizard.length === 0"
-                style="
-                  width: 100%;
-                  text-align: center;
-                  padding: 0.75rem 0;
-                  color: var(--text-muted);
-                  font-size: 0.8rem;
-                "
+                class="wizard-node-empty"
               >
                 无符合当前筛选条件的节点
               </div>
@@ -12125,5 +12064,263 @@ defineExpose({
   white-space: pre-wrap;
   max-height: 120px;
   overflow-y: auto;
+}
+
+/* 待测试节点范围与筛选面板样式 (最佳实践优化) */
+.wizard-section-box {
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+html[data-theme="light"] .wizard-section-box {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-section-box {
+    background: rgba(0, 0, 0, 0.015);
+  }
+}
+
+.wizard-link-btn {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.wizard-link-btn:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+.wizard-link-btn.wizard-link-danger {
+  color: var(--text-muted);
+}
+
+.wizard-link-btn.wizard-link-danger:hover {
+  color: var(--danger);
+  text-decoration: underline;
+}
+
+.wizard-link-divider {
+  color: var(--border-color);
+}
+
+.wizard-node-list {
+  max-height: 165px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: var(--bg-main, #090d16);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-content: flex-start;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] .wizard-node-list {
+  background: #f1f5f9;
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-list {
+    background: #f1f5f9;
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+}
+
+.wizard-node-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.wizard-node-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+html[data-theme="light"] .wizard-node-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-list::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+  }
+}
+
+.wizard-node-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+html[data-theme="light"] .wizard-node-chip {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.12);
+    color: #0f172a;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+}
+
+.wizard-node-chip:hover {
+  border-color: var(--primary);
+  background: var(--bg-card-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] .wizard-node-chip:hover {
+  background: #f8fafc;
+  border-color: var(--primary);
+  box-shadow: 0 2px 5px rgba(79, 70, 229, 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip:hover {
+    background: #f8fafc;
+    border-color: var(--primary);
+    box-shadow: 0 2px 5px rgba(79, 70, 229, 0.12);
+  }
+}
+
+.wizard-node-chip.is-selected {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4), 0 2px 4px rgba(99, 102, 241, 0.15);
+}
+
+html[data-theme="light"] .wizard-node-chip.is-selected {
+  background: rgba(79, 70, 229, 0.1);
+  border-color: var(--primary);
+  color: #312e81;
+  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.35), 0 2px 4px rgba(79, 70, 229, 0.08);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip.is-selected {
+    background: rgba(79, 70, 229, 0.1);
+    border-color: var(--primary);
+    color: #312e81;
+    box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.35), 0 2px 4px rgba(79, 70, 229, 0.08);
+  }
+}
+
+.wizard-node-checkbox {
+  pointer-events: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+  border-radius: 3px;
+}
+
+.wizard-node-tag {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.wizard-node-chip.is-selected .wizard-node-tag {
+  font-weight: 600;
+  color: #e0e7ff;
+}
+
+html[data-theme="light"] .wizard-node-chip.is-selected .wizard-node-tag {
+  color: var(--primary);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip.is-selected .wizard-node-tag {
+    color: var(--primary);
+  }
+}
+
+.wizard-node-type {
+  font-size: 0.65rem;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 0.08rem 0.3rem;
+  border-radius: 3px;
+  background: var(--btn-secondary-bg, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+html[data-theme="light"] .wizard-node-type {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(15, 23, 42, 0.08);
+  color: #64748b;
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-type {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(15, 23, 42, 0.08);
+    color: #64748b;
+  }
+}
+
+.wizard-node-chip.is-selected .wizard-node-type {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #c7d2fe;
+}
+
+html[data-theme="light"] .wizard-node-chip.is-selected .wizard-node-type {
+  background: rgba(79, 70, 229, 0.15);
+  border-color: rgba(79, 70, 229, 0.3);
+  color: var(--primary);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip.is-selected .wizard-node-type {
+    background: rgba(79, 70, 229, 0.15);
+    border-color: rgba(79, 70, 229, 0.3);
+    color: var(--primary);
+  }
+}
+
+.wizard-node-empty {
+  width: 100%;
+  text-align: center;
+  padding: 1.5rem 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
 }
 </style>
