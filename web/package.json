@@ -15,7 +15,6 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@rolldown/binding-linux-arm64-gnu": "^1.2.12",
     "@types/node": "^26.1.0",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vitest/coverage-v8": "^4.1.10",
@@ -25,7 +24,6 @@
     "eslint-plugin-vue": "^10.9.2",
     "globals": "^17.7.0",
     "jsdom": "^29.1.1",
-    "lightningcss-linux-arm64-gnu": "^1.33.0",
     "prettier": "^3.9.4",
     "typescript": "^6.0.3",
     "vite": "^8.1.3",
