@@ -113,7 +113,10 @@ pub async fn get_system_dirs(
     let path_str = query.path.unwrap_or_default();
 
     let current_dir = if path_str.trim().is_empty() {
-        std::env::var("HOME").map_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")), PathBuf::from)
+        std::env::var("HOME").map_or_else(
+            |_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+            PathBuf::from,
+        )
     } else {
         PathBuf::from(path_str)
     };
@@ -337,4 +340,3 @@ mod tests {
         }
     }
 }
-

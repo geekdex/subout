@@ -794,9 +794,7 @@ mod tests {
             .find(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geosite-geolocation-!cn"))
             .unwrap();
         assert_eq!(
-            foreign_rs
-                .get("http_client")
-                .and_then(|d| d.as_str()),
+            foreign_rs.get("http_client").and_then(|d| d.as_str()),
             Some("proxy")
         );
         assert!(foreign_rs.get("download_detour").is_none());
@@ -805,9 +803,7 @@ mod tests {
             .find(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geosite-cn"))
             .unwrap();
         assert_eq!(
-            cn_rs
-                .get("http_client")
-                .and_then(|d| d.as_str()),
+            cn_rs.get("http_client").and_then(|d| d.as_str()),
             Some("direct")
         );
         assert!(cn_rs.get("download_detour").is_none());

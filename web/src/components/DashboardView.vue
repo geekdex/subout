@@ -382,6 +382,21 @@
                     >{{ serviceStatus.inbounds_summary }}</code
                   ></span
                 >
+                <span
+                  v-if="serviceStatus.system_proxy_active"
+                  style="margin-left: 6px"
+                >
+                  • 系统代理:
+                  <span style="color: var(--success); font-weight: 600"
+                    >已开启 (127.0.0.1:{{
+                      serviceStatus.mixed_port || "2080"
+                    }})</span
+                  >
+                </span>
+                <span v-else style="margin-left: 6px">
+                  • 系统代理:
+                  <span style="color: var(--text-muted)">未设置</span>
+                </span>
               </span>
               <span
                 v-else-if="
@@ -402,6 +417,43 @@
         </div>
 
         <div class="service-power-actions">
+          <label
+            class="system-proxy-toggle-card"
+            :class="{
+              active: serviceStatus.system_proxy_enabled,
+              disabled: !hasMixedPort && !serviceStatus.system_proxy_enabled,
+            }"
+            :title="
+              !hasMixedPort && !serviceStatus.system_proxy_enabled
+                ? '当前配置仅使用 TUN 虚拟网卡接管网络，未包含混合/HTTP入站端口，无需设置系统代理'
+                : serviceStatus.system_proxy_enabled
+                  ? serviceStatus.running
+                    ? '点击关闭系统网络代理'
+                    : '已勾选：将在启动代理服务时自动设置系统网络代理'
+                  : '手动勾选后，将设置系统网络代理 (需配置 mixed/http 入站端口)'
+            "
+          >
+            <input
+              type="checkbox"
+              :checked="serviceStatus.system_proxy_enabled"
+              :disabled="
+                isTogglingProxy ||
+                (!hasMixedPort && !serviceStatus.system_proxy_enabled)
+              "
+              @change="handleToggleSystemProxy($event.target.checked)"
+            />
+            <span class="system-proxy-switch-text">
+              <span class="system-proxy-icon">🌐</span>
+              <span>设为系统代理</span>
+              <span
+                v-if="serviceStatus.system_proxy_active"
+                class="badge badge-success"
+                style="font-size: 0.7rem; padding: 1px 6px; margin-left: 4px"
+                >生效中</span
+              >
+            </span>
+          </label>
+
           <button
             v-if="!serviceStatus.running"
             class="btn btn-primary btn-lg"
@@ -941,6 +993,7 @@ import {
   setSessionSudoPassword,
   killExternalProcess,
   takeoverService,
+  toggleSystemProxy,
 } from "../store.js";
 import { initAjv } from "../validator.js";
 import KernelDownloadCard from "./KernelDownloadCard.vue";
@@ -957,6 +1010,27 @@ const stoppingService = ref(false);
 const restartingService = ref(false);
 const killingPid = ref(null);
 const isTakingOver = ref(false);
+const isTogglingProxy = ref(false);
+
+const hasMixedPort = computed(() => {
+  return (
+    serviceStatus.value?.mixed_port != null &&
+    serviceStatus.value.mixed_port > 0
+  );
+});
+
+const handleToggleSystemProxy = async (checked) => {
+  if (isTogglingProxy.value) return;
+  isTogglingProxy.value = true;
+  try {
+    const success = await toggleSystemProxy(checked);
+    if (!success) {
+      await fetchServiceStatus();
+    }
+  } finally {
+    isTogglingProxy.value = false;
+  }
+};
 
 const conflictingProcesses = computed(
   () => serviceStatus.value.conflicting_processes || [],
@@ -1022,7 +1096,9 @@ const toggleMode = async () => {
   });
   if (success) {
     // 4. 路由自适应检查（避免停留在当前模式不存在的页面）
-    const currentHash = window.location.hash.replace(/^[#/]+/, "").split("/")[0];
+    const currentHash = window.location.hash
+      .replace(/^[#/]+/, "")
+      .split("/")[0];
     const simpleOnlyViews = ["simpleConfig"];
     const expertOnlyViews = ["groups", "configs", "config"];
 
@@ -1273,7 +1349,10 @@ const handleStartService = async (customSudoPass = null) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token.value}`,
       },
-      body: JSON.stringify({ sudo_pass: sudoPass }),
+      body: JSON.stringify({
+        sudo_pass: sudoPass,
+        enable_system_proxy: serviceStatus.value.system_proxy_enabled,
+      }),
       signal: AbortSignal.timeout(10000),
     });
     if (res.ok) {
@@ -1380,7 +1459,10 @@ const handleRestartService = async (customSudoPass = null) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token.value}`,
       },
-      body: JSON.stringify({ sudo_pass: sudoPass }),
+      body: JSON.stringify({
+        sudo_pass: sudoPass,
+        enable_system_proxy: serviceStatus.value.system_proxy_enabled,
+      }),
       signal: AbortSignal.timeout(12000),
     });
     if (res.ok) {
@@ -1636,6 +1718,55 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.system-proxy-toggle-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.95rem;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-main);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.system-proxy-toggle-card:hover:not(.disabled) {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.system-proxy-toggle-card.active {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.system-proxy-toggle-card.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.system-proxy-toggle-card input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.system-proxy-toggle-card.disabled input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
+.system-proxy-switch-text {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .btn-lg {

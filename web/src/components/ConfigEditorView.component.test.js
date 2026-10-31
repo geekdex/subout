@@ -1804,10 +1804,7 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
           {
             type: "logical",
             mode: "or",
-            rules: [
-              { domain: ["claude.ai"] },
-              { domain_suffix: [".io"] },
-            ],
+            rules: [{ domain: ["claude.ai"] }, { domain_suffix: [".io"] }],
           },
         ],
       };
@@ -1827,7 +1824,9 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(wrapper.vm.itemModal.mode).toBe("visual");
       expect(wrapper.vm.itemModal.ruleType).toBe("logical");
       expect(wrapper.vm.itemModal.itemData.rules).toHaveLength(2);
-      expect(wrapper.vm.itemModal.itemData.rules[1].rules[0].domain).toEqual(["claude.ai"]);
+      expect(wrapper.vm.itemModal.itemData.rules[1].rules[0].domain).toEqual([
+        "claude.ai",
+      ]);
     });
   });
 });

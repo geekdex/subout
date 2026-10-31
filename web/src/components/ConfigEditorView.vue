@@ -951,10 +951,18 @@
                                   class="input-control table-input"
                                   style="flex: 1; min-width: 80px"
                                   :placeholder="primaryLanIp || '监听地址'"
-                                  :title="primaryLanIp ? '建议绑定内网 IP (如 ' + primaryLanIp + ') 或 :: 全网卡' : '监听地址'"
+                                  :title="
+                                    primaryLanIp
+                                      ? '建议绑定内网 IP (如 ' +
+                                        primaryLanIp +
+                                        ') 或 :: 全网卡'
+                                      : '监听地址'
+                                  "
                                 />
                                 <button
-                                  v-if="primaryLanIp && inb.listen !== primaryLanIp"
+                                  v-if="
+                                    primaryLanIp && inb.listen !== primaryLanIp
+                                  "
                                   type="button"
                                   class="btn btn-secondary table-btn"
                                   style="
@@ -2368,11 +2376,11 @@
               </div>
 
               <!-- A. Logical Tree Mode -->
-              <div v-if="itemModal.ruleType === 'logical'" style="margin-top: 0.75rem">
-                <RuleTreeEditor
-                  v-model="itemModal.itemData"
-                  rule-type="dns"
-                />
+              <div
+                v-if="itemModal.ruleType === 'logical'"
+                style="margin-top: 0.75rem"
+              >
+                <RuleTreeEditor v-model="itemModal.itemData" rule-type="dns" />
               </div>
 
               <!-- B. Standard Rule Mode -->
@@ -2395,11 +2403,16 @@
                     <label style="margin-bottom: 0"
                       >DNS 查询类型 (query_type, 每行一例)</label
                     >
-                    <div
-                      style="display: flex; gap: 0.25rem; flex-wrap: wrap"
-                    >
+                    <div style="display: flex; gap: 0.25rem; flex-wrap: wrap">
                       <button
-                        v-for="qt in ['A', 'AAAA', 'CNAME', 'HTTPS', 'TXT', 'PTR']"
+                        v-for="qt in [
+                          'A',
+                          'AAAA',
+                          'CNAME',
+                          'HTTPS',
+                          'TXT',
+                          'PTR',
+                        ]"
                         :key="qt"
                         type="button"
                         class="btn btn-xs btn-secondary"
@@ -5840,11 +5853,18 @@
                 :key="node.tag"
                 class="wizard-node-chip"
                 :class="{
-                  'is-selected': domainWizardModal.selectedNodeTags.includes(node.tag),
+                  'is-selected': domainWizardModal.selectedNodeTags.includes(
+                    node.tag,
+                  ),
                 }"
                 :title="
                   node.tag +
-                  (node.server ? ' (' + node.server + (node.port ? ':' + node.port : '') + ')' : '')
+                  (node.server
+                    ? ' (' +
+                      node.server +
+                      (node.port ? ':' + node.port : '') +
+                      ')'
+                    : '')
                 "
                 @click="toggleWizardNode(node.tag)"
               >
@@ -5858,10 +5878,7 @@
                 <span class="wizard-node-tag">
                   {{ node.tag }}
                 </span>
-                <span
-                  v-if="node.type"
-                  class="wizard-node-type"
-                >
+                <span v-if="node.type" class="wizard-node-type">
                   {{ node.type }}
                 </span>
               </div>
@@ -7864,11 +7881,7 @@ const switchDnsRuleType = (mode) => {
         {
           type: "logical",
           mode: "or",
-          rules: [
-            { domain: [] },
-            { domain_suffix: [] },
-            { rule_set: [] },
-          ],
+          rules: [{ domain: [] }, { domain_suffix: [] }, { rule_set: [] }],
         },
       ];
     }
@@ -9707,7 +9720,10 @@ const syncVisualToItemData = () => {
       }
     }
 
-    if (itemModal.ruleType === "logical" || itemModal.itemData.type === "logical") {
+    if (
+      itemModal.ruleType === "logical" ||
+      itemModal.itemData.type === "logical"
+    ) {
       itemModal.itemData.type = "logical";
       itemModal.itemData.mode = itemModal.itemData.mode || "and";
       itemModal.itemData.rules = cleanRuleTree(itemModal.itemData.rules || []);
@@ -11096,10 +11112,15 @@ const getRuleSummaryText = (rule, index, type) => {
   const extractVals = (targetRule, fName) => {
     if (!targetRule) return [];
     if (targetRule[fName]) {
-      return Array.isArray(targetRule[fName]) ? targetRule[fName] : [targetRule[fName]];
+      return Array.isArray(targetRule[fName])
+        ? targetRule[fName]
+        : [targetRule[fName]];
     }
     if (targetRule.type === "logical" && Array.isArray(targetRule.rules)) {
-      return targetRule.rules.map((sub) => extractVals(sub, fName)).flat().filter(Boolean);
+      return targetRule.rules
+        .map((sub) => extractVals(sub, fName))
+        .flat()
+        .filter(Boolean);
     }
     return [];
   };
@@ -12214,14 +12235,18 @@ html[data-theme="light"] .wizard-node-chip:hover {
   background: rgba(99, 102, 241, 0.18);
   border-color: var(--primary);
   color: #ffffff;
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4), 0 2px 4px rgba(99, 102, 241, 0.15);
+  box-shadow:
+    0 0 0 1px rgba(99, 102, 241, 0.4),
+    0 2px 4px rgba(99, 102, 241, 0.15);
 }
 
 html[data-theme="light"] .wizard-node-chip.is-selected {
   background: rgba(79, 70, 229, 0.1);
   border-color: var(--primary);
   color: #312e81;
-  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.35), 0 2px 4px rgba(79, 70, 229, 0.08);
+  box-shadow:
+    0 0 0 1px rgba(79, 70, 229, 0.35),
+    0 2px 4px rgba(79, 70, 229, 0.08);
 }
 
 @media (prefers-color-scheme: light) {
@@ -12229,7 +12254,9 @@ html[data-theme="light"] .wizard-node-chip.is-selected {
     background: rgba(79, 70, 229, 0.1);
     border-color: var(--primary);
     color: #312e81;
-    box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.35), 0 2px 4px rgba(79, 70, 229, 0.08);
+    box-shadow:
+      0 0 0 1px rgba(79, 70, 229, 0.35),
+      0 2px 4px rgba(79, 70, 229, 0.08);
   }
 }
 
@@ -12309,7 +12336,9 @@ html[data-theme="light"] .wizard-node-chip.is-selected .wizard-node-type {
 }
 
 @media (prefers-color-scheme: light) {
-  html:not([data-theme="dark"]) .wizard-node-chip.is-selected .wizard-node-type {
+  html:not([data-theme="dark"])
+    .wizard-node-chip.is-selected
+    .wizard-node-type {
     background: rgba(79, 70, 229, 0.15);
     border-color: rgba(79, 70, 229, 0.3);
     color: var(--primary);

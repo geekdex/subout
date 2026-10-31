@@ -655,7 +655,11 @@ const props = defineProps({
 });
 
 if (!props.configData.dns.fakeip) {
-  props.configData.dns.fakeip = { enabled: false, inet4_range: "", inet6_range: "" };
+  props.configData.dns.fakeip = {
+    enabled: false,
+    inet4_range: "",
+    inet6_range: "",
+  };
 }
 
 defineEmits(["syncRule"]);
@@ -694,8 +698,12 @@ const serverKey = (item) => item.tag || Math.random();
 const ruleKey = (item) => {
   if (item._key) return item._key;
   if (item.type === "logical") {
-    return `logical_${item.mode}_${item.server || ""}_${item.rules?.length || 0}_${(item.rules || [])
-      .map((r) => (r.type === "logical" ? "sub_" + r.mode : Object.keys(r).join("-")))
+    return `logical_${item.mode}_${item.server || ""}_${item.rules?.length || 0}_${(
+      item.rules || []
+    )
+      .map((r) =>
+        r.type === "logical" ? "sub_" + r.mode : Object.keys(r).join("-"),
+      )
       .join("_")}`;
   }
   return (

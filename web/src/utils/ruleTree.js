@@ -18,20 +18,36 @@ export const QUERY_TYPES = [
 ];
 
 export const DNS_CRITERIA_OPTIONS = [
-  { value: "query_type", label: "DNS 查询类型 (query_type)", type: "pills_or_text" },
+  {
+    value: "query_type",
+    label: "DNS 查询类型 (query_type)",
+    type: "pills_or_text",
+  },
   { value: "domain_suffix", label: "域名后缀 (domain_suffix)", type: "list" },
   { value: "domain", label: "精确域名 (domain)", type: "list" },
   { value: "rule_set", label: "规则集 (rule_set)", type: "list" },
   { value: "geosite", label: "Geosite (geosite)", type: "list" },
-  { value: "domain_keyword", label: "域名关键字 (domain_keyword)", type: "list" },
-  { value: "domain_regex", label: "域名正则表达式 (domain_regex)", type: "list" },
+  {
+    value: "domain_keyword",
+    label: "域名关键字 (domain_keyword)",
+    type: "list",
+  },
+  {
+    value: "domain_regex",
+    label: "域名正则表达式 (domain_regex)",
+    type: "list",
+  },
   { value: "geoip", label: "GeoIP (geoip)", type: "list" },
   { value: "ip_cidr", label: "IP CIDR 网段 (ip_cidr)", type: "list" },
   { value: "port", label: "端口列表 (port)", type: "ports" },
   { value: "inbound", label: "来源入站 (inbound)", type: "list" },
   { value: "process_name", label: "进程名称 (process_name)", type: "list" },
   { value: "process_path", label: "进程路径 (process_path)", type: "list" },
-  { value: "process_path_regex", label: "进程路径正则 (process_path_regex)", type: "list" },
+  {
+    value: "process_path_regex",
+    label: "进程路径正则 (process_path_regex)",
+    type: "list",
+  },
   { value: "package_name", label: "应用包名 (package_name)", type: "list" },
   { value: "user", label: "运行用户 (user)", type: "list" },
   { value: "clash_mode", label: "Clash 模式 (clash_mode)", type: "text" },
@@ -54,11 +70,7 @@ export function createDnsNestedTemplate() {
     {
       type: "logical",
       mode: "or",
-      rules: [
-        { domain: [] },
-        { domain_suffix: [] },
-        { rule_set: [] },
-      ],
+      rules: [{ domain: [] }, { domain_suffix: [] }, { rule_set: [] }],
     },
   ];
 }
@@ -165,7 +177,8 @@ export function ruleMatchesQuery(rule, query) {
   if (!q) return true;
 
   if (rule.server && rule.server.toLowerCase().includes(q)) return true;
-  if (rule.client_subnet && rule.client_subnet.toLowerCase().includes(q)) return true;
+  if (rule.client_subnet && rule.client_subnet.toLowerCase().includes(q))
+    return true;
 
   const checkVal = (val) => {
     if (val === undefined || val === null) return false;

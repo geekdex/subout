@@ -182,6 +182,12 @@ pub struct ServiceStatusInfo {
     pub log_disabled: bool,
     #[serde(default)]
     pub log_output: Option<String>,
+    #[serde(default)]
+    pub system_proxy_enabled: bool,
+    #[serde(default)]
+    pub system_proxy_active: bool,
+    #[serde(default)]
+    pub mixed_port: Option<u16>,
 }
 
 pub struct SingBoxServiceManager {
@@ -195,6 +201,7 @@ pub struct SingBoxServiceManager {
     current_log_level: Arc<RwLock<String>>,
     current_log_disabled: Arc<RwLock<bool>>,
     current_log_output: Arc<RwLock<Option<String>>>,
+    system_proxy_active: Arc<RwLock<bool>>,
 }
 
 impl Default for SingBoxServiceManager {
@@ -216,6 +223,7 @@ impl SingBoxServiceManager {
             current_log_level: Arc::new(RwLock::new("info".to_string())),
             current_log_disabled: Arc::new(RwLock::new(false)),
             current_log_output: Arc::new(RwLock::new(None)),
+            system_proxy_active: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -314,7 +322,9 @@ impl SingBoxServiceManager {
     pub async fn is_running(&self) -> bool {
         let mut child_guard = self.child.write().await;
         if let Some(ref mut child) = *child_guard {
-            if let Ok(None) = child.try_wait() { true } else {
+            if let Ok(None) = child.try_wait() {
+                true
+            } else {
                 *child_guard = None;
                 false
             }
@@ -326,7 +336,9 @@ impl SingBoxServiceManager {
     pub async fn get_managed_pid(&self) -> Option<u32> {
         let mut child_guard = self.child.write().await;
         if let Some(ref mut child) = *child_guard {
-            if let Ok(None) = child.try_wait() { child.id() } else {
+            if let Ok(None) = child.try_wait() {
+                child.id()
+            } else {
                 *child_guard = None;
                 None
             }
@@ -495,7 +507,10 @@ impl SingBoxServiceManager {
                         .get("level")
                         .and_then(|lv| lv.as_str())
                         .map(str::to_lowercase);
-                    let disabled = c.get("disabled").and_then(serde_json::Value::as_bool).unwrap_or(false);
+                    let disabled = c
+                        .get("disabled")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
                     let output = c
                         .get("output")
                         .and_then(|o| o.as_str())
@@ -508,6 +523,30 @@ impl SingBoxServiceManager {
         } else {
             (Some("info".to_string()), false, None)
         };
+
+        let db_path_opt = self.db_path.read().await.clone();
+        let system_proxy_active = *self.system_proxy_active.read().await;
+        let system_proxy_enabled = if let Some(ref path) = db_path_opt
+            && let Ok(conn) = rusqlite::Connection::open(path)
+            && let Ok(Some(val)) = crate::db::get_setting(&conn, "system_proxy_enabled")
+        {
+            val == "true"
+        } else {
+            false
+        };
+
+        let mixed_port = config_json
+            .as_ref()
+            .and_then(get_mixed_port_from_config)
+            .or_else(|| {
+                if let Some(ref path) = db_path_opt
+                    && let Ok(conn) = rusqlite::Connection::open(path)
+                {
+                    get_mixed_port_for_active_mode(&conn)
+                } else {
+                    None
+                }
+            });
 
         ServiceStatusInfo {
             running: is_run,
@@ -524,11 +563,78 @@ impl SingBoxServiceManager {
             log_level,
             log_disabled,
             log_output,
+            system_proxy_enabled,
+            system_proxy_active,
+            mixed_port,
         }
     }
 
+    pub async fn is_system_proxy_active(&self) -> bool {
+        *self.system_proxy_active.read().await
+    }
+
+    pub async fn set_system_proxy(&self, enable: bool) -> Result<()> {
+        let platform = crate::platform::current_platform();
+        let cached_pass = self.cached_sudo_pass.read().await.clone();
+        let is_running = self.is_running().await;
+        let db_path_opt = self.db_path.read().await.clone();
+
+        if let Some(ref path) = db_path_opt
+            && let Ok(conn) = rusqlite::Connection::open(path)
+        {
+            let _ = crate::db::update_setting(
+                &conn,
+                "system_proxy_enabled",
+                if enable { "true" } else { "false" },
+            );
+        }
+
+        if enable {
+            let running_config_path_buf = Self::get_running_config_path();
+            let config_json = std::fs::read_to_string(&running_config_path_buf)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+            let port = config_json
+                .as_ref()
+                .and_then(get_mixed_port_from_config)
+                .or_else(|| {
+                    if let Some(ref path) = db_path_opt
+                        && let Ok(conn) = rusqlite::Connection::open(path)
+                    {
+                        get_mixed_port_for_active_mode(&conn)
+                    } else {
+                        None
+                    }
+                });
+
+            let Some(port) = port else {
+                return Err(anyhow!(
+                    "当前配置未包含混合/HTTP/SOCKS入站端口 (mixed/http/socks)，无法设置为系统代理"
+                ));
+            };
+
+            if is_running {
+                platform.enable_system_proxy(port, cached_pass.as_deref());
+                *self.system_proxy_active.write().await = true;
+                self.append_log(&format!("🌐 已设置系统网络代理 (127.0.0.1:{port})"))
+                    .await;
+            } else {
+                *self.system_proxy_active.write().await = false;
+            }
+        } else {
+            platform.disable_system_proxy(cached_pass.as_deref());
+            *self.system_proxy_active.write().await = false;
+            if is_running {
+                self.append_log("🌐 已关闭系统网络代理").await;
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn start(&self, config_json: &Value) -> Result<()> {
-        self.start_with_sudo(config_json, None).await
+        self.start_with_options(config_json, None, false, None)
+            .await
     }
 
     pub async fn start_with_sudo(
@@ -536,7 +642,7 @@ impl SingBoxServiceManager {
         config_json: &Value,
         sudo_pass: Option<&str>,
     ) -> Result<()> {
-        self.start_with_sudo_and_takeover(config_json, sudo_pass, false)
+        self.start_with_options(config_json, sudo_pass, false, None)
             .await
     }
 
@@ -545,7 +651,7 @@ impl SingBoxServiceManager {
         config_json: &Value,
         sudo_pass: Option<&str>,
     ) -> Result<()> {
-        self.start_with_sudo_and_takeover(config_json, sudo_pass, true)
+        self.start_with_options(config_json, sudo_pass, true, None)
             .await
     }
 
@@ -586,6 +692,17 @@ impl SingBoxServiceManager {
         config_json: &Value,
         sudo_pass: Option<&str>,
         takeover: bool,
+    ) -> Result<()> {
+        self.start_with_options(config_json, sudo_pass, takeover, None)
+            .await
+    }
+
+    pub async fn start_with_options(
+        &self,
+        config_json: &Value,
+        sudo_pass: Option<&str>,
+        takeover: bool,
+        enable_system_proxy: Option<bool>,
     ) -> Result<()> {
         let singbox_bin = kernel::get_singbox_executable()
             .ok_or_else(|| anyhow!("未找到 sing-box 可执行文件，请先在面板下载集成内核"))?;
@@ -1075,12 +1192,43 @@ impl SingBoxServiceManager {
         }
 
         let cached_pass = self.cached_sudo_pass.read().await.clone();
-        if let Some(port) = get_mixed_port_from_config(config_json) {
-            platform.enable_system_proxy(port, cached_pass.as_deref());
-            if platform.is_macos() || platform.is_windows() {
-                self.append_log(&format!("🌐 已自动设置系统网络代理 (127.0.0.1:{port})"))
-                    .await;
+
+        // 显式系统代理控制：必须由用户显式开启，绝不在启动时隐式强制设置
+        let system_proxy_enabled = if let Some(val) = enable_system_proxy {
+            if let Some(ref path) = *self.db_path.read().await
+                && let Ok(conn) = rusqlite::Connection::open(path)
+            {
+                let _ = crate::db::update_setting(
+                    &conn,
+                    "system_proxy_enabled",
+                    if val { "true" } else { "false" },
+                );
             }
+            val
+        } else if let Some(ref path) = *self.db_path.read().await
+            && let Ok(conn) = rusqlite::Connection::open(path)
+            && let Ok(Some(val)) = crate::db::get_setting(&conn, "system_proxy_enabled")
+        {
+            val == "true"
+        } else {
+            false
+        };
+
+        if system_proxy_enabled {
+            if let Some(port) = get_mixed_port_from_config(config_json) {
+                platform.enable_system_proxy(port, cached_pass.as_deref());
+                *self.system_proxy_active.write().await = true;
+                self.append_log(&format!("🌐 已设置系统网络代理 (127.0.0.1:{port})"))
+                    .await;
+            } else {
+                *self.system_proxy_active.write().await = false;
+                self.append_log(
+                    "⚠️ 已勾选系统代理，但当前配置未包含混合/HTTP/SOCKS入站端口，未设置系统代理",
+                )
+                .await;
+            }
+        } else {
+            *self.system_proxy_active.write().await = false;
         }
         if tun_mode {
             let tun_ip =
@@ -1101,10 +1249,8 @@ impl SingBoxServiceManager {
             ))
             .await;
         } else if started_ready {
-            self.append_log(&format!(
-                "🟢 sing-box 服务已就绪并开始运行 (PID: {pid:?})"
-            ))
-            .await;
+            self.append_log(&format!("🟢 sing-box 服务已就绪并开始运行 (PID: {pid:?})"))
+                .await;
         } else {
             self.append_log(&format!("🟢 sing-box 进程已拉起 (PID: {pid:?})"))
                 .await;
@@ -1184,6 +1330,7 @@ impl SingBoxServiceManager {
 
         platform.disable_system_proxy(cached_pass.as_deref());
         platform.disable_tun_dns(cached_pass.as_deref());
+        *self.system_proxy_active.write().await = false;
         self.append_log("🌐 已恢复系统原始网络代理与路由设置").await;
 
         if had_child {
@@ -1226,8 +1373,7 @@ impl SingBoxServiceManager {
             && e.to_string().contains("Sudo 密码不正确")
         {
             self.clear_saved_sudo_pass().await;
-            self.append_log(&format!("❌ 终止外部进程失败: {e}"))
-                .await;
+            self.append_log(&format!("❌ 终止外部进程失败: {e}")).await;
             return Err(e);
         }
 
@@ -1275,8 +1421,19 @@ impl SingBoxServiceManager {
         sudo_pass: Option<&str>,
         takeover: bool,
     ) -> Result<()> {
+        self.restart_with_options(config_json, sudo_pass, takeover, None)
+            .await
+    }
+
+    pub async fn restart_with_options(
+        &self,
+        config_json: &Value,
+        sudo_pass: Option<&str>,
+        takeover: bool,
+        enable_system_proxy: Option<bool>,
+    ) -> Result<()> {
         self.stop().await?;
-        self.start_with_sudo_and_takeover(config_json, sudo_pass, takeover)
+        self.start_with_options(config_json, sudo_pass, takeover, enable_system_proxy)
             .await
     }
 }
@@ -1389,12 +1546,46 @@ pub async fn run_sudo_command(
         .await
 }
 
+pub fn get_mixed_port_for_active_mode(conn: &rusqlite::Connection) -> Option<u16> {
+    let mode = crate::db::get_setting(conn, "app_mode")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "simple".to_string());
+    if mode == "simple" {
+        let simple_cfg = crate::simple_config::get_saved_simple_config(conn);
+        if simple_cfg.inbound.inbound_type == "mixed" {
+            Some(simple_cfg.inbound.mixed_port)
+        } else {
+            None
+        }
+    } else {
+        let running_id_str = crate::db::get_setting(conn, "running_config_id")
+            .unwrap_or(None)
+            .unwrap_or_default();
+        if let Ok(id) = running_id_str.parse::<i64>()
+            && let Ok(Some(history)) = crate::db::get_config_history_detail(conn, id)
+            && let Some(content_str) = history.content
+            && let Ok(c) = serde_json::from_str::<Value>(&content_str)
+        {
+            get_mixed_port_from_config(&c)
+        } else if let Ok(Some(inbounds_str)) = crate::db::get_base_config_section(conn, "inbounds")
+            && let Ok(inbounds_val) = serde_json::from_str::<Value>(&inbounds_str)
+        {
+            let dummy = serde_json::json!({ "inbounds": inbounds_val });
+            get_mixed_port_from_config(&dummy)
+        } else {
+            None
+        }
+    }
+}
+
 pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
     if let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) {
         for inbound in inbounds {
             let inbound_type = inbound.get("type").and_then(|t| t.as_str());
             if matches!(inbound_type, Some("mixed" | "http" | "socks"))
-                && let Some(port) = inbound.get("listen_port").and_then(serde_json::Value::as_u64)
+                && let Some(port) = inbound
+                    .get("listen_port")
+                    .and_then(serde_json::Value::as_u64)
             {
                 return Some(port as u16);
             }
@@ -1631,6 +1822,9 @@ mod tests {
             log_level: Some("warn".to_string()),
             log_disabled: false,
             log_output: Some("sing-box.log".to_string()),
+            system_proxy_enabled: false,
+            system_proxy_active: false,
+            mixed_port: Some(2080),
         };
 
         let json_val = serde_json::to_value(&status).unwrap();
@@ -1640,6 +1834,9 @@ mod tests {
         assert_eq!(json_val["log_level"], "warn");
         assert_eq!(json_val["log_disabled"], false);
         assert_eq!(json_val["log_output"], "sing-box.log");
+        assert_eq!(json_val["system_proxy_enabled"], false);
+        assert_eq!(json_val["system_proxy_active"], false);
+        assert_eq!(json_val["mixed_port"], 2080);
     }
 
     #[test]
@@ -1968,5 +2165,79 @@ mod tests {
         assert!(!st.running);
         assert!(!st.ready);
         assert!(st.pid.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_system_proxy_setting_persistence_and_toggle() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let db_file = std::env::temp_dir().join(format!("test_proxy_{unique_id}.db"));
+        let db_path = db_file.to_string_lossy().to_string();
+
+        let _ = crate::db::init_db(&db_path).unwrap();
+
+        let mgr = SingBoxServiceManager::new();
+        mgr.set_db_path(&db_path).await;
+
+        // Initially disabled
+        let status = mgr.get_status().await;
+        assert!(!status.system_proxy_enabled);
+        assert!(!status.system_proxy_active);
+
+        // Turn on when no port configured -> should return error
+        let err_res = mgr.set_system_proxy(true).await;
+        assert!(err_res.is_err());
+
+        // Configure simple config with mixed port
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            let mut simple_cfg = crate::simple_config::get_saved_simple_config(&conn);
+            simple_cfg.inbound.inbound_type = "mixed".to_string();
+            simple_cfg.inbound.mixed_port = 7890;
+            crate::simple_config::save_simple_config(&conn, &simple_cfg).unwrap();
+        }
+
+        // Now mixed port should be detected even while stopped
+        let status = mgr.get_status().await;
+        assert_eq!(status.mixed_port, Some(7890));
+
+        // Enable system proxy
+        let res = mgr.set_system_proxy(true).await;
+        assert!(res.is_ok());
+
+        let status2 = mgr.get_status().await;
+        assert!(status2.system_proxy_enabled);
+        // Not running, so active is false (to prevent internet blackout)
+        assert!(!status2.system_proxy_active);
+
+        // Disable system proxy
+        let res2 = mgr.set_system_proxy(false).await;
+        assert!(res2.is_ok());
+        let status3 = mgr.get_status().await;
+        assert!(!status3.system_proxy_enabled);
+        assert!(!status3.system_proxy_active);
+
+        let _ = std::fs::remove_file(&db_file);
+    }
+
+    #[test]
+    fn test_get_mixed_port_for_active_mode_in_tun_mode() {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let db_file = std::env::temp_dir().join(format!("test_tun_port_{unique_id}.db"));
+        let db_path = db_file.to_string_lossy().to_string();
+
+        let _ = crate::db::init_db(&db_path).unwrap();
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+
+        // Default simple config is TUN mode -> no mixed port
+        let port = get_mixed_port_for_active_mode(&conn);
+        assert_eq!(port, None);
+
+        let _ = std::fs::remove_file(&db_file);
     }
 }

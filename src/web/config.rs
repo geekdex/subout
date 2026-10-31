@@ -133,8 +133,7 @@ pub async fn save_base_config(
     let experimental_str = db::get_base_config_section(&conn, "experimental")
         .unwrap_or(None)
         .unwrap_or_else(|| "{}".to_string());
-    let http_clients_str = db::get_base_config_section(&conn, "http_clients")
-        .unwrap_or(None);
+    let http_clients_str = db::get_base_config_section(&conn, "http_clients").unwrap_or(None);
 
     let mut log_val: Value = serde_json::from_str(&log_str).unwrap_or(json!({}));
     let mut dns_val: Value = serde_json::from_str(&dns_str).unwrap_or(json!({}));
@@ -738,9 +737,7 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
         let field_info = &msg[unknown_pos + 20..];
         if let Some(end_quote) = field_info.find('"') {
             let field_name = &field_info[..end_quote];
-            return format!(
-                "配置校验失败：存在未知或不支持的属性 \"{field_name}\" ({msg})"
-            );
+            return format!("配置校验失败：存在未知或不支持的属性 \"{field_name}\" ({msg})");
         }
     }
 
@@ -768,7 +765,9 @@ pub async fn create_history_config(
     let conn =
         get_db_conn(&state.db_path).map_err(|status| (status, "数据库连接失败".to_string()))?;
 
-    let content_str = if let Some(c) = payload.content { serde_json::to_string(&c).unwrap_or_else(|_| "{}".to_string()) } else {
+    let content_str = if let Some(c) = payload.content {
+        serde_json::to_string(&c).unwrap_or_else(|_| "{}".to_string())
+    } else {
         let default_cfg = json!({
             "log": {
                 "level": "info",
@@ -907,10 +906,7 @@ pub async fn update_history_config(
         &experimental_val,
         http_clients_val,
     ) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("配置语法错误: {err_msg}"),
-        ));
+        return Err((StatusCode::BAD_REQUEST, format!("配置语法错误: {err_msg}")));
     }
 
     let content_str = serde_json::to_string(&payload.content)
@@ -979,12 +975,7 @@ pub async fn delete_history_config(
         get_db_conn(&state.db_path).map_err(|status| (status, "数据库连接失败".to_string()))?;
 
     conn.execute("DELETE FROM config_history WHERE id = ?", [id])
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("删除失败: {e}"),
-            )
-        })?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("删除失败: {e}")))?;
 
     Ok(StatusCode::OK)
 }
@@ -1120,9 +1111,7 @@ pub async fn sync_history_config_resources(
         }
     }
 
-    let outbounds_arr = outbounds_val
-        .as_array()
-        .map_or(&[][..], Vec::as_slice);
+    let outbounds_arr = outbounds_val.as_array().map_or(&[][..], Vec::as_slice);
     let groups_count = outbounds_arr
         .iter()
         .filter(|o| {
@@ -1346,9 +1335,7 @@ pub async fn save_running_config(
         logs.push(ExecutionStepLog {
             step: "生成配置".to_string(),
             status: "info".to_string(),
-            message: format!(
-                "正在读取配置模板 #{config_id} 内容并构建 sing-box 配置..."
-            ),
+            message: format!("正在读取配置模板 #{config_id} 内容并构建 sing-box 配置..."),
             timestamp: get_execution_timestamp(),
         });
 
@@ -1491,9 +1478,7 @@ pub async fn save_running_config(
         logs.push(ExecutionStepLog {
             step: "生成配置".to_string(),
             status: "success".to_string(),
-            message: format!(
-                "配置模板 #{config_id} 读取并整合生成 sing-box 核心配置成功"
-            ),
+            message: format!("配置模板 #{config_id} 读取并整合生成 sing-box 核心配置成功"),
             timestamp: get_execution_timestamp(),
         });
 

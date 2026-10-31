@@ -836,10 +836,34 @@ describe("NodesView - 节点池管理", () => {
       const wrapper = await mountNodesView();
       wrapper.vm.pingModal.show = true;
       wrapper.vm.pingModal.results = [
-        { id: 1, tag: "N1", node_type: "vless", effectiveLatency: 50, status: "fast" },
-        { id: 2, tag: "N2", node_type: "vmess", effectiveLatency: 150, status: "medium" },
-        { id: 3, tag: "N3", node_type: "ss", effectiveLatency: 350, status: "slow" },
-        { id: 4, tag: "N4", node_type: "trojan", effectiveLatency: null, status: "failed" },
+        {
+          id: 1,
+          tag: "N1",
+          node_type: "vless",
+          effectiveLatency: 50,
+          status: "fast",
+        },
+        {
+          id: 2,
+          tag: "N2",
+          node_type: "vmess",
+          effectiveLatency: 150,
+          status: "medium",
+        },
+        {
+          id: 3,
+          tag: "N3",
+          node_type: "ss",
+          effectiveLatency: 350,
+          status: "slow",
+        },
+        {
+          id: 4,
+          tag: "N4",
+          node_type: "trojan",
+          effectiveLatency: null,
+          status: "failed",
+        },
       ];
       wrapper.vm.pingModal.activeTab = "summary";
       await flushPromises();
@@ -879,7 +903,10 @@ describe("NodesView - 节点池管理", () => {
 
       wrapper.vm.batchSelectFailedNodes();
       expect(wrapper.vm.selectedNodeIds).toEqual([2, 3]);
-      expect(mockShowToast).toHaveBeenCalledWith("已勾选 2 个超时节点，可直接执行批量删除或禁用", "success");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "已勾选 2 个超时节点，可直接执行批量删除或禁用",
+        "success",
+      );
     });
 
     it("复制测速报告与导出 CSV 正常工作", async () => {
@@ -911,7 +938,10 @@ describe("NodesView - 节点池管理", () => {
       const reportArg = writeTextMock.mock.calls[0][0];
       expect(reportArg).toContain("Subout 节点测速报告");
       expect(reportArg).toContain("极速节点");
-      expect(mockShowToast).toHaveBeenCalledWith("测速报告已成功复制到剪贴板", "success");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "测速报告已成功复制到剪贴板",
+        "success",
+      );
 
       // 测试导出 CSV
       const createObjectURLMock = vi.fn(() => "blob:mock-csv-url");

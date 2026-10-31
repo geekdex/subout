@@ -3,21 +3,27 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import App from "./App.vue";
 
-vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query) => ({
-  matches: false,
-  media: query,
-  onchange: null,
-  addListener: vi.fn(),
-  removeListener: vi.fn(),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  dispatchEvent: vi.fn(),
-})));
+vi.stubGlobal(
+  "matchMedia",
+  vi.fn().mockImplementation((query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+);
 
 const mockFetch = vi.fn().mockImplementation((url) => {
   const urlStr = String(url);
   if (urlStr.includes("/api/auth/status")) {
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: "ok" }) });
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: "ok" }),
+    });
   }
   if (urlStr.includes("/api/system/mode")) {
     return Promise.resolve({
@@ -51,13 +57,17 @@ describe("App.vue 路由与刷新容错测试", () => {
   });
 
   const stubs = {
-    DashboardView: { template: "<div data-testid='dashboard-view'>Dashboard</div>" },
+    DashboardView: {
+      template: "<div data-testid='dashboard-view'>Dashboard</div>",
+    },
     SubscriptionsView: { template: "<div>Subscriptions</div>" },
     NodesView: { template: "<div>Nodes</div>" },
     SimpleConfigView: { template: "<div>SimpleConfig</div>" },
     ServiceLogsView: { template: "<div>ServiceLogs</div>" },
     GroupsView: { template: "<div>Groups</div>" },
-    ConfigEditorView: { template: "<div data-testid='config-editor-view'>ConfigEditor</div>" },
+    ConfigEditorView: {
+      template: "<div data-testid='config-editor-view'>ConfigEditor</div>",
+    },
     SiteTestView: { template: "<div>SiteTest</div>" },
     SettingsView: { template: "<div>Settings</div>" },
     ModeSelectModal: { template: "<div>ModeSelect</div>" },
@@ -68,7 +78,9 @@ describe("App.vue 路由与刷新容错测试", () => {
     const wrapper = mount(App, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(
+      true,
+    );
     expect(wrapper.find("[data-testid='dashboard-view']").exists()).toBe(false);
   });
 
@@ -77,7 +89,9 @@ describe("App.vue 路由与刷新容错测试", () => {
     const wrapper = mount(App, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(
+      true,
+    );
     expect(wrapper.find("[data-testid='dashboard-view']").exists()).toBe(false);
     expect(window.location.hash).toBe("#configs/edit/1/log");
   });
@@ -87,7 +101,9 @@ describe("App.vue 路由与刷新容错测试", () => {
     const wrapper = mount(App, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(
+      true,
+    );
     expect(wrapper.find("[data-testid='dashboard-view']").exists()).toBe(false);
     expect(window.location.hash).toBe("#configs");
   });
@@ -98,7 +114,9 @@ describe("App.vue 路由与刷新容错测试", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-testid='dashboard-view']").exists()).toBe(true);
-    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='config-editor-view']").exists()).toBe(
+      false,
+    );
     expect(window.location.hash).toBe("#dashboard");
   });
 });

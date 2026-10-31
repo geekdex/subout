@@ -120,7 +120,9 @@ impl PlatformStrategy for LinuxPlatform {
 
     fn tun_permission_error_guide(&self, err: &str, singbox_bin: &Path) -> String {
         let bin_display = singbox_bin.display();
-        if err.contains("add address") && (err.contains("permission denied") || err.contains("operation not permitted")) {
+        if err.contains("add address")
+            && (err.contains("permission denied") || err.contains("operation not permitted"))
+        {
             format!(
                 "TUN 模式配置网卡地址失败 ({err}): 可能是系统禁用了 IPv6 导致无法分配 IPv6 地址。请检查并开启系统 IPv6 (执行 sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0)，或在入站 (inbounds) 配置中移除 IPv6 地址。"
             )
@@ -289,13 +291,11 @@ impl PlatformStrategy for LinuxPlatform {
 
                         let is_subout = comm == "subout"
                             || comm.contains("subout")
-                            || cmdline
-                                .as_deref()
-                                .is_some_and(|c| {
-                                    c.contains("subout")
-                                        || c.contains(&config_path_str)
-                                        || c.contains("sing-box-running.json")
-                                });
+                            || cmdline.as_deref().is_some_and(|c| {
+                                c.contains("subout")
+                                    || c.contains(&config_path_str)
+                                    || c.contains("sing-box-running.json")
+                            });
 
                         if is_subout {
                             continue;
@@ -305,14 +305,12 @@ impl PlatformStrategy for LinuxPlatform {
                             || exe_path
                                 .as_deref()
                                 .is_some_and(|p| p.ends_with("/sing-box"))
-                            || cmdline
-                                .as_deref()
-                                .is_some_and(|c| {
-                                    c.starts_with("sing-box ")
-                                        || c.contains("/sing-box ")
-                                        || c.contains("sing-box run")
-                                        || c == "sing-box"
-                                });
+                            || cmdline.as_deref().is_some_and(|c| {
+                                c.starts_with("sing-box ")
+                                    || c.contains("/sing-box ")
+                                    || c.contains("sing-box run")
+                                    || c == "sing-box"
+                            });
 
                         if is_singbox && seen_pids.insert(pid) {
                             results.push(ConflictingProcessInfo {
@@ -621,7 +619,33 @@ impl PlatformStrategy for LinuxPlatform {
         }
     }
 
-    fn enable_system_proxy(&self, _port: u16, _sudo_pass: Option<&str>) {}
+    fn enable_system_proxy(&self, port: u16, _sudo_pass: Option<&str>) {
+        #[cfg(unix)]
+        {
+            let port_str = port.to_string();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy", "mode", "manual"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.http", "host", "127.0.0.1"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.http", "port", &port_str])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.https", "host", "127.0.0.1"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.https", "port", &port_str])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.socks", "port", &port_str])
+                .output();
+        }
+    }
 
     fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {
         #[cfg(unix)]

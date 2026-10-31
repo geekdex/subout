@@ -5,9 +5,13 @@ pub use types::Outbound;
 pub use utils::decode_base64;
 
 use percent_encoding::percent_decode_str;
-use types::{VmessJsonRaw, TlsConfig, VmessOutbound, SocksOutbound, HttpOutbound, AnytlsOutbound, TrojanOutbound, RealityConfig, UtlsConfig, VlessOutbound, ShadowsocksOutbound, HysteriaOutbound, Hysteria2Obfs, Hysteria2Outbound};
+use types::{
+    AnytlsOutbound, HttpOutbound, Hysteria2Obfs, Hysteria2Outbound, HysteriaOutbound,
+    RealityConfig, ShadowsocksOutbound, SocksOutbound, TlsConfig, TrojanOutbound, UtlsConfig,
+    VlessOutbound, VmessJsonRaw, VmessOutbound,
+};
 use url::Url;
-use utils::{parse_transport_params, maybe_decode_base64, parse_mbps};
+use utils::{maybe_decode_base64, parse_mbps, parse_transport_params};
 
 pub fn parse_line(line: &str) -> Option<Outbound> {
     let line = line.trim();
@@ -146,8 +150,10 @@ fn parse_url_to_outbound(url: &Url, force_https: bool) -> Option<Outbound> {
         _ => 443,
     });
 
-    let tag = url
-        .fragment().map_or_else(|| format!("{host}:{port}"), |f| percent_decode_str(f).decode_utf8_lossy().into_owned());
+    let tag = url.fragment().map_or_else(
+        || format!("{host}:{port}"),
+        |f| percent_decode_str(f).decode_utf8_lossy().into_owned(),
+    );
 
     let username = if url.username().is_empty() {
         None

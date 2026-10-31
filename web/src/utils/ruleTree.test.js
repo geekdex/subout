@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { cleanRuleTree, ruleMatchesQuery, createDnsNestedTemplate } from "./ruleTree.js";
+import {
+  cleanRuleTree,
+  ruleMatchesQuery,
+  createDnsNestedTemplate,
+} from "./ruleTree.js";
 
 describe("ruleTree utilities", () => {
   const sampleUserRule = {
@@ -37,8 +41,12 @@ describe("ruleTree utilities", () => {
       expect(cleaned[1].mode).toBe("or");
       expect(cleaned[1].rules).toHaveLength(3);
       expect(cleaned[1].rules[0]).toEqual({ domain: ["claude.ai"] });
-      expect(cleaned[1].rules[1]).toEqual({ domain_suffix: [".io", ".google", ".org"] });
-      expect(cleaned[1].rules[2]).toEqual({ rule_set: ["geosite-google", "geosite-youtube"] });
+      expect(cleaned[1].rules[1]).toEqual({
+        domain_suffix: [".io", ".google", ".org"],
+      });
+      expect(cleaned[1].rules[2]).toEqual({
+        rule_set: ["geosite-google", "geosite-youtube"],
+      });
     });
 
     it("filters out empty conditions", () => {
@@ -84,7 +92,9 @@ describe("ruleTree utilities", () => {
     });
 
     it("returns false for non-matching query", () => {
-      expect(ruleMatchesQuery(sampleUserRule, "nonexistent-criterion")).toBe(false);
+      expect(ruleMatchesQuery(sampleUserRule, "nonexistent-criterion")).toBe(
+        false,
+      );
     });
   });
 

@@ -376,9 +376,7 @@ async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     }))?;
 
     if args.verbose {
-        eprintln!(
-            "[Info] Saving generated outbounds configuration to: {output_path}"
-        );
+        eprintln!("[Info] Saving generated outbounds configuration to: {output_path}");
     }
 
     let mut file = File::create(output_path)?;

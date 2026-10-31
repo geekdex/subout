@@ -17,6 +17,7 @@ pub struct StartServiceRequest {
     pub config: Option<Value>,
     pub sudo_pass: Option<String>,
     pub takeover: Option<bool>,
+    pub enable_system_proxy: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -24,6 +25,12 @@ pub struct TakeoverServiceRequest {
     pub sudo_pass: Option<String>,
     pub start_after_takeover: Option<bool>,
     pub config: Option<Value>,
+    pub enable_system_proxy: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct SetSystemProxyRequest {
+    pub enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -80,14 +87,15 @@ pub async fn takeover_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let (sudo_pass, start_after, custom_config) = if let Some(req) = payload {
+    let (sudo_pass, start_after, custom_config, enable_proxy) = if let Some(req) = payload {
         (
             req.sudo_pass.filter(|p| !p.trim().is_empty()),
             req.start_after_takeover.unwrap_or(true),
             req.config,
+            req.enable_system_proxy,
         )
     } else {
-        (None, true, None)
+        (None, true, None, None)
     };
 
     if start_after {
@@ -99,7 +107,7 @@ pub async fn takeover_service(
 
         state
             .service_manager
-            .takeover_and_start(&config_val, sudo_pass.as_deref())
+            .start_with_options(&config_val, sudo_pass.as_deref(), true, enable_proxy)
             .await
             .map_err(|e| {
                 (
@@ -142,22 +150,27 @@ pub async fn start_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let (config_val, custom_sudo_pass, takeover) = if let Some(req) = payload {
+    let (config_val, custom_sudo_pass, takeover, enable_proxy) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
             c
         } else {
             get_active_config_for_mode(&conn)?
         };
-        (conf, req.sudo_pass, req.takeover.unwrap_or(false))
+        (
+            conf,
+            req.sudo_pass,
+            req.takeover.unwrap_or(false),
+            req.enable_system_proxy,
+        )
     } else {
-        (get_active_config_for_mode(&conn)?, None, false)
+        (get_active_config_for_mode(&conn)?, None, false, None)
     };
 
     let sudo_pass = custom_sudo_pass.filter(|p| !p.trim().is_empty());
 
     state
         .service_manager
-        .start_with_sudo_and_takeover(&config_val, sudo_pass.as_deref(), takeover)
+        .start_with_options(&config_val, sudo_pass.as_deref(), takeover, enable_proxy)
         .await
         .map_err(|e| {
             let err_str = e.to_string();
@@ -166,10 +179,7 @@ pub async fn start_service(
             {
                 (StatusCode::CONFLICT, format!("启动服务失败: {err_str}"))
             } else {
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("启动服务失败: {err_str}"),
-                )
+                (StatusCode::BAD_REQUEST, format!("启动服务失败: {err_str}"))
             }
         })?;
 
@@ -211,22 +221,27 @@ pub async fn restart_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let (config_val, custom_sudo_pass, takeover) = if let Some(req) = payload {
+    let (config_val, custom_sudo_pass, takeover, enable_proxy) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
             c
         } else {
             get_active_config_for_mode(&conn)?
         };
-        (conf, req.sudo_pass, req.takeover.unwrap_or(false))
+        (
+            conf,
+            req.sudo_pass,
+            req.takeover.unwrap_or(false),
+            req.enable_system_proxy,
+        )
     } else {
-        (get_active_config_for_mode(&conn)?, None, false)
+        (get_active_config_for_mode(&conn)?, None, false, None)
     };
 
     let sudo_pass = custom_sudo_pass.filter(|p| !p.trim().is_empty());
 
     state
         .service_manager
-        .restart_with_sudo_and_takeover(&config_val, sudo_pass.as_deref(), takeover)
+        .restart_with_options(&config_val, sudo_pass.as_deref(), takeover, enable_proxy)
         .await
         .map_err(|e| {
             (
@@ -238,6 +253,32 @@ pub async fn restart_service(
     Ok(Json(serde_json::json!({
         "status": "success",
         "message": "sing-box 服务已重启"
+    })))
+}
+
+pub async fn set_system_proxy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<SetSystemProxyRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    state
+        .service_manager
+        .set_system_proxy(payload.enabled)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "system_proxy_enabled": payload.enabled,
+        "message": if payload.enabled {
+            "已开启系统网络代理"
+        } else {
+            "已关闭系统网络代理"
+        }
     })))
 }
 

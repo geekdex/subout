@@ -86,6 +86,9 @@ export const serviceStatus = ref({
   log_level: "info",
   log_disabled: false,
   log_output: null,
+  system_proxy_enabled: false,
+  system_proxy_active: false,
+  mixed_port: null,
 });
 
 export const toast = reactive({
@@ -480,4 +483,41 @@ export async function promptSudoPassword(customMessage = "") {
     return pass.trim();
   }
   return null;
+}
+
+/**
+ * Toggle OS system proxy explicitly
+ * @param {boolean} enabled
+ * @returns {Promise<boolean>}
+ */
+export async function toggleSystemProxy(enabled) {
+  if (!token.value) return false;
+  try {
+    const res = await fetch(`${API_BASE}/api/service/system-proxy`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({ enabled }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast(
+        data.message || (enabled ? "已开启系统网络代理" : "已关闭系统网络代理"),
+      );
+      await fetchServiceStatus();
+      return true;
+    } else {
+      const err = await res.text();
+      showToast(`设置系统代理失败: ${err}`, "danger");
+      await fetchServiceStatus();
+      return false;
+    }
+  } catch (e) {
+    showToast(`设置系统代理请求失败: ${e.message || e}`, "danger");
+    await fetchServiceStatus();
+    return false;
+  }
 }

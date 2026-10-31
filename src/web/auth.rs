@@ -25,7 +25,9 @@ pub async fn login(
 ) -> Result<Json<LoginResponse>, StatusCode> {
     let input_password = payload.password.unwrap_or_default();
 
-    let authenticated = if let Ok(env_pw) = std::env::var("ADMIN_PASSWORD") { env_pw == input_password } else {
+    let authenticated = if let Ok(env_pw) = std::env::var("ADMIN_PASSWORD") {
+        env_pw == input_password
+    } else {
         let conn = get_db_conn(&state.db_path)?;
         if let Ok(Some(stored_hash)) = db::get_setting(&conn, "password_hash") {
             let input_hash = db::hash_password(&input_password);

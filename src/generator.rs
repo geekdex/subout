@@ -28,8 +28,7 @@ pub fn generate_config(conn: &Connection) -> Result<Value> {
     let route: Value = serde_json::from_str(&route_str).unwrap_or_else(|_| serde_json::json!({}));
     let experimental: Value =
         serde_json::from_str(&experimental_str).unwrap_or_else(|_| serde_json::json!({}));
-    let http_clients: Option<Value> =
-        http_clients_str.and_then(|s| serde_json::from_str(&s).ok());
+    let http_clients: Option<Value> = http_clients_str.and_then(|s| serde_json::from_str(&s).ok());
 
     generate_config_with_base(
         log,
@@ -186,7 +185,9 @@ pub fn sanitize_log_value(log: &mut Value) {
 /// 2. Remove redundant `detour: "direct"` from DNS, rule sets, and `http_clients` to avoid "detour to an empty direct outbound makes no sense".
 /// 3. Sanitize inbounds, outbounds, route, and log defaults without implicit mutations.
 pub fn sanitize_runtime_config(config: &mut Value) {
-    let Some(root) = config.as_object_mut() else { return; };
+    let Some(root) = config.as_object_mut() else {
+        return;
+    };
 
     if let Some(log) = root.get_mut("log") {
         sanitize_log_value(log);
@@ -260,7 +261,10 @@ pub fn sync_config_with_latest_resources(
         "v2ray",
     ];
 
-    let deleted_set: HashSet<&str> = deleted_tags.iter().map(std::string::String::as_str).collect();
+    let deleted_set: HashSet<&str> = deleted_tags
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
 
     // 1. Collect non-group non-proxy system outbounds and custom nodes
     let mut system_outbounds = Vec::new();
@@ -488,7 +492,10 @@ mod tests {
         let mut log = json!({});
         sanitize_log_value(&mut log);
         assert_eq!(log.get("level").and_then(|v| v.as_str()), Some("info"));
-        assert_eq!(log.get("timestamp").and_then(serde_json::Value::as_bool), Some(true));
+        assert_eq!(
+            log.get("timestamp").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
 
         let mut custom_log =
             json!({ "level": "warn", "output": "sing-box.log", "timestamp": false });
@@ -502,7 +509,9 @@ mod tests {
             Some("sing-box.log")
         );
         assert_eq!(
-            custom_log.get("timestamp").and_then(serde_json::Value::as_bool),
+            custom_log
+                .get("timestamp")
+                .and_then(serde_json::Value::as_bool),
             Some(false)
         );
     }
@@ -623,10 +632,7 @@ mod tests {
             win_inbound.get("interface_name"),
             Some(&json!("subout-tun"))
         );
-        assert_eq!(
-            win_inbound.get("address"),
-            Some(&json!(["172.19.0.1/30"]))
-        );
+        assert_eq!(win_inbound.get("address"), Some(&json!(["172.19.0.1/30"])));
         assert_eq!(win_inbound.get("strict_route"), None);
     }
 
@@ -759,7 +765,8 @@ mod tests {
             { "tag": "direct" },
             { "tag": "proxy", "detour": "proxy" }
         ]);
-        db::save_base_config_section(&conn, "http_clients", &serde_json::to_string(&hc).unwrap()).unwrap();
+        db::save_base_config_section(&conn, "http_clients", &serde_json::to_string(&hc).unwrap())
+            .unwrap();
 
         let cfg = generate_config(&conn).unwrap();
         assert_eq!(cfg.get("http_clients"), Some(&hc));

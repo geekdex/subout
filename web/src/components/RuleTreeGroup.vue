@@ -65,10 +65,15 @@
     <div class="group-children-list">
       <div v-if="childRules.length === 0" class="group-empty-state">
         <span class="empty-icon">📂</span>
-        <span>当前逻辑组暂无规则项。请点击下方按钮添加匹配条件或子逻辑组。</span>
+        <span
+          >当前逻辑组暂无规则项。请点击下方按钮添加匹配条件或子逻辑组。</span
+        >
       </div>
 
-      <template v-for="(child, idx) in childRules" :key="getChildKey(child, idx)">
+      <template
+        v-for="(child, idx) in childRules"
+        :key="getChildKey(child, idx)"
+      >
         <!-- If child is a logical group itself: recursive render -->
         <RuleTreeGroup
           v-if="child.type === 'logical'"
@@ -236,10 +241,7 @@ function addSubGroup() {
   const newSubGroup = {
     type: "logical",
     mode: oppositeMode,
-    rules: [
-      { domain: [] },
-      { domain_suffix: [] },
-    ],
+    rules: [{ domain: [] }, { domain_suffix: [] }],
   };
   nextRules.push(newSubGroup);
   emit("update:modelValue", {

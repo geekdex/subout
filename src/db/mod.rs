@@ -292,9 +292,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
                 modified = true;
             }
         }
-        if modified
-            && let Ok(cleaned) = serde_json::to_string(&parsed)
-        {
+        if modified && let Ok(cleaned) = serde_json::to_string(&parsed) {
             let _ = save_base_config_section(conn, "http_clients", &cleaned);
         }
     }
@@ -457,7 +455,8 @@ pub fn get_nodes_paginated(
 
     let count_query = format!("SELECT COUNT(*) FROM nodes n {filter_clause}");
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(std::convert::AsRef::as_ref).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> =
+        params_vec.iter().map(std::convert::AsRef::as_ref).collect();
     let total_count: i64 = conn.query_row(&count_query, params_slice.as_slice(), |r| r.get(0))?;
 
     let query_str = format!(
@@ -475,7 +474,8 @@ pub fn get_nodes_paginated(
     params_vec.push(Box::new(limit));
     params_vec.push(Box::new(offset));
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(std::convert::AsRef::as_ref).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> =
+        params_vec.iter().map(std::convert::AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(&query_str)?;
     let nodes = stmt
@@ -961,7 +961,7 @@ pub fn get_config_history_detail(conn: &Connection, id: i64) -> Result<Option<Co
 
 pub fn get_nodes_speed_summary(conn: &Connection) -> Result<SpeedTestSummary> {
     let mut stmt = conn.prepare(
-        "SELECT id, tag, node_type, last_tcp_latency, last_web_latency, last_tested_at FROM nodes"
+        "SELECT id, tag, node_type, last_tcp_latency, last_web_latency, last_tested_at FROM nodes",
     )?;
 
     let mut total_nodes = 0i64;
@@ -1143,23 +1143,75 @@ mod tests {
         setup_database(&conn).unwrap();
 
         // Node 1: Fast (tcp 40ms, web 60ms)
-        save_node(&conn, None, "node1", "vless", "1.1.1.1", 443, "{}", true, true).unwrap();
-        update_node_ping_result(&conn, 1, Some(40), Some(60), "2026-09-08 10:00:00", Some("http://test.com")).unwrap();
+        save_node(
+            &conn, None, "node1", "vless", "1.1.1.1", 443, "{}", true, true,
+        )
+        .unwrap();
+        update_node_ping_result(
+            &conn,
+            1,
+            Some(40),
+            Some(60),
+            "2026-09-08 10:00:00",
+            Some("http://test.com"),
+        )
+        .unwrap();
 
         // Node 2: Medium (tcp 120ms, web 180ms)
-        save_node(&conn, None, "node2", "vmess", "2.2.2.2", 443, "{}", true, true).unwrap();
-        update_node_ping_result(&conn, 2, Some(120), Some(180), "2026-09-08 10:01:00", Some("http://test.com")).unwrap();
+        save_node(
+            &conn, None, "node2", "vmess", "2.2.2.2", 443, "{}", true, true,
+        )
+        .unwrap();
+        update_node_ping_result(
+            &conn,
+            2,
+            Some(120),
+            Some(180),
+            "2026-09-08 10:01:00",
+            Some("http://test.com"),
+        )
+        .unwrap();
 
         // Node 3: Slow (tcp 350ms, web 420ms)
-        save_node(&conn, None, "node3", "trojan", "3.3.3.3", 443, "{}", true, true).unwrap();
-        update_node_ping_result(&conn, 3, Some(350), Some(420), "2026-09-08 10:02:00", Some("http://test.com")).unwrap();
+        save_node(
+            &conn, None, "node3", "trojan", "3.3.3.3", 443, "{}", true, true,
+        )
+        .unwrap();
+        update_node_ping_result(
+            &conn,
+            3,
+            Some(350),
+            Some(420),
+            "2026-09-08 10:02:00",
+            Some("http://test.com"),
+        )
+        .unwrap();
 
         // Node 4: Timeout (-1, -1)
         save_node(&conn, None, "node4", "ss", "4.4.4.4", 443, "{}", true, true).unwrap();
-        update_node_ping_result(&conn, 4, Some(-1), Some(-1), "2026-09-08 10:03:00", Some("http://test.com")).unwrap();
+        update_node_ping_result(
+            &conn,
+            4,
+            Some(-1),
+            Some(-1),
+            "2026-09-08 10:03:00",
+            Some("http://test.com"),
+        )
+        .unwrap();
 
         // Node 5: Untested
-        save_node(&conn, None, "node5", "hysteria2", "5.5.5.5", 443, "{}", true, true).unwrap();
+        save_node(
+            &conn,
+            None,
+            "node5",
+            "hysteria2",
+            "5.5.5.5",
+            443,
+            "{}",
+            true,
+            true,
+        )
+        .unwrap();
 
         let summary = get_nodes_speed_summary(&conn).unwrap();
         assert_eq!(summary.total_nodes, 5);
@@ -1187,7 +1239,9 @@ mod tests {
         assert_eq!(summary.web_tiers.failed, 1);
         assert_eq!(summary.web_tiers.untested, 1);
 
-        assert_eq!(summary.last_tested_at, Some("2026-09-08 10:03:00".to_string()));
+        assert_eq!(
+            summary.last_tested_at,
+            Some("2026-09-08 10:03:00".to_string())
+        );
     }
 }
-

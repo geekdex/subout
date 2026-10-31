@@ -50,7 +50,9 @@ describe("RuleTree Components", () => {
       expect(activeTexts).toContain("AAAA");
 
       // Click HTTPS to add it
-      const httpsPill = wrapper.findAll(".pill-btn").find((p) => p.text() === "HTTPS");
+      const httpsPill = wrapper
+        .findAll(".pill-btn")
+        .find((p) => p.text() === "HTTPS");
       expect(httpsPill).toBeTruthy();
       await httpsPill.trigger("click");
 
@@ -133,7 +135,9 @@ describe("RuleTree Components", () => {
         },
       });
 
-      const addBtn = wrapper.findAll(".add-action-btn").find((b) => b.text().includes("添加匹配条件"));
+      const addBtn = wrapper
+        .findAll(".add-action-btn")
+        .find((b) => b.text().includes("添加匹配条件"));
       await addBtn.trigger("click");
 
       expect(wrapper.emitted("update:modelValue")).toBeTruthy();
@@ -185,9 +189,15 @@ describe("RuleTree Components", () => {
       expect(wrapper.text()).toContain("AAAA");
       expect(wrapper.text()).toContain("子逻辑组 (层级 1)");
       const textareas = wrapper.findAll("textarea");
-      expect(textareas.some((t) => t.element.value.includes("claude.ai"))).toBe(true);
-      expect(textareas.some((t) => t.element.value.includes("feiniaoyun.xyz"))).toBe(true);
-      expect(textareas.some((t) => t.element.value.includes("geosite-google"))).toBe(true);
+      expect(textareas.some((t) => t.element.value.includes("claude.ai"))).toBe(
+        true,
+      );
+      expect(
+        textareas.some((t) => t.element.value.includes("feiniaoyun.xyz")),
+      ).toBe(true);
+      expect(
+        textareas.some((t) => t.element.value.includes("geosite-google")),
+      ).toBe(true);
     });
 
     it("applies best practice template", async () => {

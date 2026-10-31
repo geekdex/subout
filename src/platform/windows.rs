@@ -394,7 +394,11 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn default_data_dir(&self) -> PathBuf {
         std::env::var("ProgramData")
-            .or_else(|_| std::env::var("ALLUSERSPROFILE")).map_or_else(|_| PathBuf::from(r"C:\ProgramData\Subout"), |p| PathBuf::from(p).join("Subout"))
+            .or_else(|_| std::env::var("ALLUSERSPROFILE"))
+            .map_or_else(
+                |_| PathBuf::from(r"C:\ProgramData\Subout"),
+                |p| PathBuf::from(p).join("Subout"),
+            )
     }
 
     fn default_config_dir(&self, data_dir: &Path) -> PathBuf {
@@ -542,16 +546,14 @@ pub fn filter_conflicting_processes(
         let cmdline = item.command_line.clone();
         let exe_path = item.executable_path.clone();
 
-        let is_subout_instance = cmdline
-            .as_deref()
-            .is_some_and(|c| {
-                let c_lower = c.to_lowercase();
-                c_lower.contains("subout")
-                    || c.contains(&config_path_str)
-                    || c.contains(&config_path_norm)
-                    || c_lower.contains("sing-box.json")
-                    || c_lower.contains("sing-box-running.json")
-            });
+        let is_subout_instance = cmdline.as_deref().is_some_and(|c| {
+            let c_lower = c.to_lowercase();
+            c_lower.contains("subout")
+                || c.contains(&config_path_str)
+                || c.contains(&config_path_norm)
+                || c_lower.contains("sing-box.json")
+                || c_lower.contains("sing-box-running.json")
+        });
 
         if is_subout_instance {
             continue;
@@ -741,9 +743,7 @@ mod tests {
                 process_id: Some(8888),
                 parent_process_id: Some(1),
                 name: Some("sing-box.exe".to_string()),
-                command_line: Some(
-                    r"sing-box.exe run -c C:\etc\sing-box\config.json".to_string(),
-                ),
+                command_line: Some(r"sing-box.exe run -c C:\etc\sing-box\config.json".to_string()),
                 executable_path: Some(r"C:\Program Files\sing-box\sing-box.exe".to_string()),
             },
         ];

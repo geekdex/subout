@@ -339,9 +339,8 @@ pub async fn run_auto_update_process(
         ));
 
         // Save history config and update active config id
-        let new_history_desc = format!(
-            "自动更新配置 (包含已更新策略组和代理节点, 清理超时节点: {deleted_count} 个)"
-        );
+        let new_history_desc =
+            format!("自动更新配置 (包含已更新策略组和代理节点, 清理超时节点: {deleted_count} 个)");
         let new_content_json = serde_json::to_string(&final_config)?;
         {
             let conn_hist = Connection::open(db_path)?;

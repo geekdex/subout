@@ -357,7 +357,7 @@ pub async fn download_and_install_kernel(
 
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(last_speed_time).as_secs_f64();
-        
+
         // 优化：只在 1 秒或以上时计算速度，降低抖动
         // 这样可以避免在 macOS 上网络延迟导致的瞬间波动
         let speed = if elapsed >= 1.0 {
@@ -381,7 +381,7 @@ pub async fn download_and_install_kernel(
         } else {
             0.0
         };
-        
+
         // 只在进度确实增加时更新，避免网络乱序导致的回退
         let progress_to_report = if new_progress >= last_reported_progress {
             last_reported_progress = new_progress;

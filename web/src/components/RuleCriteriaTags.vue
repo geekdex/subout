@@ -150,7 +150,10 @@
             margin: 2px 0;
           "
         >
-          <span class="criteria-tag rule-set-tag" style="margin: 0; font-weight: 600;">
+          <span
+            class="criteria-tag rule-set-tag"
+            style="margin: 0; font-weight: 600"
+          >
             子逻辑: {{ (sub.mode || "or").toUpperCase() }}
           </span>
           <RuleCriteriaTags
