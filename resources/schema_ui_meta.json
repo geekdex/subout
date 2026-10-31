@@ -15,7 +15,6 @@
     "fields": {
       "strategy": { "label": "查询策略", "widget": "select", "default": "ipv4_only" },
       "final": { "label": "默认 DNS 服务器", "widget": "text", "placeholder": "local-dns" },
-      "independent_cache": { "label": "独立缓存", "widget": "switch", "default": true },
       "disable_cache": { "label": "禁用缓存", "widget": "switch", "default": false },
       "reverse_mapping": { "label": "反向映射", "widget": "switch", "default": false }
     },
@@ -42,11 +41,21 @@
     "fields": {
       "final": { "label": "默认出站", "widget": "text", "placeholder": "direct", "required": true },
       "auto_detect_interface": { "label": "自动检测接口", "widget": "switch", "default": true },
-      "default_domain_resolver": { "label": "默认域名解析器", "widget": "text", "optional": true }
+      "default_domain_resolver": { "label": "默认域名解析器", "widget": "text", "optional": true },
+      "default_http_client": { "label": "默认 HTTP 客户端", "widget": "text", "placeholder": "direct", "optional": true }
     },
     "complexFields": {
       "rule_set": { "type": "array", "label": "规则集" },
       "rules": { "type": "array", "label": "路由规则" }
+    }
+  },
+  "http_clients": {
+    "title": "HTTP 客户端",
+    "icon": "🌐",
+    "type": "array",
+    "itemFields": {
+      "tag": { "label": "客户端标签", "widget": "text", "required": true },
+      "detour": { "label": "底层出站代理", "widget": "select", "required": true }
     }
   },
   "experimental": {

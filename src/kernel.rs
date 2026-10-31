@@ -50,6 +50,13 @@ pub fn get_supported_targets() -> Vec<KernelTarget> {
             binary_name: "sing-box",
         },
         KernelTarget {
+            os: "linux",
+            arch: "armv7",
+            archive_type: "tar.gz",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-armv7.tar.gz",
+            binary_name: "sing-box",
+        },
+        KernelTarget {
             os: "darwin",
             arch: "amd64",
             archive_type: "tar.gz",
@@ -80,6 +87,7 @@ pub fn detect_current_target() -> Option<KernelTarget> {
     let arch = match raw_arch {
         "x86_64" | "amd64" => "amd64",
         "aarch64" | "arm64" => "arm64",
+        "arm" | "armv7" | "armv7l" => "armv7",
         _ => return None,
     };
 
@@ -349,7 +357,7 @@ pub async fn download_and_install_kernel(
 
         let now = std::time::Instant::now();
         let elapsed = now.duration_since(last_speed_time).as_secs_f64();
-        
+
         // 优化：只在 1 秒或以上时计算速度，降低抖动
         // 这样可以避免在 macOS 上网络延迟导致的瞬间波动
         let speed = if elapsed >= 1.0 {
@@ -373,7 +381,7 @@ pub async fn download_and_install_kernel(
         } else {
             0.0
         };
-        
+
         // 只在进度确实增加时更新，避免网络乱序导致的回退
         let progress_to_report = if new_progress >= last_reported_progress {
             last_reported_progress = new_progress;
@@ -451,7 +459,7 @@ mod tests {
     #[test]
     fn test_supported_targets_count_and_urls() {
         let targets = get_supported_targets();
-        assert_eq!(targets.len(), 6);
+        assert_eq!(targets.len(), 7);
 
         let win_amd64 = targets
             .iter()
@@ -472,6 +480,16 @@ mod tests {
             "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-amd64.tar.gz"
         );
         assert_eq!(linux_amd64.binary_name, "sing-box");
+
+        let linux_armv7 = targets
+            .iter()
+            .find(|t| t.os == "linux" && t.arch == "armv7")
+            .unwrap();
+        assert_eq!(
+            linux_armv7.url,
+            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-armv7.tar.gz"
+        );
+        assert_eq!(linux_armv7.binary_name, "sing-box");
 
         let darwin_arm64 = targets
             .iter()

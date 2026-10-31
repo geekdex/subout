@@ -79,10 +79,7 @@ pub async fn add_custom_node(
         payload.port,
         &payload.raw_json,
     ) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("节点校验失败: {err_msg}"),
-        ));
+        return Err((StatusCode::BAD_REQUEST, format!("节点校验失败: {err_msg}")));
     }
 
     db::save_node(
@@ -157,10 +154,7 @@ pub async fn update_node(
         &payload.raw_json,
     ) {
         if let Err(err_msg) = validate_node_json(tag, node_type, server, port, raw_json) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!("节点校验失败: {err_msg}"),
-            ));
+            return Err((StatusCode::BAD_REQUEST, format!("节点校验失败: {err_msg}")));
         }
 
         let old_node = db::get_node_by_id(&conn, id).ok().flatten();
@@ -333,8 +327,7 @@ pub fn diff_json(old_val: &Value, new_val: &Value) -> String {
                         if (!old_field_val.is_object() && !old_field_val.is_array())
                             && (!val.is_object() && !val.is_array())
                         {
-                            changes
-                                .push(format!("修改字段 '{key}' ({old_field_val} → {val})"));
+                            changes.push(format!("修改字段 '{key}' ({old_field_val} → {val})"));
                         } else {
                             changes.push(format!("更新字段 '{key}' 内容"));
                         }
@@ -705,8 +698,8 @@ pub async fn get_speed_test_summary(
 ) -> Result<Json<db::SpeedTestSummary>, StatusCode> {
     check_auth(&state, &headers).await?;
     let conn = get_db_conn(&state.db_path)?;
-    let summary = db::get_nodes_speed_summary(&conn)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let summary =
+        db::get_nodes_speed_summary(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(summary))
 }
 
@@ -899,4 +892,3 @@ mod tests {
         assert!(res.is_err());
     }
 }
-

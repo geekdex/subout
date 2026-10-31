@@ -35,15 +35,24 @@
     <div class="view-body">
       <div class="panel fill-height">
         <!-- Speed Test Summary Banner -->
-        <div
-          v-if="pingModal.isTesting"
-          class="speed-test-banner is-testing"
-        >
+        <div v-if="pingModal.isTesting" class="speed-test-banner is-testing">
           <div class="banner-left">
             <span class="ping-dot"></span>
-            <span>正在执行节点测速 ({{ pingModal.progress }} / {{ pingModal.total }})</span>
-            <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #22d3ee; margin-left: 0.25rem">
-              {{ Math.round((pingModal.progress / (pingModal.total || 1)) * 100) }}%
+            <span
+              >正在执行节点测速 ({{ pingModal.progress }} /
+              {{ pingModal.total }})</span
+            >
+            <span
+              class="badge"
+              style="
+                background: rgba(6, 182, 212, 0.2);
+                color: #22d3ee;
+                margin-left: 0.25rem;
+              "
+            >
+              {{
+                Math.round((pingModal.progress / (pingModal.total || 1)) * 100)
+              }}%
             </span>
           </div>
           <button
@@ -66,16 +75,31 @@
               共测 <strong>{{ lastSpeedTestSummary.total }}</strong> 个
             </span>
             <span class="banner-stat">
-              可用 <strong style="color: var(--success)">{{ lastSpeedTestSummary.successCount }}</strong> 个 ({{ lastSpeedTestSummary.successRate }}%)
+              可用
+              <strong style="color: var(--success)">{{
+                lastSpeedTestSummary.successCount
+              }}</strong>
+              个 ({{ lastSpeedTestSummary.successRate }}%)
             </span>
-            <span v-if="lastSpeedTestSummary.failedCount > 0" class="banner-stat">
-              超时 <strong style="color: var(--danger)">{{ lastSpeedTestSummary.failedCount }}</strong> 个
+            <span
+              v-if="lastSpeedTestSummary.failedCount > 0"
+              class="banner-stat"
+            >
+              超时
+              <strong style="color: var(--danger)">{{
+                lastSpeedTestSummary.failedCount
+              }}</strong>
+              个
             </span>
             <span v-if="lastSpeedTestSummary.avgLatency" class="banner-stat">
               平均延迟 <strong>{{ lastSpeedTestSummary.avgLatency }} ms</strong>
             </span>
             <span v-if="lastSpeedTestSummary.fastest" class="banner-stat">
-              最优: <strong>{{ lastSpeedTestSummary.fastest.tag }}</strong> ({{ lastSpeedTestSummary.fastest.latency || lastSpeedTestSummary.fastest.effectiveLatency }} ms)
+              最优: <strong>{{ lastSpeedTestSummary.fastest.tag }}</strong> ({{
+                lastSpeedTestSummary.fastest.latency ||
+                lastSpeedTestSummary.fastest.effectiveLatency
+              }}
+              ms)
             </span>
           </div>
           <div class="banner-actions">
@@ -1233,8 +1257,19 @@
             >
               <span>⚙️ 测速参数设置</span>
               <span style="font-size: 0.8rem; color: var(--text-muted)">
-                {{ pingModal.testRange === "selected" ? ("已选 " + selectedNodeIds.length + " 个") : "全部节点" }} ·
-                {{ pingModal.testType === "both" ? "TCP + 网页延迟" : pingModal.testType === "web" ? "仅网页延迟" : "仅TCP连通性" }}
+                {{
+                  pingModal.testRange === "selected"
+                    ? "已选 " + selectedNodeIds.length + " 个"
+                    : "全部节点"
+                }}
+                ·
+                {{
+                  pingModal.testType === "both"
+                    ? "TCP + 网页延迟"
+                    : pingModal.testType === "web"
+                      ? "仅网页延迟"
+                      : "仅TCP连通性"
+                }}
               </span>
             </summary>
             <div style="margin-top: 1rem">
@@ -1275,7 +1310,11 @@
                       color: var(--text-color);
                     "
                   >
-                    <input v-model="pingModal.testRange" type="radio" value="all" />
+                    <input
+                      v-model="pingModal.testRange"
+                      type="radio"
+                      value="all"
+                    />
                     所有节点 ({{ totalNodes }})
                   </label>
                 </div>
@@ -1307,8 +1346,15 @@
                   <option value="tcp">TCP 连通性测试 (快速)</option>
                   <option value="web">网页延迟测试 (代理)</option>
                 </select>
-                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem">
-                  ⏱️ 默认超时判定：TCP 握手 2000ms (2s)，网页代理请求 5000ms (5s)。超过该阈值未响应即判定为超时。
+                <div
+                  style="
+                    font-size: 0.8rem;
+                    color: var(--text-muted);
+                    margin-top: 0.35rem;
+                  "
+                >
+                  ⏱️ 默认超时判定：TCP 握手 2000ms (2s)，网页代理请求 5000ms
+                  (5s)。超过该阈值未响应即判定为超时。
                 </div>
               </div>
 
@@ -1431,7 +1477,10 @@
 
           <!-- Progress bar -->
           <div
-            v-if="pingModal.isTesting || (pingModal.total > 0 && pingModal.progress === pingModal.total)"
+            v-if="
+              pingModal.isTesting ||
+              (pingModal.total > 0 && pingModal.progress === pingModal.total)
+            "
             style="margin-bottom: 1.25rem"
           >
             <div
@@ -1448,7 +1497,11 @@
                 {{ pingModal.progress }} / {{ pingModal.total }}
               </span>
               <span>
-                {{ Math.round((pingModal.progress / (pingModal.total || 1)) * 100) }}%
+                {{
+                  Math.round(
+                    (pingModal.progress / (pingModal.total || 1)) * 100,
+                  )
+                }}%
               </span>
             </div>
             <div
@@ -1461,10 +1514,13 @@
             >
               <div
                 :style="{
-                  width: (pingModal.progress / (pingModal.total || 1)) * 100 + '%',
-                  background: pingModal.isTesting ? 'var(--primary)' : 'var(--success)',
+                  width:
+                    (pingModal.progress / (pingModal.total || 1)) * 100 + '%',
+                  background: pingModal.isTesting
+                    ? 'var(--primary)'
+                    : 'var(--success)',
                 }"
-                style="height: 100%; transition: width 0.2s;"
+                style="height: 100%; transition: width 0.2s"
               ></div>
             </div>
           </div>
@@ -1492,55 +1548,109 @@
               @click="pingModal.activeTab = 'logs'"
             >
               📜 运行日志
-              <span v-if="pingModal.isTesting" class="ping-dot" style="margin-left: 0.35rem"></span>
+              <span
+                v-if="pingModal.isTesting"
+                class="ping-dot"
+                style="margin-left: 0.35rem"
+              ></span>
             </button>
           </div>
 
           <!-- TAB 1: Summary Panel -->
-          <div v-if="pingModal.activeTab === 'summary' && pingSummaryStats" class="summary-section">
+          <div
+            v-if="pingModal.activeTab === 'summary' && pingSummaryStats"
+            class="summary-section"
+          >
             <!-- Metric Cards -->
             <div class="metric-cards-grid">
               <div class="metric-card">
                 <div class="metric-label">已测总数</div>
                 <div class="metric-value">{{ pingSummaryStats.total }}</div>
-                <div class="metric-sub">{{ pingModal.testRange === 'selected' ? '已选节点' : '全部节点' }}</div>
+                <div class="metric-sub">
+                  {{
+                    pingModal.testRange === "selected" ? "已选节点" : "全部节点"
+                  }}
+                </div>
               </div>
               <div class="metric-card success">
                 <div class="metric-label">可用节点</div>
-                <div class="metric-value text-success">{{ pingSummaryStats.successCount }}</div>
-                <div class="metric-sub">连通率 {{ pingSummaryStats.successRate }}%</div>
+                <div class="metric-value text-success">
+                  {{ pingSummaryStats.successCount }}
+                </div>
+                <div class="metric-sub">
+                  连通率 {{ pingSummaryStats.successRate }}%
+                </div>
               </div>
               <div class="metric-card danger">
                 <div class="metric-label">超时 / 异常</div>
-                <div class="metric-value" :class="pingSummaryStats.failedCount > 0 ? 'text-danger' : ''">
+                <div
+                  class="metric-value"
+                  :class="pingSummaryStats.failedCount > 0 ? 'text-danger' : ''"
+                >
                   {{ pingSummaryStats.failedCount }}
                 </div>
                 <div class="metric-sub">
-                  {{ pingSummaryStats.failedCount > 0 ? (pingModal.testType === 'tcp' ? '超时 (>2000ms)' : pingModal.testType === 'web' ? '超时 (>5000ms)' : '超时 (>2s/5s)') : '无异常' }}
+                  {{
+                    pingSummaryStats.failedCount > 0
+                      ? pingModal.testType === "tcp"
+                        ? "超时 (>2000ms)"
+                        : pingModal.testType === "web"
+                          ? "超时 (>5000ms)"
+                          : "超时 (>2s/5s)"
+                      : "无异常"
+                  }}
                 </div>
               </div>
               <div class="metric-card info">
                 <div class="metric-label">平均延迟</div>
                 <div class="metric-value text-info">
-                  {{ pingSummaryStats.avgLatency ? pingSummaryStats.avgLatency + ' ms' : '--' }}
+                  {{
+                    pingSummaryStats.avgLatency
+                      ? pingSummaryStats.avgLatency + " ms"
+                      : "--"
+                  }}
                 </div>
-                <div class="metric-sub">{{ pingModal.testType === 'web' ? '真实网页' : '综合探测' }}</div>
+                <div class="metric-sub">
+                  {{ pingModal.testType === "web" ? "真实网页" : "综合探测" }}
+                </div>
               </div>
               <div class="metric-card primary">
                 <div class="metric-label">最优节点</div>
                 <div
                   class="metric-value text-primary"
-                  style="font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                  :title="pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : ''"
+                  style="
+                    font-size: 1rem;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                  "
+                  :title="
+                    pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : ''
+                  "
                 >
-                  {{ pingSummaryStats.fastest ? (pingSummaryStats.fastest.latency || pingSummaryStats.fastest.effectiveLatency) + ' ms' : '--' }}
+                  {{
+                    pingSummaryStats.fastest
+                      ? (pingSummaryStats.fastest.latency ||
+                          pingSummaryStats.fastest.effectiveLatency) + " ms"
+                      : "--"
+                  }}
                 </div>
                 <div
                   class="metric-sub"
-                  style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                  :title="pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : ''"
+                  style="
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                  "
+                  :title="
+                    pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : ''
+                  "
                 >
-                  {{ pingSummaryStats.fastest ? pingSummaryStats.fastest.tag : '暂无数据' }}
+                  {{
+                    pingSummaryStats.fastest
+                      ? pingSummaryStats.fastest.tag
+                      : "暂无数据"
+                  }}
                 </div>
               </div>
             </div>
@@ -1551,25 +1661,45 @@
                 <div
                   v-if="pingSummaryStats.tiers.fast > 0"
                   class="dist-seg seg-fast"
-                  :style="{ width: (pingSummaryStats.tiers.fast / pingSummaryStats.total) * 100 + '%' }"
+                  :style="{
+                    width:
+                      (pingSummaryStats.tiers.fast / pingSummaryStats.total) *
+                        100 +
+                      '%',
+                  }"
                   :title="`极速: ${pingSummaryStats.tiers.fast} 个`"
                 ></div>
                 <div
                   v-if="pingSummaryStats.tiers.medium > 0"
                   class="dist-seg seg-medium"
-                  :style="{ width: (pingSummaryStats.tiers.medium / pingSummaryStats.total) * 100 + '%' }"
+                  :style="{
+                    width:
+                      (pingSummaryStats.tiers.medium / pingSummaryStats.total) *
+                        100 +
+                      '%',
+                  }"
                   :title="`良好: ${pingSummaryStats.tiers.medium} 个`"
                 ></div>
                 <div
                   v-if="pingSummaryStats.tiers.slow > 0"
                   class="dist-seg seg-slow"
-                  :style="{ width: (pingSummaryStats.tiers.slow / pingSummaryStats.total) * 100 + '%' }"
+                  :style="{
+                    width:
+                      (pingSummaryStats.tiers.slow / pingSummaryStats.total) *
+                        100 +
+                      '%',
+                  }"
                   :title="`较慢: ${pingSummaryStats.tiers.slow} 个`"
                 ></div>
                 <div
                   v-if="pingSummaryStats.tiers.failed > 0"
                   class="dist-seg seg-failed"
-                  :style="{ width: (pingSummaryStats.tiers.failed / pingSummaryStats.total) * 100 + '%' }"
+                  :style="{
+                    width:
+                      (pingSummaryStats.tiers.failed / pingSummaryStats.total) *
+                        100 +
+                      '%',
+                  }"
                   :title="`超时: ${pingSummaryStats.tiers.failed} 个`"
                 ></div>
               </div>
@@ -1612,7 +1742,11 @@
                   type="button"
                   class="tier-chip chip-slow"
                   :class="{ active: pingModal.filterTier === 'slow' }"
-                  :title="pingModal.testType === 'tcp' ? '延迟 300~2000ms' : '延迟 300~5000ms'"
+                  :title="
+                    pingModal.testType === 'tcp'
+                      ? '延迟 300~2000ms'
+                      : '延迟 300~5000ms'
+                  "
                   @click="pingModal.filterTier = 'slow'"
                 >
                   🐢 较慢 (300ms~超时) ({{ pingSummaryStats.tiers.slow }})
@@ -1621,10 +1755,22 @@
                   type="button"
                   class="tier-chip chip-failed"
                   :class="{ active: pingModal.filterTier === 'failed' }"
-                  :title="pingModal.testType === 'tcp' ? 'TCP 握手超时 (>2000ms)' : pingModal.testType === 'web' ? '网页测速超时 (>5000ms)' : '探测超时 (TCP>2000ms / Web>5000ms)'"
+                  :title="
+                    pingModal.testType === 'tcp'
+                      ? 'TCP 握手超时 (>2000ms)'
+                      : pingModal.testType === 'web'
+                        ? '网页测速超时 (>5000ms)'
+                        : '探测超时 (TCP>2000ms / Web>5000ms)'
+                  "
                   @click="pingModal.filterTier = 'failed'"
                 >
-                  ❌ 超时 ({{ pingModal.testType === 'tcp' ? '>2s' : pingModal.testType === 'web' ? '>5s' : '>2s/5s' }}) ({{ pingSummaryStats.tiers.failed }})
+                  ❌ 超时 ({{
+                    pingModal.testType === "tcp"
+                      ? ">2s"
+                      : pingModal.testType === "web"
+                        ? ">5s"
+                        : ">2s/5s"
+                  }}) ({{ pingSummaryStats.tiers.failed }})
                 </button>
               </div>
             </div>
@@ -1638,9 +1784,18 @@
                 title="勾选所有超时节点，关闭弹窗后可批量删除或禁用"
                 @click="batchSelectFailedNodes"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
                   <polyline points="9 11 12 14 22 4" />
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                  <path
+                    d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+                  />
                 </svg>
                 勾选超时节点 ({{ pingSummaryStats.failedCount }})
               </button>
@@ -1651,10 +1806,19 @@
                 title="仅重新测试未通过/超时的节点"
                 @click="retryFailedNodes"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
                   <path d="M23 4v6h-6" />
                   <path d="M1 20v-6h6" />
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  <path
+                    d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+                  />
                 </svg>
                 仅重测超时节点 ({{ pingSummaryStats.failedCount }})
               </button>
@@ -1664,9 +1828,18 @@
                 title="复制测速报告文本到剪贴板"
                 @click="copySpeedTestReport"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  <path
+                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                  />
                 </svg>
                 复制测速报告
               </button>
@@ -1676,7 +1849,14 @@
                 title="导出 CSV 格式测速结果"
                 @click="exportSpeedTestCsv"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
@@ -1696,12 +1876,18 @@
             <!-- Ranked Results Table -->
             <div class="ranked-results-section">
               <div class="ranked-header">
-                <span style="font-weight: 500; font-size: 0.9rem">节点排行列表 ({{ filteredPingResults.length }})</span>
+                <span style="font-weight: 500; font-size: 0.9rem"
+                  >节点排行列表 ({{ filteredPingResults.length }})</span
+                >
                 <input
                   v-model="pingModal.searchQuery"
                   type="text"
                   class="input-control"
-                  style="padding: 0.25rem 0.6rem; font-size: 0.8rem; width: 170px"
+                  style="
+                    padding: 0.25rem 0.6rem;
+                    font-size: 0.8rem;
+                    width: 170px;
+                  "
                   placeholder="搜索节点名称/地址..."
                 />
               </div>
@@ -1719,22 +1905,54 @@
                   </thead>
                   <tbody>
                     <tr v-if="filteredPingResults.length === 0">
-                      <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1rem">
+                      <td
+                        colspan="6"
+                        style="
+                          text-align: center;
+                          color: var(--text-muted);
+                          padding: 1rem;
+                        "
+                      >
                         暂无符合条件的测速结果
                       </td>
                     </tr>
                     <tr v-for="(res, idx) in filteredPingResults" :key="res.id">
-                      <td style="text-align: center; font-family: var(--font-mono); font-size: 0.85rem">
-                        <span v-if="idx === 0 && res.effectiveLatency !== null" style="color: #f59e0b">🥇</span>
-                        <span v-else-if="idx === 1 && res.effectiveLatency !== null" style="color: #94a3b8">🥈</span>
-                        <span v-else-if="idx === 2 && res.effectiveLatency !== null" style="color: #b45309">🥉</span>
+                      <td
+                        style="
+                          text-align: center;
+                          font-family: var(--font-mono);
+                          font-size: 0.85rem;
+                        "
+                      >
+                        <span
+                          v-if="idx === 0 && res.effectiveLatency !== null"
+                          style="color: #f59e0b"
+                          >🥇</span
+                        >
+                        <span
+                          v-else-if="idx === 1 && res.effectiveLatency !== null"
+                          style="color: #94a3b8"
+                          >🥈</span
+                        >
+                        <span
+                          v-else-if="idx === 2 && res.effectiveLatency !== null"
+                          style="color: #b45309"
+                          >🥉</span
+                        >
                         <span v-else>#{{ idx + 1 }}</span>
                       </td>
                       <td>
                         <strong>{{ res.tag }}</strong>
                       </td>
                       <td>
-                        <span class="badge" style="font-size: 0.75rem; background: rgba(99, 102, 241, 0.15); color: var(--primary);">
+                        <span
+                          class="badge"
+                          style="
+                            font-size: 0.75rem;
+                            background: rgba(99, 102, 241, 0.15);
+                            color: var(--primary);
+                          "
+                        >
                           {{ res.node_type }}
                         </span>
                       </td>
@@ -1754,7 +1972,11 @@
                         >
                           超时 (&gt;2s)
                         </span>
-                        <span v-else style="color: var(--text-muted); font-size: 0.75rem">-</span>
+                        <span
+                          v-else
+                          style="color: var(--text-muted); font-size: 0.75rem"
+                          >-</span
+                        >
                       </td>
                       <td>
                         <span
@@ -1772,15 +1994,35 @@
                         >
                           超时 (&gt;5s)
                         </span>
-                        <span v-else style="color: var(--text-muted); font-size: 0.75rem">-</span>
+                        <span
+                          v-else
+                          style="color: var(--text-muted); font-size: 0.75rem"
+                          >-</span
+                        >
                       </td>
                       <td style="text-align: center">
                         <span
                           class="badge"
-                          :class="res.status === 'fast' ? 'badge-success' : res.status === 'medium' ? 'badge-info' : res.status === 'slow' ? 'badge-warning' : 'badge-danger'"
+                          :class="
+                            res.status === 'fast'
+                              ? 'badge-success'
+                              : res.status === 'medium'
+                                ? 'badge-info'
+                                : res.status === 'slow'
+                                  ? 'badge-warning'
+                                  : 'badge-danger'
+                          "
                           style="font-size: 0.75rem"
                         >
-                          {{ res.status === 'fast' ? '极速' : res.status === 'medium' ? '良好' : res.status === 'slow' ? '较慢' : '超时' }}
+                          {{
+                            res.status === "fast"
+                              ? "极速"
+                              : res.status === "medium"
+                                ? "良好"
+                                : res.status === "slow"
+                                  ? "较慢"
+                                  : "超时"
+                          }}
                         </span>
                       </td>
                     </tr>
@@ -1791,8 +2033,21 @@
           </div>
 
           <!-- TAB 2: Logs Output Console -->
-          <div v-show="pingModal.activeTab === 'logs' || (!pingSummaryStats && pingModal.logs.length > 0)" style="margin-top: 1rem">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem">
+          <div
+            v-show="
+              pingModal.activeTab === 'logs' ||
+              (!pingSummaryStats && pingModal.logs.length > 0)
+            "
+            style="margin-top: 1rem"
+          >
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 0.5rem;
+              "
+            >
               <label
                 style="
                   display: block;
@@ -2843,16 +3098,10 @@ const pingSummaryStats = computed(() => {
       totalLatency += item.effectiveLatency;
 
       const currLat = item.effectiveLatency;
-      if (
-        !fastest ||
-        currLat < (fastest.latency || fastest.effectiveLatency)
-      ) {
+      if (!fastest || currLat < (fastest.latency || fastest.effectiveLatency)) {
         fastest = item;
       }
-      if (
-        !slowest ||
-        currLat > (slowest.latency || slowest.effectiveLatency)
-      ) {
+      if (!slowest || currLat > (slowest.latency || slowest.effectiveLatency)) {
         slowest = item;
       }
 
@@ -3097,10 +3346,7 @@ const exportSpeedTestCsv = () => {
   const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const timestamp = new Date()
-    .toISOString()
-    .replace(/[-:T]/g, "")
-    .slice(0, 14);
+  const timestamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
   a.href = url;
   a.download = `subout_speedtest_${timestamp}.csv`;
   document.body.appendChild(a);
@@ -3925,4 +4171,3 @@ onMounted(() => {
   color: var(--danger);
 }
 </style>
-

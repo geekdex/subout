@@ -157,8 +157,8 @@
             v-else-if="hasDownloadError && !isDownloading"
             class="btn btn-sm btn-secondary"
             style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
-            @click="refreshStatusCheck"
             title="手动检测内核状态，可修复僵尸状态"
+            @click="refreshStatusCheck"
           >
             🔄 重新检测
           </button>
@@ -273,7 +273,7 @@ const pollStatus = async () => {
     if (!res.ok) return;
 
     const statusData = await res.json();
-    
+
     // 优化 1: 进度条单调性保证 - 进度永不后退
     if (statusData.progress !== undefined) {
       statusData.progress = Math.max(lastProgress, statusData.progress);
@@ -291,7 +291,10 @@ const pollStatus = async () => {
       stopPolling();
       lastProgress = 0;
       verificationAttempts = 0;
-    } else if (statusData.status === "downloading" || statusData.status === "extracting") {
+    } else if (
+      statusData.status === "downloading" ||
+      statusData.status === "extracting"
+    ) {
       // 重置完成状态的重试计数
       verificationAttempts = 0;
     }
@@ -329,7 +332,10 @@ const verifyAndCompleteDownload = async () => {
         lastProgress = 0;
       } else {
         // 内核还未安装，继续等待
-        kernelInfo.value.download_status = { status: "extracting", progress: 100 };
+        kernelInfo.value.download_status = {
+          status: "extracting",
+          progress: 100,
+        };
         // 继续轮询验证
         startPolling();
       }

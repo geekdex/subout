@@ -784,11 +784,7 @@
       </div>
 
       <div
-        style="
-          margin-top: 0.5rem;
-          font-size: 0.8rem;
-          color: var(--text-muted);
-        "
+        style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted)"
       >
         💡 提示：核心将严格根据配置级别进行日志记录；生效后可在「<a
           href="#serviceLogs"

@@ -78,10 +78,17 @@ pub async fn save_simple_config(
         .get("experimental")
         .cloned()
         .unwrap_or(serde_json::json!({}));
+    let http_clients = generated.get("http_clients");
 
-    if let Err(err_msg) =
-        validate_config_with_singbox(&log, &dns, &inbounds, &outbounds, &route, &experimental)
-    {
+    if let Err(err_msg) = validate_config_with_singbox(
+        &log,
+        &dns,
+        &inbounds,
+        &outbounds,
+        &route,
+        &experimental,
+        http_clients,
+    ) {
         return Err((
             StatusCode::BAD_REQUEST,
             format!("配置校验未通过: {err_msg}"),

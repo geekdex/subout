@@ -529,6 +529,13 @@
           </div>
           <div
             class="tab"
+            :class="{ active: activeSection === 'http_clients' }"
+            @click="activeSection = 'http_clients'"
+          >
+            HTTP 客户端
+          </div>
+          <div
+            class="tab"
             :class="{ active: activeSection === 'experimental' }"
             @click="activeSection = 'experimental'"
           >
@@ -735,6 +742,7 @@
                                 <option value="http">http</option>
                                 <option value="tproxy">tproxy</option>
                                 <option value="redirect">redirect</option>
+                                <option value="direct">direct</option>
                               </select>
                             </td>
                             <td>
@@ -789,6 +797,65 @@
                                     <option value="mixed">mixed</option>
                                     <option value="system">system</option>
                                   </select>
+                                </div>
+                                <div
+                                  style="
+                                    display: flex;
+                                    gap: 0.5rem;
+                                    align-items: center;
+                                  "
+                                >
+                                  <span
+                                    style="
+                                      width: 60px;
+                                      color: var(--text-muted);
+                                      flex-shrink: 0;
+                                      text-align: right;
+                                    "
+                                    >IP 网段:</span
+                                  >
+                                  <input
+                                    v-model="inb._table_address"
+                                    type="text"
+                                    class="input-control table-input"
+                                    style="
+                                      flex: 1;
+                                      min-width: 80px;
+                                      padding: 0.15rem 0.3rem;
+                                    "
+                                    placeholder="默认 (点击右侧按钮填入推荐)"
+                                    @input="onTableInboundAddressChange(inb)"
+                                  />
+                                  <button
+                                    type="button"
+                                    class="btn btn-secondary table-btn"
+                                    style="
+                                      padding: 0.15rem 0.4rem;
+                                      font-size: 0.75rem;
+                                      white-space: nowrap;
+                                    "
+                                    title="一键填入推荐 IPv4 地址 (172.19.0.1/30)"
+                                    @click="
+                                      applyTableRecommendedIp(inb, 'ipv4')
+                                    "
+                                  >
+                                    IPv4
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="btn btn-secondary table-btn"
+                                    style="
+                                      padding: 0.15rem 0.4rem;
+                                      font-size: 0.75rem;
+                                      white-space: nowrap;
+                                    "
+                                    title="一键填入推荐双栈地址 (172.19.0.1/30, fd00::1/126)"
+                                    @click="
+                                      applyTableRecommendedIp(inb, 'dual')
+                                    "
+                                  >
+                                    双栈
+                                  </button>
                                 </div>
                                 <div
                                   style="
@@ -883,8 +950,31 @@
                                   type="text"
                                   class="input-control table-input"
                                   style="flex: 1; min-width: 80px"
-                                  placeholder="监听地址"
+                                  :placeholder="primaryLanIp || '监听地址'"
+                                  :title="
+                                    primaryLanIp
+                                      ? '建议绑定内网 IP (如 ' +
+                                        primaryLanIp +
+                                        ') 或 :: 全网卡'
+                                      : '监听地址'
+                                  "
                                 />
+                                <button
+                                  v-if="
+                                    primaryLanIp && inb.listen !== primaryLanIp
+                                  "
+                                  type="button"
+                                  class="btn btn-secondary table-btn"
+                                  style="
+                                    padding: 0.1rem 0.4rem;
+                                    font-size: 0.72rem;
+                                    white-space: nowrap;
+                                  "
+                                  title="一键填入推荐内网 IP"
+                                  @click="inb.listen = primaryLanIp"
+                                >
+                                  填入IP
+                                </button>
                                 <input
                                   v-model.number="inb.listen_port"
                                   type="number"
@@ -1646,12 +1736,145 @@
                   <RouteEditor
                     :config-data="configData"
                     :all-outbound-tags="allOutboundTags"
+                    :all-http-client-tags="allHttpClientTags"
                     :duplicate-route-rules-info="duplicateRouteRulesInfo"
                     :edit-item="editItem"
                     :duplicate-check-fn="hasDuplicateInField"
                     @sync-rule="openSyncModal"
                     @open-domain-wizard="openDomainWizard"
+                    @switch-tab="activeSection = $event"
                   />
+                </div>
+
+                <!-- HTTP_CLIENTS VISUAL -->
+                <div v-if="section === 'http_clients'">
+                  <div class="visual-section-box">
+                    <div class="flex justify-between items-center mb-2">
+                      <div>
+                        <span class="visual-section-title"
+                          >HTTP 客户端列表 (http_clients)</span
+                        >
+                        <p
+                          style="
+                            margin: 4px 0 0 0;
+                            font-size: 0.825rem;
+                            color: var(--text-muted);
+                          "
+                        >
+                          sing-box 1.14+ 核心架构：用于远端规则集 (rule_set)
+                          下载等网络出站的 HTTP 客户端实例集合。
+                        </p>
+                      </div>
+                      <button
+                        class="btn btn-secondary"
+                        style="padding: 0.3rem 0.6rem; font-size: 0.8rem"
+                        @click="addHttpClient"
+                      >
+                        + 添加客户端
+                      </button>
+                    </div>
+                    <div class="table-container">
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th style="width: 35%">客户端 Tag</th>
+                            <th style="width: 45%">底层出站代理 (Detour)</th>
+                            <th style="text-align: right; width: 140px">
+                              操作
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr
+                            v-for="(hc, idx) in configData.http_clients"
+                            :key="idx"
+                          >
+                            <td>
+                              <input
+                                v-model="hc.tag"
+                                type="text"
+                                class="input-control table-input"
+                                style="font-weight: 600"
+                                placeholder="direct"
+                              />
+                            </td>
+                            <td>
+                              <select
+                                v-model="hc.detour"
+                                class="input-control table-input"
+                              >
+                                <option value="">(空 / 默认直连)</option>
+                                <option
+                                  v-if="
+                                    hc.detour &&
+                                    !allOutboundTags
+                                      .filter((t) => t !== 'direct')
+                                      .includes(hc.detour)
+                                  "
+                                  :value="hc.detour"
+                                >
+                                  {{ hc.detour }}
+                                  {{
+                                    hc.detour === "direct"
+                                      ? "(空直连无需设置 Detour，已自动兼容)"
+                                      : "(当前值)"
+                                  }}
+                                </option>
+                                <option
+                                  v-for="outTag in allOutboundTags.filter(
+                                    (t) => t !== 'direct',
+                                  )"
+                                  :key="outTag"
+                                  :value="outTag"
+                                >
+                                  {{ outTag }}
+                                </option>
+                              </select>
+                            </td>
+                            <td style="text-align: right">
+                              <div
+                                class="flex gap-2"
+                                style="justify-content: flex-end"
+                              >
+                                <button
+                                  class="btn btn-secondary table-btn"
+                                  title="弹窗编辑"
+                                  @click="editHttpClient(hc, idx)"
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  class="btn btn-danger table-btn"
+                                  title="删除"
+                                  @click="deleteHttpClient(idx)"
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          <tr
+                            v-if="
+                              !configData.http_clients ||
+                              configData.http_clients.length === 0
+                            "
+                          >
+                            <td
+                              colspan="3"
+                              style="
+                                text-align: center;
+                                color: var(--text-muted);
+                                padding: 2rem;
+                              "
+                            >
+                              暂无 HTTP 客户端配置。点击上方「+
+                              添加客户端」创建（建议配置 direct 和 proxy）。
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- EXPERIMENTAL VISUAL -->
@@ -2060,21 +2283,6 @@
             <div v-if="itemModal.itemType === 'dns_rule'">
               <div class="grid-2" style="margin-bottom: 1rem">
                 <div class="input-group">
-                  <label>规则匹配逻辑 (Rule Logic)</label>
-                  <select
-                    v-model="itemModal.routeRuleLogic"
-                    class="input-control"
-                  >
-                    <option value="or">
-                      逻辑或 OR (满足下方任意非空条件即可 - 建议默认)
-                    </option>
-                    <option value="standard">
-                      默认 AND 逻辑 (需同时满足下方所有非空条件)
-                    </option>
-                    <option value="and">逻辑与 AND (仅用于特殊嵌套逻辑)</option>
-                  </select>
-                </div>
-                <div class="input-group">
                   <label>目标 DNS 服务器 Tag (server)</label>
                   <select
                     v-model="itemModal.itemData.server"
@@ -2100,6 +2308,38 @@
                       {{ srv.tag }}
                     </option>
                   </select>
+                </div>
+                <div class="input-group">
+                  <label>规则配置模式</label>
+                  <div
+                    class="rule-mode-toggle"
+                    style="display: flex; gap: 0.5rem; margin-top: 0.25rem"
+                  >
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :class="
+                        itemModal.ruleType === 'logical'
+                          ? 'btn-primary'
+                          : 'btn-secondary'
+                      "
+                      @click="switchDnsRuleType('logical')"
+                    >
+                      🌲 逻辑嵌套规则 (AND / OR 树形)
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      :class="
+                        itemModal.ruleType === 'standard'
+                          ? 'btn-primary'
+                          : 'btn-secondary'
+                      "
+                      @click="switchDnsRuleType('standard')"
+                    >
+                      📄 标准单一规则
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2135,8 +2375,62 @@
                 </div>
               </div>
 
-              <!-- Coexisting condition fields -->
-              <div style="display: flex; flex-direction: column; gap: 1rem">
+              <!-- A. Logical Tree Mode -->
+              <div
+                v-if="itemModal.ruleType === 'logical'"
+                style="margin-top: 0.75rem"
+              >
+                <RuleTreeEditor v-model="itemModal.itemData" rule-type="dns" />
+              </div>
+
+              <!-- B. Standard Rule Mode -->
+              <div
+                v-else
+                style="display: flex; flex-direction: column; gap: 1rem"
+              >
+                <!-- query_type -->
+                <div class="input-group">
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      margin-bottom: 0.35rem;
+                      flex-wrap: wrap;
+                      gap: 0.4rem;
+                    "
+                  >
+                    <label style="margin-bottom: 0"
+                      >DNS 查询类型 (query_type, 每行一例)</label
+                    >
+                    <div style="display: flex; gap: 0.25rem; flex-wrap: wrap">
+                      <button
+                        v-for="qt in [
+                          'A',
+                          'AAAA',
+                          'CNAME',
+                          'HTTPS',
+                          'TXT',
+                          'PTR',
+                        ]"
+                        :key="qt"
+                        type="button"
+                        class="btn btn-xs btn-secondary"
+                        style="padding: 0.1rem 0.35rem; font-size: 0.72rem"
+                        @click="appendDnsQueryType(qt)"
+                      >
+                        + {{ qt }}
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    v-model="itemModal.tempFields.query_type"
+                    class="input-control"
+                    style="height: 60px"
+                    placeholder="A&#10;AAAA&#10;HTTPS"
+                  ></textarea>
+                </div>
+
                 <div class="input-group">
                   <label>规则集列表 (rule_set, 每行一例)</label>
                   <textarea
@@ -2388,6 +2682,7 @@
                     <option value="http">http</option>
                     <option value="tproxy">tproxy</option>
                     <option value="redirect">redirect</option>
+                    <option value="direct">direct</option>
                   </select>
                 </div>
               </div>
@@ -2397,14 +2692,94 @@
                 style="margin-top: 1rem"
               >
                 <div class="input-group">
-                  <label>监听地址</label>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      flex-wrap: wrap;
+                      gap: 0.4rem;
+                      margin-bottom: 0.4rem;
+                    "
+                  >
+                    <label style="margin-bottom: 0; font-weight: 500"
+                      >监听地址 (listen)</label
+                    >
+                    <div
+                      style="
+                        display: flex;
+                        gap: 0.35rem;
+                        align-items: center;
+                        flex-wrap: wrap;
+                      "
+                    >
+                      <button
+                        v-if="primaryLanIp"
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.15rem 0.5rem; font-size: 0.75rem"
+                        :title="
+                          '绑定本机推荐局域网 IP (' +
+                          primaryLanIp +
+                          ')，避免 Linux 53 端口冲突并允许局域网设备访问'
+                        "
+                        @click="itemModal.itemData.listen = primaryLanIp"
+                      >
+                        🏠 推荐内网 IP ({{ primaryLanIp }})
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.15rem 0.45rem; font-size: 0.75rem"
+                        title="监听所有 IPv4 与 IPv6 网络接口 (::)"
+                        @click="itemModal.itemData.listen = '::'"
+                      >
+                        🌐 全网卡 (::)
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.15rem 0.45rem; font-size: 0.75rem"
+                        title="仅限本机回路访问 (127.0.0.1)"
+                        @click="itemModal.itemData.listen = '127.0.0.1'"
+                      >
+                        🔒 本地 (127.0.0.1)
+                      </button>
+                    </div>
+                  </div>
                   <input
                     v-model="itemModal.itemData.listen"
                     type="text"
                     class="input-control"
-                    placeholder="::"
+                    :placeholder="primaryLanIp || '::'"
                     required
                   />
+                  <div
+                    v-if="systemLanIps.length > 1"
+                    style="
+                      display: flex;
+                      gap: 0.3rem;
+                      margin-top: 0.35rem;
+                      align-items: center;
+                      flex-wrap: wrap;
+                      font-size: 0.75rem;
+                      color: var(--text-muted);
+                    "
+                  >
+                    <span>其他可用网卡 IP:</span>
+                    <button
+                      v-for="ip in systemLanIps.filter(
+                        (i) => i !== primaryLanIp,
+                      )"
+                      :key="ip"
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      style="padding: 0.1rem 0.4rem; font-size: 0.75rem"
+                      @click="itemModal.itemData.listen = ip"
+                    >
+                      {{ ip }}
+                    </button>
+                  </div>
                 </div>
                 <div class="input-group">
                   <label>监听端口</label>
@@ -2487,6 +2862,74 @@
                       placeholder="9000"
                     />
                   </div>
+                </div>
+                <div class="input-group" style="margin-top: 1rem">
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      flex-wrap: wrap;
+                      gap: 0.5rem;
+                      margin-bottom: 0.4rem;
+                    "
+                  >
+                    <label style="margin-bottom: 0; font-weight: 500">
+                      虚拟网卡 IP 地址 / 网段 (address)
+                    </label>
+                    <div
+                      style="display: flex; gap: 0.4rem; align-items: center"
+                    >
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
+                        title="填入最通用的 IPv4 推荐地址，兼容性最佳（避免 Linux 禁用 IPv6 时启动报错）"
+                        @click="applyRecommendedInboundIp('ipv4')"
+                      >
+                        ⚡ 推荐 IPv4 (172.19.0.1/30)
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
+                        title="填入 IPv4 + IPv6 双栈推荐地址，适合启用 IPv6 并需防泄漏的网络"
+                        @click="applyRecommendedInboundIp('dual')"
+                      >
+                        🌐 推荐双栈 (IPv4 + IPv6)
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.5rem; font-size: 0.75rem"
+                        title="清空当前地址（留空使用 sing-box 内核默认行为）"
+                        @click="applyRecommendedInboundIp('empty')"
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    v-model="itemModal.tempFields.address"
+                    type="text"
+                    class="input-control"
+                    placeholder="例如: 172.19.0.1/30 或 172.19.0.1/30, fd00::1/126 (支持直接编辑，逗号分隔)"
+                  />
+                  <small
+                    style="
+                      color: var(--text-muted);
+                      margin-top: 4px;
+                      display: block;
+                      line-height: 1.4;
+                    "
+                  >
+                    💡 <b>最佳实践建议</b>：若当前系统（如云服务器、VPS 或特定
+                    Linux 环境）禁用了 IPv6，请选择
+                    <b>推荐 IPv4 (172.19.0.1/30)</b>，避免内核分配 IPv6
+                    地址时触发 <code>permission denied</code>；若网络环境支持
+                    IPv6 并需要接管防止泄漏，请选用
+                    <b>推荐双栈</b>。你也可以直接编辑输入任意合法的 CIDR 网段。
+                  </small>
                 </div>
                 <div
                   style="
@@ -2959,24 +3402,27 @@
                 style="margin-top: 1rem"
               >
                 <div class="input-group">
-                  <label>下载出站代理 Tag (download_detour)</label>
+                  <label>HTTP 客户端 Tag (http_client)</label>
                   <select
-                    v-model="itemModal.itemData.download_detour"
+                    v-model="itemModal.itemData.http_client"
                     class="input-control"
                   >
-                    <option
-                      v-if="
-                        itemModal.itemData.download_detour &&
-                        !allOutboundTags.includes(
-                          itemModal.itemData.download_detour,
-                        )
-                      "
-                      :value="itemModal.itemData.download_detour"
-                    >
-                      {{ itemModal.itemData.download_detour }} (当前值)
+                    <option value="">
+                      -- 使用路由默认客户端 (default_http_client) --
                     </option>
                     <option
-                      v-for="tag in allOutboundTags"
+                      v-if="
+                        itemModal.itemData.http_client &&
+                        !allHttpClientTags.includes(
+                          itemModal.itemData.http_client,
+                        )
+                      "
+                      :value="itemModal.itemData.http_client"
+                    >
+                      {{ itemModal.itemData.http_client }} (当前值)
+                    </option>
+                    <option
+                      v-for="tag in allHttpClientTags"
                       :key="tag"
                       :value="tag"
                     >
@@ -3419,6 +3865,56 @@
                       placeholder="例如: grpc-service"
                     />
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 7. HTTP Client fields -->
+            <div v-if="itemModal.itemType === 'http_client'">
+              <div class="grid-2">
+                <div class="input-group">
+                  <label>客户端 Tag 标签</label>
+                  <input
+                    v-model="itemModal.itemData.tag"
+                    type="text"
+                    class="input-control"
+                    placeholder="direct"
+                    required
+                  />
+                </div>
+                <div class="input-group">
+                  <label>底层出站代理 (Detour)</label>
+                  <select
+                    v-model="itemModal.itemData.detour"
+                    class="input-control"
+                  >
+                    <option value="">(空 / 默认直连)</option>
+                    <option
+                      v-if="
+                        itemModal.itemData.detour &&
+                        !allOutboundTags
+                          .filter((t) => t !== 'direct')
+                          .includes(itemModal.itemData.detour)
+                      "
+                      :value="itemModal.itemData.detour"
+                    >
+                      {{ itemModal.itemData.detour }}
+                      {{
+                        itemModal.itemData.detour === "direct"
+                          ? "(空直连无需设置 Detour，已自动兼容)"
+                          : "(当前值)"
+                      }}
+                    </option>
+                    <option
+                      v-for="tag in allOutboundTags.filter(
+                        (t) => t !== 'direct',
+                      )"
+                      :key="tag"
+                      :value="tag"
+                    >
+                      {{ tag }}
+                    </option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -4824,7 +5320,14 @@
           <!-- 同步模式选择：新建 vs 覆盖 vs 追加 -->
           <div class="input-group" style="margin-bottom: 1rem">
             <label>同步目标方式 (Target Action)</label>
-            <div style="display: flex; gap: 1rem; margin-top: 0.35rem; flex-wrap: wrap">
+            <div
+              style="
+                display: flex;
+                gap: 1rem;
+                margin-top: 0.35rem;
+                flex-wrap: wrap;
+              "
+            >
               <label
                 style="
                   display: flex;
@@ -4871,7 +5374,10 @@
 
           <!-- 覆盖或追加目标选择 -->
           <div
-            v-if="ruleSyncModal.mode === 'overwrite' || ruleSyncModal.mode === 'append'"
+            v-if="
+              ruleSyncModal.mode === 'overwrite' ||
+              ruleSyncModal.mode === 'append'
+            "
             class="input-group"
             style="margin-bottom: 1rem"
           >
@@ -4995,7 +5501,16 @@
       :class="{ active: domainWizardModal.show }"
       @click.self="domainWizardModal.show = false"
     >
-      <div class="modal-card" style="max-width: 800px; width: 95%; max-height: 90vh; display: flex; flex-direction: column;">
+      <div
+        class="modal-card"
+        style="
+          max-width: 800px;
+          width: 95%;
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+        "
+      >
         <div class="modal-header">
           <span>⚡ 快捷域名 / IP 分流推荐 (最佳实践)</span>
           <svg
@@ -5013,7 +5528,7 @@
           </svg>
         </div>
 
-        <div class="modal-body" style="overflow-y: auto; flex: 1;">
+        <div class="modal-body" style="overflow-y: auto; flex: 1">
           <!-- Description & Tip -->
           <div
             style="
@@ -5028,7 +5543,8 @@
             "
           >
             <strong>💡 最佳实践建议:</strong>
-            输入一个或多个域名或 IP/CIDR（例如用于 SSH 或代理访问的 IP）。系统将智能分析并测试您选定的节点延迟，然后为您推荐最合适的
+            输入一个或多个域名或 IP/CIDR（例如用于 SSH 或代理访问的
+            IP）。系统将智能分析并测试您选定的节点延迟，然后为您推荐最合适的
             <strong>URLTest 策略组</strong> 或 <strong>特定代理节点</strong>。
           </div>
 
@@ -5139,8 +5655,11 @@
                 v-else-if="domainWizardModal.detectedType === 'multi_domain'"
                 style="color: var(--text-muted)"
               >
-                检测到 {{ (domainWizardModal.detectedDomains || []).length }} 个域名：
-                <strong>{{ (domainWizardModal.detectedDomains || []).join(", ") }}</strong>
+                检测到
+                {{ (domainWizardModal.detectedDomains || []).length }} 个域名：
+                <strong>{{
+                  (domainWizardModal.detectedDomains || []).join(", ")
+                }}</strong>
                 (匹配规则字段: <code>domain</code>)
                 <div
                   style="
@@ -5158,8 +5677,11 @@
                 v-else-if="domainWizardModal.detectedType === 'ip'"
                 style="color: var(--text-muted)"
               >
-                检测到 {{ (domainWizardModal.detectedIps || []).length }} 个目标 IP / CIDR：
-                <strong>{{ (domainWizardModal.detectedIps || []).join(", ") }}</strong>
+                检测到 {{ (domainWizardModal.detectedIps || []).length }} 个目标
+                IP / CIDR：
+                <strong>{{
+                  (domainWizardModal.detectedIps || []).join(", ")
+                }}</strong>
                 (匹配规则字段: <code>ip_cidr</code>)
                 <div
                   style="
@@ -5168,7 +5690,10 @@
                     color: var(--text-muted);
                   "
                 >
-                  测试测速所用基准服务：<code>{{ domainWizardModal.testUrl }}</code> (测试节点对外部网络传输与连接质量)
+                  测试测速所用基准服务：<code>{{
+                    domainWizardModal.testUrl
+                  }}</code>
+                  (测试节点对外部网络传输与连接质量)
                 </div>
               </div>
 
@@ -5178,11 +5703,21 @@
                 style="color: var(--text-muted)"
               >
                 <div>
-                  域名：<strong>{{ (domainWizardModal.detectedDomains || []).join(", ") }}</strong>
-                  (匹配字段: <code>{{ domainWizardModal.extractedSuffix ? 'domain_suffix' : 'domain' }}</code>)
+                  域名：<strong>{{
+                    (domainWizardModal.detectedDomains || []).join(", ")
+                  }}</strong>
+                  (匹配字段:
+                  <code>{{
+                    domainWizardModal.extractedSuffix
+                      ? "domain_suffix"
+                      : "domain"
+                  }}</code
+                  >)
                 </div>
                 <div style="margin-top: 0.2rem">
-                  IP / CIDR：<strong>{{ (domainWizardModal.detectedIps || []).join(", ") }}</strong>
+                  IP / CIDR：<strong>{{
+                    (domainWizardModal.detectedIps || []).join(", ")
+                  }}</strong>
                   (匹配字段: <code>ip_cidr</code>)
                 </div>
                 <div
@@ -5199,15 +5734,7 @@
           </div>
 
           <!-- 待测试节点范围与筛选面板 (参考 GroupsView) -->
-          <div
-            style="
-              margin-bottom: 1.25rem;
-              padding: 0.85rem 1rem;
-              background: rgba(255, 255, 255, 0.02);
-              border: 1px solid var(--border-color);
-              border-radius: 6px;
-            "
-          >
+          <div class="wizard-section-box">
             <div
               style="
                 display: flex;
@@ -5219,7 +5746,9 @@
               "
             >
               <div style="display: flex; align-items: center; gap: 0.5rem">
-                <span style="font-size: 0.88rem; font-weight: 600">🎯 待测试节点范围</span>
+                <span style="font-size: 0.88rem; font-weight: 600"
+                  >🎯 待测试节点范围</span
+                >
                 <span
                   class="badge"
                   :class="
@@ -5236,26 +5765,23 @@
               <div class="flex gap-2" style="font-size: 0.8rem">
                 <a
                   href="javascript:void(0)"
-                  class="wizard-select-filtered-btn"
-                  style="color: var(--primary); text-decoration: none; font-weight: 500"
+                  class="wizard-select-filtered-btn wizard-link-btn"
                   @click="selectAllFilteredWizardNodes"
                 >
                   全选当前筛选
                 </a>
-                <span style="color: var(--border-color)">|</span>
+                <span class="wizard-link-divider">|</span>
                 <a
                   href="javascript:void(0)"
-                  class="wizard-select-all-btn"
-                  style="color: var(--primary); text-decoration: none"
+                  class="wizard-select-all-btn wizard-link-btn"
                   @click="selectAllWizardNodes"
                 >
                   全选全部
                 </a>
-                <span style="color: var(--border-color)">|</span>
+                <span class="wizard-link-divider">|</span>
                 <a
                   href="javascript:void(0)"
-                  class="wizard-clear-nodes-btn"
-                  style="color: var(--text-muted); text-decoration: none"
+                  class="wizard-clear-nodes-btn wizard-link-btn wizard-link-danger"
                   @click="clearWizardNodes"
                 >
                   清空
@@ -5321,79 +5847,44 @@
             </div>
 
             <!-- 节点可选列表预览 -->
-            <div
-              style="
-                max-height: 135px;
-                overflow-y: auto;
-                border: 1px solid var(--border-color);
-                border-radius: 4px;
-                padding: 0.4rem;
-                background: rgba(0, 0, 0, 0.15);
-                display: flex;
-                flex-wrap: wrap;
-                gap: 0.35rem;
-                align-content: flex-start;
-              "
-            >
+            <div class="wizard-node-list">
               <div
                 v-for="node in filteredNodesForWizard"
                 :key="node.tag"
-                style="
-                  display: inline-flex;
-                  align-items: center;
-                  gap: 0.3rem;
-                  padding: 0.2rem 0.45rem;
-                  border-radius: 4px;
-                  font-size: 0.78rem;
-                  cursor: pointer;
-                  user-select: none;
-                  transition: all 0.15s ease;
-                  border: 1px solid transparent;
-                "
-                :style="
-                  domainWizardModal.selectedNodeTags.includes(node.tag)
-                    ? 'background: rgba(99, 102, 241, 0.2); border-color: rgba(99, 102, 241, 0.4); color: var(--primary-light, #c7d2fe);'
-                    : 'background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.08); color: var(--text-muted);'
+                class="wizard-node-chip"
+                :class="{
+                  'is-selected': domainWizardModal.selectedNodeTags.includes(
+                    node.tag,
+                  ),
+                }"
+                :title="
+                  node.tag +
+                  (node.server
+                    ? ' (' +
+                      node.server +
+                      (node.port ? ':' + node.port : '') +
+                      ')'
+                    : '')
                 "
                 @click="toggleWizardNode(node.tag)"
               >
                 <input
                   type="checkbox"
-                  :checked="domainWizardModal.selectedNodeTags.includes(node.tag)"
-                  style="pointer-events: none; width: 13px; height: 13px; margin: 0"
-                />
-                <span
-                  style="
-                    max-width: 180px;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
+                  :checked="
+                    domainWizardModal.selectedNodeTags.includes(node.tag)
                   "
-                >
+                  class="wizard-node-checkbox"
+                />
+                <span class="wizard-node-tag">
                   {{ node.tag }}
                 </span>
-                <span
-                  v-if="node.type"
-                  style="
-                    font-size: 0.68rem;
-                    opacity: 0.7;
-                    background: rgba(0, 0, 0, 0.25);
-                    padding: 0.05rem 0.25rem;
-                    border-radius: 2px;
-                  "
-                >
+                <span v-if="node.type" class="wizard-node-type">
                   {{ node.type }}
                 </span>
               </div>
               <div
                 v-if="filteredNodesForWizard.length === 0"
-                style="
-                  width: 100%;
-                  text-align: center;
-                  padding: 0.75rem 0;
-                  color: var(--text-muted);
-                  font-size: 0.8rem;
-                "
+                class="wizard-node-empty"
               >
                 无符合当前筛选条件的节点
               </div>
@@ -5671,6 +6162,8 @@ import {
 import JsonTreeView from "./JsonTreeView.vue";
 import DnsEditor from "./DnsEditor.vue";
 import RouteEditor from "./RouteEditor.vue";
+import RuleTreeEditor from "./RuleTreeEditor.vue";
+import { cleanRuleTree } from "../utils/ruleTree.js";
 
 const sections = [
   "log",
@@ -5678,6 +6171,7 @@ const sections = [
   "inbounds",
   "outbounds",
   "route",
+  "http_clients",
   "experimental",
 ];
 
@@ -5685,7 +6179,7 @@ const getInitialActiveSection = () => {
   const hash = window.location.hash.substring(1);
   const [pathPart] = hash.split("?");
   const parts = pathPart.split("/").filter(Boolean);
-  if (parts[0] === "config") {
+  if (parts[0] === "configs" || parts[0] === "config") {
     let tabCandidate = null;
     if (parts[1] === "edit" && parts[2] && parts[3]) {
       tabCandidate = parts[3];
@@ -5737,6 +6231,8 @@ const runningConfigForm = reactive({
 
 // 当前运行 subout 服务的宿主机操作系统环境（由 /api/system/info 接口获取，默认预设为 'linux'）
 const systemOs = ref("linux");
+const systemLanIps = ref([]);
+const primaryLanIp = ref("");
 const isLinux = computed(() => systemOs.value === "linux");
 const isApplePlatform = computed(
   () => systemOs.value === "macos" || systemOs.value === "darwin",
@@ -5871,6 +6367,12 @@ const fetchSystemInfo = async () => {
       if (data && data.os) {
         systemOs.value = data.os;
       }
+      if (data && Array.isArray(data.lan_ips)) {
+        systemLanIps.value = data.lan_ips;
+      }
+      if (data && data.primary_lan_ip) {
+        primaryLanIp.value = data.primary_lan_ip;
+      }
     }
   } catch {
     // keep fallback
@@ -5883,6 +6385,7 @@ const sectionModes = reactive({
   inbounds: "visual",
   outbounds: "visual",
   route: "visual",
+  http_clients: "visual",
   experimental: "visual",
 });
 
@@ -5892,6 +6395,7 @@ const rawJson = reactive({
   inbounds: "",
   outbounds: "",
   route: "",
+  http_clients: "",
   experimental: "",
 });
 
@@ -5900,7 +6404,6 @@ const configData = reactive({
   dns: {
     strategy: "ipv4_only",
     final: "local-dns",
-    independent_cache: true,
     disable_cache: false,
     disable_expire: false,
     reverse_mapping: false,
@@ -5915,9 +6418,11 @@ const configData = reactive({
     final: "direct",
     auto_detect_interface: true,
     default_domain_resolver: "",
+    default_http_client: "direct",
     rules: [],
     rule_set: [],
   },
+  http_clients: [{ tag: "direct" }, { tag: "proxy", detour: "proxy" }],
   experimental: {
     cache_file: {
       enabled: false,
@@ -6170,6 +6675,18 @@ const allOutboundTags = computed(() => {
   return tags;
 });
 
+const allHttpClientTags = computed(() => {
+  const tags = [];
+  if (configData.http_clients && Array.isArray(configData.http_clients)) {
+    configData.http_clients.forEach((c) => {
+      if (c && c.tag && !tags.includes(c.tag)) {
+        tags.push(c.tag);
+      }
+    });
+  }
+  return tags;
+});
+
 // 计算属性：分类出站连接（基于配置内的 outbound.type）
 const basicOutbounds = computed(() => {
   return (configData.outbounds || []).filter((outb) =>
@@ -6355,7 +6872,9 @@ const isIPv6OrCIDR = (str) => {
 
 const isDomainName = (str) => {
   if (isIPv4(str) || isIPv4CIDR(str) || isIPv6OrCIDR(str)) return false;
-  return /^[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+$/.test(str);
+  return /^[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+$/.test(
+    str,
+  );
 };
 
 const getCommonSuffix = (domains) => {
@@ -6524,7 +7043,10 @@ const availableNodesForWizard = computed(() => {
   });
 
   (configData.outbounds || []).forEach((o) => {
-    if (["selector", "urltest"].includes(o.type) && Array.isArray(o.outbounds)) {
+    if (
+      ["selector", "urltest"].includes(o.type) &&
+      Array.isArray(o.outbounds)
+    ) {
       o.outbounds.forEach((memberTag) => {
         if (!addedTags.has(memberTag)) {
           const memberOutbound = (configData.outbounds || []).find(
@@ -7254,7 +7776,9 @@ const itemModal = reactive({
   validating: false,
   routeRuleLogic: "standard",
   dnsRuleType: "domain_suffix",
+  ruleType: "logical",
   tempFields: {
+    query_type: "",
     domain: "",
     domain_suffix: "",
     domain_keyword: "",
@@ -7272,8 +7796,124 @@ const itemModal = reactive({
     process_path_regex: "",
     package_name: "",
     user: "",
+    address: "",
   },
 });
+
+const applyRecommendedInboundIp = (preset) => {
+  if (preset === "ipv4") {
+    itemModal.tempFields.address = "172.19.0.1/30";
+  } else if (preset === "dual") {
+    itemModal.tempFields.address = "172.19.0.1/30, fd00::1/126";
+  } else if (preset === "empty") {
+    itemModal.tempFields.address = "";
+  }
+};
+
+const appendDnsQueryType = (qt) => {
+  const current = (itemModal.tempFields.query_type || "")
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!current.includes(qt)) {
+    current.push(qt);
+    itemModal.tempFields.query_type = current.join("\n");
+  }
+};
+
+const switchDnsRuleType = (mode) => {
+  if (itemModal.ruleType === mode) return;
+  itemModal.ruleType = mode;
+  if (mode === "logical") {
+    itemModal.itemData.type = "logical";
+    itemModal.itemData.mode = itemModal.itemData.mode || "and";
+    if (!Array.isArray(itemModal.itemData.rules)) {
+      itemModal.itemData.rules = [];
+    }
+    // Migrate standard fields if any had values
+    const migrated = [];
+    if (itemModal.tempFields.query_type?.trim()) {
+      migrated.push({
+        query_type: itemModal.tempFields.query_type
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      });
+    }
+    const standardFields = [
+      "rule_set",
+      "domain_suffix",
+      "geosite",
+      "domain",
+      "domain_keyword",
+      "domain_regex",
+      "geoip",
+      "ip_cidr",
+    ];
+    const subCriteria = [];
+    standardFields.forEach((f) => {
+      if (itemModal.tempFields[f]?.trim()) {
+        subCriteria.push({
+          [f]: itemModal.tempFields[f]
+            .split(/[\n,]+/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        });
+      }
+    });
+    if (subCriteria.length > 0) {
+      if (migrated.length > 0) {
+        migrated.push({
+          type: "logical",
+          mode: "or",
+          rules: subCriteria,
+        });
+      } else {
+        migrated.push(...subCriteria);
+      }
+    }
+    if (itemModal.itemData.rules.length === 0 && migrated.length > 0) {
+      itemModal.itemData.rules = migrated;
+    }
+    if (itemModal.itemData.rules.length === 0) {
+      itemModal.itemData.rules = [
+        { query_type: ["A", "AAAA"] },
+        {
+          type: "logical",
+          mode: "or",
+          rules: [{ domain: [] }, { domain_suffix: [] }, { rule_set: [] }],
+        },
+      ];
+    }
+  } else {
+    delete itemModal.itemData.type;
+    delete itemModal.itemData.mode;
+    delete itemModal.itemData.rules;
+  }
+};
+
+const onTableInboundAddressChange = (inb) => {
+  const raw = (inb._table_address || "").trim();
+  if (raw) {
+    inb.address = raw
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  } else {
+    delete inb.address;
+  }
+};
+
+const applyTableRecommendedIp = (inb, preset) => {
+  if (preset === "ipv4") {
+    inb._table_address = "172.19.0.1/30";
+  } else if (preset === "dual") {
+    inb._table_address = "172.19.0.1/30, fd00::1/126";
+  } else {
+    inb._table_address = "";
+  }
+  onTableInboundAddressChange(inb);
+};
 
 const presetUrlSelectConfig = ref("http://cp.cloudflare.com/generate_204");
 const onPresetUrlChangeConfig = () => {
@@ -7385,7 +8025,6 @@ const parseLog = (json) => {
 const parseDns = (json) => {
   configData.dns.strategy = json.strategy || "ipv4_only";
   configData.dns.final = json.final || "";
-  configData.dns.independent_cache = json.independent_cache !== false;
   configData.dns.disable_cache = !!json.disable_cache;
   configData.dns.disable_expire = !!json.disable_expire;
   configData.dns.reverse_mapping = !!json.reverse_mapping;
@@ -7440,7 +8079,6 @@ const parseDns = (json) => {
   configData.dns._extra = { ...json };
   delete configData.dns._extra.strategy;
   delete configData.dns._extra.final;
-  delete configData.dns._extra.independent_cache;
   delete configData.dns._extra.disable_cache;
   delete configData.dns._extra.disable_expire;
   delete configData.dns._extra.reverse_mapping;
@@ -7452,6 +8090,18 @@ const parseDns = (json) => {
 
 const parseInbounds = (json, notifyOnRemove = false) => {
   const list = Array.isArray(json) ? JSON.parse(JSON.stringify(json)) : [];
+
+  list.forEach((inb) => {
+    if (inb && typeof inb === "object" && inb.type === "tun") {
+      if (Array.isArray(inb.address)) {
+        inb._table_address = inb.address.join(", ");
+      } else if (typeof inb.address === "string") {
+        inb._table_address = inb.address;
+      } else {
+        inb._table_address = "";
+      }
+    }
+  });
 
   if (!isLinux.value && Array.isArray(list)) {
     let hasAutoRedirect = false;
@@ -7480,18 +8130,43 @@ const parseRoute = (json) => {
   configData.route.final = json.final || "direct";
   configData.route.auto_detect_interface = json.auto_detect_interface !== false;
   configData.route.default_domain_resolver = json.default_domain_resolver || "";
+  configData.route.default_http_client = json.default_http_client || "";
   configData.route.rules = Array.isArray(json.rules)
     ? JSON.parse(JSON.stringify(json.rules))
     : [];
   configData.route.rule_set = Array.isArray(json.rule_set)
-    ? JSON.parse(JSON.stringify(json.rule_set))
+    ? JSON.parse(JSON.stringify(json.rule_set)).map((rs) => {
+        if (rs && typeof rs === "object") {
+          if (!rs.http_client && rs.download_detour) {
+            rs.http_client = rs.download_detour;
+          }
+          delete rs.download_detour;
+        }
+        return rs;
+      })
     : [];
   configData.route._extra = { ...json };
   delete configData.route._extra.final;
   delete configData.route._extra.auto_detect_interface;
   delete configData.route._extra.default_domain_resolver;
+  delete configData.route._extra.default_http_client;
   delete configData.route._extra.rules;
   delete configData.route._extra.rule_set;
+};
+
+const parseHttpClients = (json) => {
+  let list = [];
+  if (Array.isArray(json)) {
+    list = JSON.parse(JSON.stringify(json));
+  } else if (json && Array.isArray(json.http_clients)) {
+    list = JSON.parse(JSON.stringify(json.http_clients));
+  }
+  list.forEach((item) => {
+    if (!item.detour || item.detour === "direct") {
+      item.detour = "";
+    }
+  });
+  configData.http_clients = list;
 };
 
 const parseExperimental = (json) => {
@@ -7553,7 +8228,6 @@ const serializeDns = () => {
   const obj = {
     strategy: configData.dns.strategy,
     final: configData.dns.final,
-    independent_cache: configData.dns.independent_cache,
     disable_cache: configData.dns.disable_cache,
     disable_expire: configData.dns.disable_expire,
     reverse_mapping: configData.dns.reverse_mapping,
@@ -7561,6 +8235,7 @@ const serializeDns = () => {
     rules: JSON.parse(JSON.stringify(configData.dns.rules)),
     ...(configData.dns._extra || {}),
   };
+  delete obj.independent_cache;
   if (configData.dns.client_subnet) {
     obj.client_subnet = configData.dns.client_subnet.trim();
   }
@@ -7575,13 +8250,27 @@ const serializeDns = () => {
 
 const serializeInbounds = () => {
   const list = JSON.parse(JSON.stringify(configData.inbounds));
-  if (!isLinux.value && Array.isArray(list)) {
-    list.forEach((inb) => {
-      if (inb && typeof inb === "object") {
+  list.forEach((inb) => {
+    if (inb && typeof inb === "object") {
+      if (!isLinux.value) {
         delete inb.auto_redirect;
       }
-    });
-  }
+      if (inb.type === "tun") {
+        if (inb._table_address !== undefined) {
+          const raw = inb._table_address.trim();
+          if (raw) {
+            inb.address = raw
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+          } else {
+            delete inb.address;
+          }
+          delete inb._table_address;
+        }
+      }
+    }
+  });
   return list;
 };
 
@@ -7598,16 +8287,38 @@ const serializeOutbounds = () => {
 };
 
 const serializeRoute = () => {
+  const ruleSet = JSON.parse(
+    JSON.stringify(configData.route.rule_set || []),
+  ).map((rs) => {
+    if (rs && typeof rs === "object") {
+      delete rs.download_detour;
+      if (!rs.http_client) {
+        delete rs.http_client;
+      }
+    }
+    return rs;
+  });
   const obj = {
     final: configData.route.final,
     auto_detect_interface: configData.route.auto_detect_interface,
     default_domain_resolver:
       configData.route.default_domain_resolver || undefined,
+    default_http_client: configData.route.default_http_client || undefined,
     rules: JSON.parse(JSON.stringify(configData.route.rules)),
-    rule_set: JSON.parse(JSON.stringify(configData.route.rule_set)),
+    rule_set: ruleSet,
     ...(configData.route._extra || {}),
   };
   return obj;
+};
+
+const serializeHttpClients = () => {
+  return (configData.http_clients || []).map((client) => {
+    const item = { ...client };
+    if (!item.detour || !item.detour.trim() || item.detour === "direct") {
+      delete item.detour;
+    }
+    return item;
+  });
 };
 
 const serializeExperimental = () => {
@@ -7683,6 +8394,7 @@ const confirmImport = async () => {
     const inboundsSec = parsed.inbounds || [];
     const outboundsSec = parsed.outbounds || [];
     const routeSec = parsed.route || {};
+    const httpClientsSec = parsed.http_clients || [];
     const experimentalSec = parsed.experimental || {};
 
     // Support direct servers or array configuration at root
@@ -7773,6 +8485,7 @@ const confirmImport = async () => {
         inbounds: inboundsSec,
         outbounds: outboundsSec,
         route: routeSec,
+        http_clients: httpClientsSec,
         experimental: experimentalSec,
       }),
     });
@@ -7800,6 +8513,7 @@ const confirmImport = async () => {
     parseInbounds(inboundsSec);
     parseOutbounds(outboundsSec);
     parseRoute(routeSec);
+    parseHttpClients(httpClientsSec);
     parseExperimental(experimentalSec);
 
     rawJson.log = JSON.stringify(logSec, null, 2);
@@ -7807,6 +8521,7 @@ const confirmImport = async () => {
     rawJson.inbounds = JSON.stringify(inboundsSec, null, 2);
     rawJson.outbounds = JSON.stringify(outboundsSec, null, 2);
     rawJson.route = JSON.stringify(routeSec, null, 2);
+    rawJson.http_clients = JSON.stringify(httpClientsSec, null, 2);
     rawJson.experimental = JSON.stringify(experimentalSec, null, 2);
 
     showToast(
@@ -7831,6 +8546,7 @@ const getFullConfigData = () => {
     "inbounds",
     "outbounds",
     "route",
+    "http_clients",
     "experimental",
   ];
   for (const sec of sectionsList) {
@@ -7840,6 +8556,7 @@ const getFullConfigData = () => {
       else if (sec === "inbounds") data[sec] = serializeInbounds();
       else if (sec === "outbounds") data[sec] = serializeOutbounds();
       else if (sec === "route") data[sec] = serializeRoute();
+      else if (sec === "http_clients") data[sec] = serializeHttpClients();
       else if (sec === "experimental") data[sec] = serializeExperimental();
     } else {
       try {
@@ -8235,6 +8952,7 @@ const loadHistoryConfig = async (id) => {
       rawJson.inbounds = JSON.stringify(base.inbounds || [], null, 2);
       rawJson.outbounds = JSON.stringify(base.outbounds || [], null, 2);
       rawJson.route = JSON.stringify(base.route || {}, null, 2);
+      rawJson.http_clients = JSON.stringify(base.http_clients || [], null, 2);
       rawJson.experimental = JSON.stringify(base.experimental || {}, null, 2);
 
       parseLog(base.log || {});
@@ -8242,6 +8960,7 @@ const loadHistoryConfig = async (id) => {
       parseInbounds(base.inbounds || []);
       parseOutbounds(base.outbounds || []);
       parseRoute(base.route || {});
+      parseHttpClients(base.http_clients || []);
       parseExperimental(base.experimental || {});
 
       // 旧配置迁移：把 selector/urltest 的引用展开为自包含快照
@@ -8444,23 +9163,27 @@ const duplicateConfigItem = async (id) => {
 };
 
 const loadAllSections = async () => {
-  await fetchSystemInfo();
-  try {
-    const resGroups = await fetch(`${API_BASE}/api/groups`, {
-      headers: { Authorization: `Bearer ${token.value}` },
-    });
-    if (resGroups.ok) {
-      outboundGroups.value = await resGroups.json();
-    }
-  } catch (e) {
-    console.error("加载出站组失败", e);
-  }
+  // 并发拉取核心首屏数据（系统信息、出站组、运行设置与配置列表），大幅提升 Armbian 等低功耗设备上的响应速度
+  await Promise.allSettled([
+    fetchSystemInfo(),
+    (async () => {
+      try {
+        const resGroups = await fetch(`${API_BASE}/api/groups`, {
+          headers: { Authorization: `Bearer ${token.value}` },
+        });
+        if (resGroups.ok) {
+          outboundGroups.value = await resGroups.json();
+        }
+      } catch (e) {
+        console.error("加载出站组失败", e);
+      }
+    })(),
+    loadRunningConfigSettings(),
+    loadConfigList(),
+  ]);
 
-  // 加载节点池缓存（用于出站组完整展开导入与旧配置迁移）
-  await loadNodePoolCache();
-
-  await loadRunningConfigSettings();
-  await loadConfigList();
+  // 异步加载节点池缓存（用于出站组完整展开导入与旧配置迁移），后台执行不阻塞首屏渲染与路由恢复
+  loadNodePoolCache();
 
   const routeState = parseConfigRoute();
   if (routeState.isEditing && routeState.configId) {
@@ -8508,6 +9231,7 @@ const loadAllSections = async () => {
     rawJson.inbounds = "";
     rawJson.outbounds = "";
     rawJson.route = "";
+    rawJson.http_clients = "";
     rawJson.experimental = "";
 
     parseLog({});
@@ -8515,6 +9239,7 @@ const loadAllSections = async () => {
     parseInbounds([]);
     parseOutbounds([]);
     parseRoute({});
+    parseHttpClients([]);
     parseExperimental({});
   }
 };
@@ -8530,6 +9255,7 @@ const setSectionMode = (section, mode) => {
       else if (section === "inbounds") parseInbounds(parsed);
       else if (section === "outbounds") parseOutbounds(parsed);
       else if (section === "route") parseRoute(parsed);
+      else if (section === "http_clients") parseHttpClients(parsed);
       else if (section === "experimental") parseExperimental(parsed);
       sectionModes[section] = mode;
     } catch (e) {
@@ -8545,6 +9271,7 @@ const setSectionMode = (section, mode) => {
     else if (section === "inbounds") obj = serializeInbounds();
     else if (section === "outbounds") obj = serializeOutbounds();
     else if (section === "route") obj = serializeRoute();
+    else if (section === "http_clients") obj = serializeHttpClients();
     else if (section === "experimental") obj = serializeExperimental();
 
     rawJson[section] = JSON.stringify(obj, null, 2);
@@ -8561,6 +9288,7 @@ const saveVueConfigSection = async (section) => {
     else if (section === "inbounds") finalObj = serializeInbounds();
     else if (section === "outbounds") finalObj = serializeOutbounds();
     else if (section === "route") finalObj = serializeRoute();
+    else if (section === "http_clients") finalObj = serializeHttpClients();
     else if (section === "experimental") finalObj = serializeExperimental();
   } else {
     try {
@@ -8655,8 +9383,29 @@ const onModalDnsServerTypeChange = () => {
   }
 };
 
+const defaultInboundPorts = [2334, 1080, 8080, 7890, 7892, 7895];
+const defaultInboundTags = [
+  "mixed-in",
+  "socks-in",
+  "http-in",
+  "tproxy-in",
+  "redirect-in",
+  "tun-in",
+  "mixed",
+  "socks",
+  "http",
+  "tproxy",
+  "redirect",
+  "tun",
+];
+
 const onInboundTypeChange = (inb) => {
+  const isDefaultTag = !inb.tag || defaultInboundTags.includes(inb.tag);
+
   if (inb.type === "tun") {
+    if (isDefaultTag) {
+      inb.tag = "tun-in";
+    }
     if (isApplePlatform.value || isWindowsPlatform.value) {
       inb.interface_name = "";
     } else {
@@ -8671,13 +9420,27 @@ const onInboundTypeChange = (inb) => {
     }
   } else {
     inb.listen = inb.listen || "::";
-    inb.listen_port = inb.listen_port || 2334;
+    if (!inb.listen_port || defaultInboundPorts.includes(inb.listen_port)) {
+      if (inb.type === "socks") inb.listen_port = 1080;
+      else if (inb.type === "http") inb.listen_port = 8080;
+      else if (inb.type === "tproxy") inb.listen_port = 7895;
+      else if (inb.type === "redirect") inb.listen_port = 7892;
+      else inb.listen_port = 2334;
+    }
+    if (isDefaultTag) {
+      inb.tag = inb.type + "-in";
+    }
     delete inb.interface_name;
     delete inb.stack;
     delete inb.auto_route;
     delete inb.strict_route;
     delete inb.mtu;
     delete inb.auto_redirect;
+    delete inb.address;
+    delete inb._table_address;
+    if (itemModal.show && itemModal.itemType === "inbound") {
+      itemModal.tempFields.address = "";
+    }
   }
 };
 
@@ -8685,17 +9448,20 @@ const onRuleSetTypeChange = (rs) => {
   if (rs.type === "remote") {
     rs.url = rs.url || "";
     rs.format = rs.format || "binary";
-    rs.download_detour =
-      rs.download_detour ||
-      (allOutboundTags.value.includes("proxy")
-        ? "proxy"
-        : allOutboundTags.value[0] || "direct");
+    rs.http_client =
+      rs.http_client ||
+      configData.route.default_http_client ||
+      (allHttpClientTags.value.includes("direct")
+        ? "direct"
+        : allHttpClientTags.value[0] || "");
     rs.update_interval = rs.update_interval || "1d";
     delete rs.path;
+    delete rs.download_detour;
   } else {
     rs.path = rs.path || "";
     delete rs.url;
     delete rs.download_detour;
+    delete rs.http_client;
     delete rs.update_interval;
     delete rs.format;
   }
@@ -8735,10 +9501,22 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
   else if (type === "outbound") itemModal.title = "编辑出站连接 (Outbound)";
   else if (type === "route_rule") itemModal.title = "编辑分流路由规则";
   else if (type === "route_ruleset") itemModal.title = "编辑规则集 (RuleSet)";
+  else if (type === "http_client") itemModal.title = "编辑 HTTP 客户端";
 
   itemModal.itemData = JSON.parse(JSON.stringify(item));
 
-  if (["route_rule", "dns_rule"].includes(type)) {
+  if (type === "dns_rule") {
+    if (itemModal.itemData.type === "logical") {
+      itemModal.ruleType = "logical";
+      itemModal.routeRuleLogic = itemModal.itemData.mode || "and";
+      if (!Array.isArray(itemModal.itemData.rules)) {
+        itemModal.itemData.rules = [];
+      }
+    } else {
+      itemModal.ruleType = "standard";
+      itemModal.routeRuleLogic = "standard";
+    }
+  } else if (type === "route_rule") {
     if (itemModal.itemData.type === "logical") {
       itemModal.routeRuleLogic = itemModal.itemData.mode || "or";
     } else {
@@ -8755,6 +9533,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
       itemModal.dnsRuleType = "domain_suffix";
     } else {
       const hasOtherFields = [
+        "query_type",
         "domain",
         "domain_keyword",
         "domain_regex",
@@ -8775,6 +9554,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
   }
 
   const arrayFields = [
+    "query_type",
     "domain",
     "domain_suffix",
     "domain_keyword",
@@ -8807,7 +9587,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
   });
 
   if (
-    ["route_rule", "dns_rule"].includes(type) &&
+    type === "route_rule" &&
     itemModal.itemData.type === "logical" &&
     Array.isArray(itemModal.itemData.rules)
   ) {
@@ -8837,8 +9617,20 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
     });
   }
 
-  if (type === "inbound" && !itemModal.itemData.type) {
-    itemModal.itemData.type = "mixed";
+  if (type === "inbound") {
+    if (!itemModal.itemData.type) {
+      itemModal.itemData.type = "mixed";
+    }
+    if (itemModal.itemData.address) {
+      const addr = itemModal.itemData.address;
+      itemModal.tempFields.address = Array.isArray(addr)
+        ? addr.join(", ")
+        : String(addr);
+    } else if (itemModal.itemData._table_address) {
+      itemModal.tempFields.address = itemModal.itemData._table_address;
+    } else {
+      itemModal.tempFields.address = "";
+    }
   }
   if (type === "dns_server" && !itemModal.itemData.type) {
     itemModal.itemData.type = "udp";
@@ -8898,6 +9690,7 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
 
 const syncVisualToItemData = () => {
   const arrayFields = [
+    "query_type",
     "domain",
     "domain_suffix",
     "domain_keyword",
@@ -8926,58 +9719,126 @@ const syncVisualToItemData = () => {
         delete itemModal.itemData.client_subnet;
       }
     }
-  }
 
-  if (
-    ["route_rule", "dns_rule"].includes(itemModal.itemType) &&
-    itemModal.routeRuleLogic &&
-    itemModal.routeRuleLogic !== "standard"
-  ) {
-    itemModal.itemData.type = "logical";
-    itemModal.itemData.mode = itemModal.routeRuleLogic;
-
-    const rules = [];
-    arrayFields.forEach((f) => {
-      delete itemModal.itemData[f];
-      if (
-        itemModal.tempFields[f] !== undefined &&
-        itemModal.tempFields[f] !== null
-      ) {
-        const val = itemModal.tempFields[f].trim();
-        if (val) {
-          const list = val
-            .split(/[\n,]+/)
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-          if (list.length > 0) {
-            rules.push({ [f]: list });
-          }
-        }
-      }
-    });
-
-    delete itemModal.itemData.port;
-    if (itemModal.tempFields.port) {
-      const val = itemModal.tempFields.port.trim();
-      if (val) {
-        const list = val
-          .split(/[\n,]+/)
-          .map((s) => parseInt(s.trim()))
-          .filter((n) => !isNaN(n));
-        if (list.length > 0) {
-          rules.push({ port: list });
-        }
-      }
-    }
-
-    itemModal.itemData.rules = rules;
-  } else {
-    if (["route_rule", "dns_rule"].includes(itemModal.itemType)) {
+    if (
+      itemModal.ruleType === "logical" ||
+      itemModal.itemData.type === "logical"
+    ) {
+      itemModal.itemData.type = "logical";
+      itemModal.itemData.mode = itemModal.itemData.mode || "and";
+      itemModal.itemData.rules = cleanRuleTree(itemModal.itemData.rules || []);
+      arrayFields.forEach((f) => {
+        delete itemModal.itemData[f];
+      });
+      delete itemModal.itemData.port;
+    } else {
       delete itemModal.itemData.type;
       delete itemModal.itemData.mode;
       delete itemModal.itemData.rules;
-    }
 
+      arrayFields.forEach((f) => {
+        if (
+          itemModal.tempFields[f] !== undefined &&
+          itemModal.tempFields[f] !== null
+        ) {
+          const val = itemModal.tempFields[f].trim();
+          if (val) {
+            itemModal.itemData[f] = val
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+          } else {
+            delete itemModal.itemData[f];
+          }
+        }
+      });
+      if (itemModal.tempFields.port) {
+        const val = itemModal.tempFields.port.trim();
+        if (val) {
+          itemModal.itemData.port = val
+            .split(/[\n,]+/)
+            .map((s) => parseInt(s.trim()))
+            .filter((n) => !isNaN(n));
+        } else {
+          delete itemModal.itemData.port;
+        }
+      }
+    }
+  } else if (itemModal.itemType === "route_rule") {
+    if (itemModal.routeRuleLogic && itemModal.routeRuleLogic !== "standard") {
+      itemModal.itemData.type = "logical";
+      itemModal.itemData.mode = itemModal.routeRuleLogic;
+
+      const rules = [];
+      arrayFields.forEach((f) => {
+        delete itemModal.itemData[f];
+        if (
+          itemModal.tempFields[f] !== undefined &&
+          itemModal.tempFields[f] !== null
+        ) {
+          const val = itemModal.tempFields[f].trim();
+          if (val) {
+            const list = val
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+            if (list.length > 0) {
+              rules.push({ [f]: list });
+            }
+          }
+        }
+      });
+
+      delete itemModal.itemData.port;
+      if (itemModal.tempFields.port) {
+        const val = itemModal.tempFields.port.trim();
+        if (val) {
+          const list = val
+            .split(/[\n,]+/)
+            .map((s) => parseInt(s.trim()))
+            .filter((n) => !isNaN(n));
+          if (list.length > 0) {
+            rules.push({ port: list });
+          }
+        }
+      }
+
+      itemModal.itemData.rules = rules;
+    } else {
+      delete itemModal.itemData.type;
+      delete itemModal.itemData.mode;
+      delete itemModal.itemData.rules;
+
+      arrayFields.forEach((f) => {
+        if (
+          itemModal.tempFields[f] !== undefined &&
+          itemModal.tempFields[f] !== null
+        ) {
+          const val = itemModal.tempFields[f].trim();
+          if (val) {
+            itemModal.itemData[f] = val
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+          } else {
+            delete itemModal.itemData[f];
+          }
+        }
+      });
+
+      if (itemModal.tempFields.port) {
+        const val = itemModal.tempFields.port.trim();
+        if (val) {
+          itemModal.itemData.port = val
+            .split(/[\n,]+/)
+            .map((s) => parseInt(s.trim()))
+            .filter((n) => !isNaN(n));
+        } else {
+          delete itemModal.itemData.port;
+        }
+      }
+    }
+  } else {
     arrayFields.forEach((f) => {
       if (
         itemModal.tempFields[f] !== undefined &&
@@ -9027,6 +9888,20 @@ const syncVisualToItemData = () => {
       if (!isLinux.value) {
         delete itemModal.itemData.auto_redirect;
       }
+      if (itemModal.tempFields.address !== undefined) {
+        const rawAddr = itemModal.tempFields.address.trim();
+        if (rawAddr) {
+          itemModal.itemData.address = rawAddr
+            .split(/[\n,]+/)
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          itemModal.itemData._table_address =
+            itemModal.itemData.address.join(", ");
+        } else {
+          delete itemModal.itemData.address;
+          delete itemModal.itemData._table_address;
+        }
+      }
     } else {
       delete itemModal.itemData.interface_name;
       delete itemModal.itemData.stack;
@@ -9034,16 +9909,37 @@ const syncVisualToItemData = () => {
       delete itemModal.itemData.strict_route;
       delete itemModal.itemData.mtu;
       delete itemModal.itemData.auto_redirect;
+      delete itemModal.itemData.address;
+      delete itemModal.itemData._table_address;
     }
   }
   if (itemModal.itemType === "route_ruleset") {
     if (itemModal.itemData.type === "local") {
       delete itemModal.itemData.url;
       delete itemModal.itemData.download_detour;
+      delete itemModal.itemData.http_client;
       delete itemModal.itemData.update_interval;
       delete itemModal.itemData.format;
     } else {
       delete itemModal.itemData.path;
+      delete itemModal.itemData.download_detour;
+      if (!itemModal.itemData.http_client) {
+        delete itemModal.itemData.http_client;
+      }
+    }
+  }
+  if (itemModal.itemType === "http_client") {
+    if (!itemModal.itemData.tag || !itemModal.itemData.tag.trim()) {
+      itemModal.error = "请输入客户端标签 (Tag)";
+      itemModal.validating = false;
+      return;
+    }
+    if (
+      !itemModal.itemData.detour ||
+      !itemModal.itemData.detour.trim() ||
+      itemModal.itemData.detour === "direct"
+    ) {
+      delete itemModal.itemData.detour;
     }
   }
   if (itemModal.itemType === "outbound") {
@@ -9162,14 +10058,20 @@ const setItemModalMode = (mode) => {
       }
       if (itemModal.itemType === "dns_rule") {
         if (parsed.type === "logical") {
-          itemModal.routeRuleLogic = parsed.mode || "or";
+          itemModal.ruleType = "logical";
+          itemModal.routeRuleLogic = parsed.mode || "and";
+          if (!Array.isArray(parsed.rules)) {
+            parsed.rules = [];
+          }
         } else {
+          itemModal.ruleType = "standard";
           itemModal.routeRuleLogic = "standard";
         }
       }
       itemModal.itemData = parsed;
 
       const arrayFields = [
+        "query_type",
         "domain",
         "domain_suffix",
         "domain_keyword",
@@ -9220,7 +10122,34 @@ const getListByType = (type) => {
   if (type === "outbound") return configData.outbounds;
   if (type === "route_rule") return configData.route.rules;
   if (type === "route_ruleset") return configData.route.rule_set;
+  if (type === "http_client") return configData.http_clients;
   return null;
+};
+
+const addHttpClient = () => {
+  const newItem = {
+    tag: `client-${(configData.http_clients || []).length + 1}`,
+    detour: "",
+  };
+  editItem(newItem, "http_client", (parsed) => {
+    if (!configData.http_clients) configData.http_clients = [];
+    configData.http_clients.push(parsed);
+  });
+};
+
+const editHttpClient = (hc, idx) => {
+  editItem(
+    hc,
+    "http_client",
+    (parsed) => {
+      configData.http_clients[idx] = parsed;
+    },
+    idx,
+  );
+};
+
+const deleteHttpClient = (idx) => {
+  configData.http_clients.splice(idx, 1);
 };
 
 const addBasicOutbound = () => {
@@ -9586,6 +10515,7 @@ const validateItemModal = () => {
   if (itemModal.mode === "visual") {
     let tempObj = JSON.parse(JSON.stringify(itemModal.itemData));
     const arrayFields = [
+      "query_type",
       "domain",
       "domain_suffix",
       "domain_keyword",
@@ -9633,8 +10563,14 @@ const validateItemModal = () => {
       tempObj.server_port = parseInt(tempObj.port);
       delete tempObj.port;
     }
-    if (
-      ["route_rule", "dns_rule"].includes(itemModal.itemType) &&
+    if (itemModal.itemType === "dns_rule") {
+      if (itemModal.ruleType === "logical" || tempObj.type === "logical") {
+        tempObj.type = "logical";
+        tempObj.mode = tempObj.mode || "and";
+        tempObj.rules = cleanRuleTree(tempObj.rules || []);
+      }
+    } else if (
+      itemModal.itemType === "route_rule" &&
       itemModal.routeRuleLogic &&
       itemModal.routeRuleLogic !== "standard"
     ) {
@@ -9694,6 +10630,7 @@ const getSerializedState = () => {
       else if (sec === "inbounds") state[sec] = serializeInbounds();
       else if (sec === "outbounds") state[sec] = serializeOutbounds();
       else if (sec === "route") state[sec] = serializeRoute();
+      else if (sec === "http_clients") state[sec] = serializeHttpClients();
       else if (sec === "experimental") state[sec] = serializeExperimental();
     } else {
       try {
@@ -10157,6 +11094,7 @@ const getRuleSummaryText = (rule, index, type) => {
 
   const criteria = [];
   const fields = [
+    "query_type",
     "rule_set",
     "domain_suffix",
     "geosite",
@@ -10170,13 +11108,27 @@ const getRuleSummaryText = (rule, index, type) => {
     "process_path_regex",
     "package_name",
   ];
+
+  const extractVals = (targetRule, fName) => {
+    if (!targetRule) return [];
+    if (targetRule[fName]) {
+      return Array.isArray(targetRule[fName])
+        ? targetRule[fName]
+        : [targetRule[fName]];
+    }
+    if (targetRule.type === "logical" && Array.isArray(targetRule.rules)) {
+      return targetRule.rules
+        .map((sub) => extractVals(sub, fName))
+        .flat()
+        .filter(Boolean);
+    }
+    return [];
+  };
+
   fields.forEach((f) => {
     let val = rule[f];
     if (!val && rule.type === "logical" && Array.isArray(rule.rules)) {
-      const subVals = rule.rules
-        .map((sub) => sub[f])
-        .filter(Boolean)
-        .flat();
+      const subVals = extractVals(rule, f);
       if (subVals.length > 0) val = subVals;
     }
     if (val) {
@@ -11133,5 +12085,271 @@ defineExpose({
   white-space: pre-wrap;
   max-height: 120px;
   overflow-y: auto;
+}
+
+/* 待测试节点范围与筛选面板样式 (最佳实践优化) */
+.wizard-section-box {
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+html[data-theme="light"] .wizard-section-box {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-section-box {
+    background: rgba(0, 0, 0, 0.015);
+  }
+}
+
+.wizard-link-btn {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.wizard-link-btn:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+.wizard-link-btn.wizard-link-danger {
+  color: var(--text-muted);
+}
+
+.wizard-link-btn.wizard-link-danger:hover {
+  color: var(--danger);
+  text-decoration: underline;
+}
+
+.wizard-link-divider {
+  color: var(--border-color);
+}
+
+.wizard-node-list {
+  max-height: 165px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: var(--bg-main, #090d16);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-content: flex-start;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] .wizard-node-list {
+  background: #f1f5f9;
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-list {
+    background: #f1f5f9;
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+}
+
+.wizard-node-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.wizard-node-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+html[data-theme="light"] .wizard-node-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-list::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+  }
+}
+
+.wizard-node-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+html[data-theme="light"] .wizard-node-chip {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.12);
+    color: #0f172a;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+}
+
+.wizard-node-chip:hover {
+  border-color: var(--primary);
+  background: var(--bg-card-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] .wizard-node-chip:hover {
+  background: #f8fafc;
+  border-color: var(--primary);
+  box-shadow: 0 2px 5px rgba(79, 70, 229, 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip:hover {
+    background: #f8fafc;
+    border-color: var(--primary);
+    box-shadow: 0 2px 5px rgba(79, 70, 229, 0.12);
+  }
+}
+
+.wizard-node-chip.is-selected {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: var(--primary);
+  color: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(99, 102, 241, 0.4),
+    0 2px 4px rgba(99, 102, 241, 0.15);
+}
+
+html[data-theme="light"] .wizard-node-chip.is-selected {
+  background: rgba(79, 70, 229, 0.1);
+  border-color: var(--primary);
+  color: #312e81;
+  box-shadow:
+    0 0 0 1px rgba(79, 70, 229, 0.35),
+    0 2px 4px rgba(79, 70, 229, 0.08);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip.is-selected {
+    background: rgba(79, 70, 229, 0.1);
+    border-color: var(--primary);
+    color: #312e81;
+    box-shadow:
+      0 0 0 1px rgba(79, 70, 229, 0.35),
+      0 2px 4px rgba(79, 70, 229, 0.08);
+  }
+}
+
+.wizard-node-checkbox {
+  pointer-events: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+  border-radius: 3px;
+}
+
+.wizard-node-tag {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.wizard-node-chip.is-selected .wizard-node-tag {
+  font-weight: 600;
+  color: #e0e7ff;
+}
+
+html[data-theme="light"] .wizard-node-chip.is-selected .wizard-node-tag {
+  color: var(--primary);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-chip.is-selected .wizard-node-tag {
+    color: var(--primary);
+  }
+}
+
+.wizard-node-type {
+  font-size: 0.65rem;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 0.08rem 0.3rem;
+  border-radius: 3px;
+  background: var(--btn-secondary-bg, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+html[data-theme="light"] .wizard-node-type {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(15, 23, 42, 0.08);
+  color: #64748b;
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .wizard-node-type {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(15, 23, 42, 0.08);
+    color: #64748b;
+  }
+}
+
+.wizard-node-chip.is-selected .wizard-node-type {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #c7d2fe;
+}
+
+html[data-theme="light"] .wizard-node-chip.is-selected .wizard-node-type {
+  background: rgba(79, 70, 229, 0.15);
+  border-color: rgba(79, 70, 229, 0.3);
+  color: var(--primary);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"])
+    .wizard-node-chip.is-selected
+    .wizard-node-type {
+    background: rgba(79, 70, 229, 0.15);
+    border-color: rgba(79, 70, 229, 0.3);
+    color: var(--primary);
+  }
+}
+
+.wizard-node-empty {
+  width: 100%;
+  text-align: center;
+  padding: 1.5rem 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
 }
 </style>

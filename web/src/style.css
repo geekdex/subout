@@ -997,6 +997,14 @@ input:checked + .slider:before {
   white-space: nowrap;
 }
 
+.badge-primary {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+.badge-secondary {
+  background: rgba(6, 182, 212, 0.15);
+  color: #22d3ee;
+}
 .badge-success {
   background: rgba(16, 185, 129, 0.15);
   color: #34d399;
@@ -1012,6 +1020,58 @@ input:checked + .slider:before {
 .badge-warning {
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;
+}
+
+html[data-theme="light"] .badge-primary {
+  background: rgba(79, 70, 229, 0.12);
+  color: #4f46e5;
+}
+html[data-theme="light"] .badge-secondary {
+  background: rgba(8, 145, 178, 0.12);
+  color: #0891b2;
+}
+html[data-theme="light"] .badge-success {
+  background: rgba(5, 150, 105, 0.12);
+  color: #059669;
+}
+html[data-theme="light"] .badge-danger {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+}
+html[data-theme="light"] .badge-info {
+  background: rgba(8, 145, 178, 0.12);
+  color: #0891b2;
+}
+html[data-theme="light"] .badge-warning {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) .badge-primary {
+    background: rgba(79, 70, 229, 0.12);
+    color: #4f46e5;
+  }
+  html:not([data-theme="dark"]) .badge-secondary {
+    background: rgba(8, 145, 178, 0.12);
+    color: #0891b2;
+  }
+  html:not([data-theme="dark"]) .badge-success {
+    background: rgba(5, 150, 105, 0.12);
+    color: #059669;
+  }
+  html:not([data-theme="dark"]) .badge-danger {
+    background: rgba(220, 38, 38, 0.12);
+    color: #dc2626;
+  }
+  html:not([data-theme="dark"]) .badge-info {
+    background: rgba(8, 145, 178, 0.12);
+    color: #0891b2;
+  }
+  html:not([data-theme="dark"]) .badge-warning {
+    background: rgba(217, 119, 6, 0.12);
+    color: #b45309;
+  }
 }
 
 /* JSON Code Viewer */

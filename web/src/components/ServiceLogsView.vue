@@ -89,7 +89,8 @@
         font-size: 0.82rem;
       "
     >
-      ⚠️ 提示：sing-box 核心配置已禁用日志记录 (disabled: true)，核心运行日志不会写入，当前仅记录 Subout 服务启停与管理事件。
+      ⚠️ 提示：sing-box 核心配置已禁用日志记录 (disabled:
+      true)，核心运行日志不会写入，当前仅记录 Subout 服务启停与管理事件。
     </div>
 
     <!-- Search / Filter bar -->

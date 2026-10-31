@@ -132,7 +132,6 @@ pub fn is_cn_domain(domain: &str) -> bool {
         return true;
     }
 
-
     KNOWN_CN_SUFFIXES
         .iter()
         .any(|suffix| d == *suffix || d.ends_with(&format!(".{suffix}")))
@@ -289,7 +288,11 @@ fn get_str_list(val: Option<&Value>) -> Vec<&str> {
 /// Helper to get a list of ports from a JSON Value (number, array of numbers, or strings).
 fn get_port_list(val: Option<&Value>) -> Vec<u16> {
     match val {
-        Some(Value::Number(n)) => n.as_u64().and_then(|p| u16::try_from(p).ok()).into_iter().collect(),
+        Some(Value::Number(n)) => n
+            .as_u64()
+            .and_then(|p| u16::try_from(p).ok())
+            .into_iter()
+            .collect(),
         Some(Value::Array(arr)) => arr
             .iter()
             .filter_map(|v| match v {
@@ -440,7 +443,12 @@ fn evaluate_rule(
                 matched_reasons.push(desc);
             }
             let target = target_opt
-                .or_else(|| sub_rules.first()?.get(target_field).and_then(|v| v.as_str()))?
+                .or_else(|| {
+                    sub_rules
+                        .first()?
+                        .get(target_field)
+                        .and_then(|v| v.as_str())
+                })?
                 .to_string();
             return Some((matched_reasons.join(" + "), target));
         }
@@ -475,7 +483,13 @@ pub fn format_dns_server(server_tag: &str, dns_val: &Value) -> String {
                         let host = s.get("server").and_then(|h| h.as_str()).unwrap_or("");
                         let detour = s.get("detour").and_then(|d| d.as_str());
                         if let Some(d) = detour {
-                            format!("{} ({} {} ➔ {})", server_tag, srv_type.to_uppercase(), host, d)
+                            format!(
+                                "{} ({} {} ➔ {})",
+                                server_tag,
+                                srv_type.to_uppercase(),
+                                host,
+                                d
+                            )
                         } else if !host.is_empty() {
                             format!("{} ({} {})", server_tag, srv_type.to_uppercase(), host)
                         } else {
@@ -509,10 +523,8 @@ pub fn format_outbound(outbound_tag: &str, config_val: &Value) -> String {
                     "direct" => return "direct (直连出站)".to_string(),
                     "block" => return "block (拦截丢弃)".to_string(),
                     "selector" => {
-                        let default_target = o
-                            .get("default")
-                            .and_then(|d| d.as_str())
-                            .or_else(|| {
+                        let default_target =
+                            o.get("default").and_then(|d| d.as_str()).or_else(|| {
                                 o.get("outbounds")
                                     .and_then(|obs| obs.as_array())
                                     .and_then(|obs| obs.first())
@@ -556,11 +568,9 @@ pub fn parse_target_url(url_str: &str) -> (String, Option<IpAddr>, u16, String, 
 
     if let Ok(parsed) = url::Url::parse(&full_url) {
         let domain = parsed.host_str().unwrap_or("").trim().to_string();
-        let port = parsed.port().unwrap_or(if parsed.scheme() == "https" {
-            443
-        } else {
-            80
-        });
+        let port = parsed
+            .port()
+            .unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
         let protocol = "tcp".to_string();
         let ip = domain.parse::<IpAddr>().ok();
         let is_private = if let Some(ip_val) = ip {
@@ -604,23 +614,14 @@ pub fn trace_rules_for_url(config_val: &Value, url_str: &str) -> RouteTraceResul
     // 1. DNS evaluation
     let dns_val = config_val.get("dns").unwrap_or(&Value::Null);
     let (dns_rule, dns_server) = if ip.is_some() {
-        (
-            "直接IP请求 (无需解析)".to_string(),
-            "直接连接".to_string(),
-        )
+        ("直接IP请求 (无需解析)".to_string(), "直接连接".to_string())
     } else {
         let mut matched_rule = None;
         if let Some(rules_arr) = dns_val.get("rules").and_then(|r| r.as_array()) {
             for r in rules_arr {
-                if let Some((desc, server_tag)) = evaluate_rule(
-                    r,
-                    &domain,
-                    ip,
-                    port,
-                    &protocol,
-                    is_private,
-                    "server",
-                ) {
+                if let Some((desc, server_tag)) =
+                    evaluate_rule(r, &domain, ip, port, &protocol, is_private, "server")
+                {
                     matched_rule = Some((desc, server_tag));
                     break;
                 }
@@ -651,15 +652,9 @@ pub fn trace_rules_for_url(config_val: &Value, url_str: &str) -> RouteTraceResul
                 continue;
             }
 
-            if let Some((desc, outbound_tag)) = evaluate_rule(
-                r,
-                &domain,
-                ip,
-                port,
-                &protocol,
-                is_private,
-                "outbound",
-            ) {
+            if let Some((desc, outbound_tag)) =
+                evaluate_rule(r, &domain, ip, port, &protocol, is_private, "outbound")
+            {
                 matched_route = Some((desc, outbound_tag));
                 break;
             }
@@ -704,7 +699,10 @@ pub fn load_active_config(db_path: &str) -> Option<Value> {
 }
 
 /// Convenient helper for `test_site_reachability` to evaluate trace given `AppState` and URL.
-pub fn evaluate_site_trace(state: &crate::web::AppState, url_str: &str) -> Option<RouteTraceResult> {
+pub fn evaluate_site_trace(
+    state: &crate::web::AppState,
+    url_str: &str,
+) -> Option<RouteTraceResult> {
     let config_val = load_active_config(&state.db_path)?;
     Some(trace_rules_for_url(&config_val, url_str))
 }

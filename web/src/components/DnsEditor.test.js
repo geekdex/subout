@@ -80,7 +80,6 @@ const mockConfigData = {
     strategy: "prefer_ipv4",
     final: "dns-google",
     client_subnet: "223.5.5.0/24",
-    independent_cache: false,
     disable_cache: false,
     disable_expire: true,
     reverse_mapping: false,
@@ -105,7 +104,6 @@ const emptyConfigData = {
     strategy: "prefer_ipv4",
     final: "",
     client_subnet: "",
-    independent_cache: false,
     disable_cache: false,
     disable_expire: false,
     reverse_mapping: false,
@@ -216,6 +214,53 @@ describe("DnsEditor", () => {
       await searchInput.setValue("ZZZZNOTEXIST");
       await flushPromises();
       expect(wrapper.text()).toContain("没有匹配的规则");
+    });
+
+    it("filters rules by criteria located in nested logical rules", async () => {
+      const configWithNested = {
+        dns: {
+          servers: [{ tag: "remote-dns", type: "https" }],
+          rules: [
+            {
+              type: "logical",
+              mode: "and",
+              server: "remote-dns",
+              rules: [
+                { query_type: ["A", "AAAA"] },
+                {
+                  type: "logical",
+                  mode: "or",
+                  rules: [
+                    { domain: ["claude.ai"] },
+                    { domain_suffix: [".google.com"] },
+                  ],
+                },
+              ],
+            },
+            {
+              server: "direct-dns",
+              domain_suffix: [".cn"],
+            },
+          ],
+        },
+      };
+
+      const wrapper = mountDnsEditor(configWithNested);
+      const searchInput = wrapper.find(".search-filter-bar input");
+
+      // Search for nested domain "claude"
+      await searchInput.setValue("claude");
+      await flushPromises();
+      expect(wrapper.text()).toContain("remote-dns");
+      expect(wrapper.text()).toContain("claude.ai");
+      expect(wrapper.text()).not.toContain(".cn");
+
+      // Search for nested query_type "AAAA"
+      await searchInput.setValue("AAAA");
+      await flushPromises();
+      expect(wrapper.text()).toContain("remote-dns");
+      expect(wrapper.text()).toContain("AAAA");
+      expect(wrapper.text()).not.toContain(".cn");
     });
   });
 

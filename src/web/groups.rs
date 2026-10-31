@@ -66,9 +66,7 @@ pub async fn get_groups(
         )
     })?;
     let groups = db::get_outbound_groups(&conn).map_err(|e| {
-        eprintln!(
-            "[groups::get_groups] Failed to query outbound_groups: {e:?}"
-        );
+        eprintln!("[groups::get_groups] Failed to query outbound_groups: {e:?}");
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("获取出站分组列表失败: {}", e) })),

@@ -107,4 +107,3 @@ pub struct SpeedTestSummary {
     pub tcp_tiers: LatencyTierCount,
     pub last_tested_at: Option<String>,
 }
-

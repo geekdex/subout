@@ -365,43 +365,13 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
-            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
             obj.remove("auto_redirect");
-            if is_tun {
-                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str()) {
-                    if iface == "tun0" || iface.is_empty() {
-                        obj.insert("interface_name".to_string(), json!("subout-tun"));
-                    }
-                } else {
-                    obj.insert("interface_name".to_string(), json!("subout-tun"));
-                }
-
-                // If stack is system on Windows, switch to mixed (wintun standard)
-                if let Some(stack) = obj.get("stack").and_then(|s| s.as_str()) {
-                    if stack == "system" {
-                        obj.insert("stack".to_string(), json!("mixed"));
-                    }
-                } else {
-                    obj.insert("stack".to_string(), json!("mixed"));
-                }
-
-                // Ensure IPv6 dual-stack address is present on Windows to prevent leakage
-                if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr
-                        .iter()
-                        .any(|a| a.as_str().is_some_and(|s| s.contains(':')));
-                    if !has_ipv6 {
-                        addr_arr.push(json!("fd00::1/126"));
-                    }
-                } else {
-                    obj.insert(
-                        "address".to_string(),
-                        json!(["172.19.0.1/30", "fd00::1/126"]),
-                    );
-                }
-
-                // Windows strict_route MUST be true
-                obj.insert("strict_route".to_string(), json!(true));
+            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
+            if is_tun
+                && let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
+                && iface == "tun0"
+            {
+                obj.insert("interface_name".to_string(), json!("subout-tun"));
             }
         }
     }
@@ -424,7 +394,11 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn default_data_dir(&self) -> PathBuf {
         std::env::var("ProgramData")
-            .or_else(|_| std::env::var("ALLUSERSPROFILE")).map_or_else(|_| PathBuf::from(r"C:\ProgramData\Subout"), |p| PathBuf::from(p).join("Subout"))
+            .or_else(|_| std::env::var("ALLUSERSPROFILE"))
+            .map_or_else(
+                |_| PathBuf::from(r"C:\ProgramData\Subout"),
+                |p| PathBuf::from(p).join("Subout"),
+            )
     }
 
     fn default_config_dir(&self, data_dir: &Path) -> PathBuf {
@@ -572,16 +546,14 @@ pub fn filter_conflicting_processes(
         let cmdline = item.command_line.clone();
         let exe_path = item.executable_path.clone();
 
-        let is_subout_instance = cmdline
-            .as_deref()
-            .is_some_and(|c| {
-                let c_lower = c.to_lowercase();
-                c_lower.contains("subout")
-                    || c.contains(&config_path_str)
-                    || c.contains(&config_path_norm)
-                    || c_lower.contains("sing-box.json")
-                    || c_lower.contains("sing-box-running.json")
-            });
+        let is_subout_instance = cmdline.as_deref().is_some_and(|c| {
+            let c_lower = c.to_lowercase();
+            c_lower.contains("subout")
+                || c.contains(&config_path_str)
+                || c.contains(&config_path_norm)
+                || c_lower.contains("sing-box.json")
+                || c_lower.contains("sing-box-running.json")
+        });
 
         if is_subout_instance {
             continue;
@@ -771,9 +743,7 @@ mod tests {
                 process_id: Some(8888),
                 parent_process_id: Some(1),
                 name: Some("sing-box.exe".to_string()),
-                command_line: Some(
-                    r"sing-box.exe run -c C:\etc\sing-box\config.json".to_string(),
-                ),
+                command_line: Some(r"sing-box.exe run -c C:\etc\sing-box\config.json".to_string()),
                 executable_path: Some(r"C:\Program Files\sing-box\sing-box.exe".to_string()),
             },
         ];

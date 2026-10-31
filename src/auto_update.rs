@@ -310,6 +310,7 @@ pub async fn run_auto_update_process(
             .get("experimental")
             .cloned()
             .unwrap_or(json!({}));
+        let http_clients_val = final_config.get("http_clients");
 
         if let Err(err_msg) = crate::web::config::validate_config_with_singbox(
             &log_val,
@@ -318,6 +319,7 @@ pub async fn run_auto_update_process(
             &outbounds_val,
             &route_val,
             &experimental_val,
+            http_clients_val,
         ) {
             return Err(anyhow!("配置校验失败: {err_msg}"));
         }
@@ -337,9 +339,8 @@ pub async fn run_auto_update_process(
         ));
 
         // Save history config and update active config id
-        let new_history_desc = format!(
-            "自动更新配置 (包含已更新策略组和代理节点, 清理超时节点: {deleted_count} 个)"
-        );
+        let new_history_desc =
+            format!("自动更新配置 (包含已更新策略组和代理节点, 清理超时节点: {deleted_count} 个)");
         let new_content_json = serde_json::to_string(&final_config)?;
         {
             let conn_hist = Connection::open(db_path)?;

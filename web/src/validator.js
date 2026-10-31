@@ -19,6 +19,8 @@ export async function initAjv() {
       if (schemas.inbounds)
         validators["inbounds"] = ajv.compile(schemas.inbounds);
       if (schemas.route) validators["route"] = ajv.compile(schemas.route);
+      if (schemas.http_clients)
+        validators["http_clients"] = ajv.compile(schemas.http_clients);
       if (schemas.experimental)
         validators["experimental"] = ajv.compile(schemas.experimental);
       if (schemas.node) validators["node"] = ajv.compile(schemas.node);

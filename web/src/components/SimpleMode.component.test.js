@@ -504,6 +504,123 @@ describe("DashboardView - Mode Switch Confirmation", () => {
   });
 });
 
+describe("DashboardView - Explicit System Proxy Control", () => {
+  it("disables system proxy checkbox with informative tooltip when no mixed port exists (pure TUN)", async () => {
+    const { default: DashboardView } = await import("./DashboardView.vue");
+    const { serviceStatus, token } = await import("../store.js");
+    token.value = "test-token";
+    serviceStatus.value = {
+      running: true,
+      ready: true,
+      is_tun: true,
+      mixed_port: null,
+      system_proxy_enabled: false,
+      system_proxy_active: false,
+    };
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(serviceStatus.value),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(DashboardView);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const proxyToggle = wrapper.find(".system-proxy-toggle-card");
+    expect(proxyToggle.exists()).toBe(true);
+    expect(proxyToggle.classes()).toContain("disabled");
+    const checkbox = proxyToggle.find("input[type='checkbox']");
+    expect(checkbox.attributes("disabled")).toBeDefined();
+  });
+
+  it("enables system proxy checkbox and toggles /api/service/system-proxy when mixed port is configured", async () => {
+    const { default: DashboardView } = await import("./DashboardView.vue");
+    const { serviceStatus, token } = await import("../store.js");
+    token.value = "test-token";
+    serviceStatus.value = {
+      running: true,
+      ready: true,
+      is_tun: true,
+      mixed_port: 2080,
+      system_proxy_enabled: false,
+      system_proxy_active: false,
+    };
+
+    let systemProxyPayload = null;
+    global.fetch = vi.fn().mockImplementation((url, opts) => {
+      if (url.includes("/api/service/system-proxy")) {
+        systemProxyPayload = JSON.parse(opts.body);
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: "success",
+              system_proxy_enabled: systemProxyPayload.enabled,
+              message: "已开启系统网络代理",
+            }),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(serviceStatus.value),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(DashboardView);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const proxyToggle = wrapper.find(".system-proxy-toggle-card");
+    expect(proxyToggle.classes()).not.toContain("disabled");
+
+    const checkbox = proxyToggle.find("input[type='checkbox']");
+    expect(checkbox.attributes("disabled")).toBeUndefined();
+
+    // Trigger toggle check
+    await checkbox.setValue(true);
+    expect(systemProxyPayload).toEqual({ enabled: true });
+  });
+
+  it("shows active badge when system proxy is currently active", async () => {
+    const { default: DashboardView } = await import("./DashboardView.vue");
+    const { serviceStatus, token } = await import("../store.js");
+    token.value = "test-token";
+    serviceStatus.value = {
+      running: true,
+      ready: true,
+      mixed_port: 2080,
+      system_proxy_enabled: true,
+      system_proxy_active: true,
+    };
+
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(serviceStatus.value),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const wrapper = mount(DashboardView);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(wrapper.find(".system-proxy-toggle-card").classes()).toContain(
+      "active",
+    );
+    expect(wrapper.text()).toContain("生效中");
+    expect(wrapper.text()).toContain("已开启 (127.0.0.1:2080)");
+  });
+});
+
 describe("SimpleConfigView Speed Test & Best Node Indicator", () => {
   it("triggers node speed test and updates node latency displays", async () => {
     const { default: SimpleConfigView } =
@@ -894,7 +1011,9 @@ describe("SimpleConfigView - Log Level Configuration", () => {
     // Check timestamp, disabled switches and output file input
     expect(wrapper.text()).toContain("在日志中包含精确时间戳");
     expect(wrapper.text()).toContain("禁用内核日志输出");
-    const logCheckboxes = wrapper.findAll(".log-switches-row input[type='checkbox']");
+    const logCheckboxes = wrapper.findAll(
+      ".log-switches-row input[type='checkbox']",
+    );
     expect(logCheckboxes.length).toBe(2);
 
     const outputInput = wrapper.find("input[placeholder*='sing-box.log']");
@@ -930,6 +1049,12 @@ describe("SimpleConfigView - Log Level Configuration", () => {
             Promise.resolve([
               "[2026-09-01 00:00:01] 🟢 sing-box 进程已拉起 (PID: 67890)",
             ]),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(serviceStatus.value),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -970,6 +1095,12 @@ describe("SimpleConfigView - Log Level Configuration", () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve([]),
+        });
+      }
+      if (url.includes("/api/service/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(serviceStatus.value),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });

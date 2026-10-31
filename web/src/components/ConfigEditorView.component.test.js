@@ -734,6 +734,19 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(wrapper.text()).toContain("编辑中 #1");
     });
 
+    it("带前导斜杠 URL #/configs/edit/1/log -> 正确进入配置 #1 编辑页并在 log tab", async () => {
+      window.location.hash = "#/configs/edit/1/log";
+      vi.spyOn(global, "fetch").mockImplementation(createMockFetch());
+      const wrapper = mount(ConfigEditorView, {
+        global: { stubs: { JsonTreeView: true } },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("编辑中 #1");
+      expect(wrapper.text()).toContain("log 配置");
+    });
+
     it("在编辑模式下点击'返回列表' -> URL Hash 恢复为 #configs 并返回列表", async () => {
       window.location.hash = "#configs";
       const wrapper = await mountConfigEditor();
@@ -1176,7 +1189,9 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       ];
 
       await wrapper.vm.openDomainWizard();
-      expect(wrapper.vm.domainWizardModal.selectedNodeTags.length).toBeGreaterThan(0);
+      expect(
+        wrapper.vm.domainWizardModal.selectedNodeTags.length,
+      ).toBeGreaterThan(0);
 
       // 清空节点
       const clearBtn = wrapper.find(".wizard-clear-nodes-btn");
@@ -1209,7 +1224,10 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       wrapper.vm.domainWizardModal.inputText = "1.2.3.4";
       await flushPromises();
       await wrapper.vm.startLatencyTest();
-      expect(mockShowToast).toHaveBeenCalledWith("请至少选择一个待测试节点", "warning");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "请至少选择一个待测试节点",
+        "warning",
+      );
     });
   });
 
@@ -1606,6 +1624,209 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       await flushPromises();
 
       expect(wrapper.vm.configData.inbounds[0].auto_redirect).toBe(true);
+    });
+
+    it("TUN 入站连接 IP 地址 (address) 编辑与一键使用推荐 IP 功能测试", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      // 1. 测试 parseInbounds 正确将 address 解析到 _table_address
+      wrapper.vm.parseInbounds([
+        {
+          type: "tun",
+          tag: "tun-in",
+          address: ["172.19.0.1/30"],
+        },
+      ]);
+      await flushPromises();
+
+      expect(wrapper.vm.configData.inbounds[0]._table_address).toBe(
+        "172.19.0.1/30",
+      );
+
+      // 2. 测试编辑弹窗 editItem 时正确回显 address 到 tempFields.address
+      wrapper.vm.editItem(
+        wrapper.vm.configData.inbounds[0],
+        "inbound",
+        (parsed) => {
+          wrapper.vm.configData.inbounds[0] = parsed;
+        },
+        0,
+      );
+      await flushPromises();
+
+      expect(wrapper.vm.itemModal.tempFields.address).toBe("172.19.0.1/30");
+
+      // 3. 测试一键应用双栈推荐 IP
+      wrapper.vm.applyRecommendedInboundIp("dual");
+      expect(wrapper.vm.itemModal.tempFields.address).toBe(
+        "172.19.0.1/30, fd00::1/126",
+      );
+
+      // 4. 测试自定义修改并保存
+      wrapper.vm.itemModal.tempFields.address = "10.0.0.1/30";
+      wrapper.vm.syncVisualToItemData();
+      expect(wrapper.vm.itemModal.itemData.address).toEqual(["10.0.0.1/30"]);
+
+      // 5. 测试一键推荐 IPv4
+      wrapper.vm.applyRecommendedInboundIp("ipv4");
+      wrapper.vm.syncVisualToItemData();
+      expect(wrapper.vm.itemModal.itemData.address).toEqual(["172.19.0.1/30"]);
+
+      // 6. 测试 serializeInbounds 正确序列化为 JSON 数组并清除 _table_address
+      wrapper.vm.configData.inbounds[0].address = ["172.19.0.1/30"];
+      wrapper.vm.configData.inbounds[0]._table_address = "172.19.0.1/30";
+      const serialized = wrapper.vm.serializeInbounds();
+      expect(serialized[0].address).toEqual(["172.19.0.1/30"]);
+      expect(serialized[0]._table_address).toBeUndefined();
+    });
+
+    it("入站连接切换协议类型时，智能更新默认端口与标签 (mixed -> socks -> http)", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      const inb = {
+        tag: "mixed-in",
+        type: "mixed",
+        listen: "::",
+        listen_port: 2334,
+      };
+
+      // 切换为 socks 类型
+      inb.type = "socks";
+      wrapper.vm.onInboundTypeChange(inb);
+
+      expect(inb.listen_port).toBe(1080);
+      expect(inb.tag).toBe("socks-in");
+
+      // 切换为 http 类型
+      inb.type = "http";
+      wrapper.vm.onInboundTypeChange(inb);
+
+      expect(inb.listen_port).toBe(8080);
+      expect(inb.tag).toBe("http-in");
+
+      // 切换回 mixed 类型
+      inb.type = "mixed";
+      wrapper.vm.onInboundTypeChange(inb);
+
+      expect(inb.listen_port).toBe(2334);
+      expect(inb.tag).toBe("mixed-in");
+    });
+
+    it("检测到本机局域网 IP 时，入站连接支持一键快捷绑定推荐内网 IP 与全网卡", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      wrapper.vm.primaryLanIp = "192.168.1.2";
+      wrapper.vm.systemLanIps = ["192.168.1.2", "10.0.0.5"];
+
+      const inb = {
+        tag: "mixed-in",
+        type: "mixed",
+        listen: "::",
+        listen_port: 2334,
+      };
+
+      // 在弹窗中可一键选择推荐内网 IP 或 :: 或 127.0.0.1
+      wrapper.vm.itemModal.itemData = inb;
+      wrapper.vm.itemModal.itemData.listen = wrapper.vm.primaryLanIp;
+      expect(wrapper.vm.itemModal.itemData.listen).toBe("192.168.1.2");
+
+      wrapper.vm.itemModal.itemData.listen = "::";
+      expect(wrapper.vm.itemModal.itemData.listen).toBe("::");
+
+      wrapper.vm.itemModal.itemData.listen = "127.0.0.1";
+      expect(wrapper.vm.itemModal.itemData.listen).toBe("127.0.0.1");
+    });
+
+    it("DNS 规则模态框：支持嵌套逻辑规则 (AND/OR) 的可视化编辑与数据保存", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      const userNestedRule = {
+        type: "logical",
+        mode: "and",
+        server: "remote-dns",
+        rules: [
+          {
+            query_type: ["A", "AAAA"],
+          },
+          {
+            type: "logical",
+            mode: "or",
+            rules: [
+              { domain: ["claude.ai"] },
+              { domain_suffix: [".io", ".google"] },
+              { rule_set: ["geosite-google"] },
+            ],
+          },
+        ],
+      };
+
+      let savedRule = null;
+      wrapper.vm.editItem(userNestedRule, "dns_rule", (parsed) => {
+        savedRule = parsed;
+      });
+      await flushPromises();
+
+      expect(wrapper.vm.itemModal.show).toBe(true);
+      expect(wrapper.vm.itemModal.itemType).toBe("dns_rule");
+      expect(wrapper.vm.itemModal.ruleType).toBe("logical");
+      expect(wrapper.vm.itemModal.itemData.server).toBe("remote-dns");
+      expect(wrapper.vm.itemModal.itemData.rules).toHaveLength(2);
+
+      // 保存
+      wrapper.vm.saveItem();
+      await flushPromises();
+      expect(savedRule).toBeTruthy();
+      expect(savedRule.type).toBe("logical");
+      expect(savedRule.mode).toBe("and");
+      expect(savedRule.server).toBe("remote-dns");
+      expect(savedRule.rules).toHaveLength(2);
+      expect(savedRule.rules[0].query_type).toEqual(["A", "AAAA"]);
+      expect(savedRule.rules[1].type).toBe("logical");
+      expect(savedRule.rules[1].mode).toBe("or");
+      expect(savedRule.rules[1].rules).toHaveLength(3);
+      expect(savedRule.rules[1].rules[0].domain).toEqual(["claude.ai"]);
+    });
+
+    it("DNS 规则模态框：在可视化与 JSON 源码模式之间切换时无损保留嵌套规则结构", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      const userNestedRule = {
+        type: "logical",
+        mode: "and",
+        server: "remote-dns",
+        rules: [
+          { query_type: ["A", "AAAA"] },
+          {
+            type: "logical",
+            mode: "or",
+            rules: [{ domain: ["claude.ai"] }, { domain_suffix: [".io"] }],
+          },
+        ],
+      };
+
+      wrapper.vm.editItem(userNestedRule, "dns_rule", () => {});
+      await flushPromises();
+
+      // 切换到 JSON 源码模式
+      wrapper.vm.setItemModalMode("json");
+      expect(wrapper.vm.itemModal.mode).toBe("json");
+      const parsedFromText = JSON.parse(wrapper.vm.itemModal.jsonText);
+      expect(parsedFromText.type).toBe("logical");
+      expect(parsedFromText.rules).toHaveLength(2);
+
+      // 切换回可视化表单模式
+      wrapper.vm.setItemModalMode("visual");
+      expect(wrapper.vm.itemModal.mode).toBe("visual");
+      expect(wrapper.vm.itemModal.ruleType).toBe("logical");
+      expect(wrapper.vm.itemModal.itemData.rules).toHaveLength(2);
+      expect(wrapper.vm.itemModal.itemData.rules[1].rules[0].domain).toEqual([
+        "claude.ai",
+      ]);
     });
   });
 });

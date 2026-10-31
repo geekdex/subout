@@ -159,13 +159,19 @@
               <span class="custom-trace-badge dns-badge">DNS 规则</span>
               <span class="custom-trace-rule">{{ customResult.dns_rule }}</span>
               <span class="custom-trace-arrow">➔</span>
-              <span class="custom-trace-server">{{ customResult.dns_server || "默认服务" }}</span>
+              <span class="custom-trace-server">{{
+                customResult.dns_server || "默认服务"
+              }}</span>
             </div>
             <div v-if="customResult.route_rule" class="custom-trace-item">
               <span class="custom-trace-badge route-badge">请求出口</span>
-              <span class="custom-trace-rule">{{ customResult.route_rule }}</span>
+              <span class="custom-trace-rule">{{
+                customResult.route_rule
+              }}</span>
               <span class="custom-trace-arrow">➔</span>
-              <span class="custom-trace-outbound">{{ customResult.outbound || "默认出站" }}</span>
+              <span class="custom-trace-outbound">{{
+                customResult.outbound || "默认出站"
+              }}</span>
             </div>
           </div>
         </div>
@@ -249,7 +255,9 @@
 
             <!-- Route & DNS Trace Information -->
             <div
-              v-if="site.result && (site.result.dns_rule || site.result.route_rule)"
+              v-if="
+                site.result && (site.result.dns_rule || site.result.route_rule)
+              "
               class="site-trace-box"
             >
               <div
@@ -259,9 +267,15 @@
               >
                 <span class="trace-tag-pill trace-dns-pill">DNS</span>
                 <span class="trace-text">
-                  <span class="trace-rule-part">{{ site.result.dns_rule }}</span>
+                  <span class="trace-rule-part">{{
+                    site.result.dns_rule
+                  }}</span>
                   <span v-if="site.result.dns_server" class="trace-sep">➔</span>
-                  <span v-if="site.result.dns_server" class="trace-target-part">{{ site.result.dns_server }}</span>
+                  <span
+                    v-if="site.result.dns_server"
+                    class="trace-target-part"
+                    >{{ site.result.dns_server }}</span
+                  >
                 </span>
               </div>
 
@@ -272,9 +286,15 @@
               >
                 <span class="trace-tag-pill trace-route-pill">出口</span>
                 <span class="trace-text">
-                  <span class="trace-rule-part">{{ site.result.route_rule }}</span>
+                  <span class="trace-rule-part">{{
+                    site.result.route_rule
+                  }}</span>
                   <span v-if="site.result.outbound" class="trace-sep">➔</span>
-                  <span v-if="site.result.outbound" class="trace-target-part trace-highlight">{{ site.result.outbound }}</span>
+                  <span
+                    v-if="site.result.outbound"
+                    class="trace-target-part trace-highlight"
+                    >{{ site.result.outbound }}</span
+                  >
                 </span>
               </div>
             </div>

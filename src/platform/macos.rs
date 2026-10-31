@@ -1,7 +1,7 @@
 use anyhow::Result;
 #[cfg(unix)]
 use anyhow::anyhow;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::platform::{BoxFuture, PlatformStrategy};
@@ -447,38 +447,13 @@ impl PlatformStrategy for MacOsPlatform {
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
-            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
             obj.remove("auto_redirect");
-            if is_tun {
-                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
-                    && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
-                {
-                    obj.remove("interface_name");
-                }
-
-                // On macOS, FakeIP and TUN transparent proxy require stack: "mixed" or "gvisor".
-                let current_stack = obj.get("stack").and_then(|s| s.as_str());
-                if current_stack.is_none() || current_stack == Some("system") {
-                    obj.insert("stack".to_string(), json!("mixed"));
-                }
-
-                // Ensure IPv6 dual-stack address is present on macOS to prevent leakage
-                if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr
-                        .iter()
-                        .any(|a| a.as_str().is_some_and(|s| s.contains(':')));
-                    if !has_ipv6 {
-                        addr_arr.push(json!("fd00::1/126"));
-                    }
-                } else {
-                    obj.insert(
-                        "address".to_string(),
-                        json!(["172.19.0.1/30", "fd00::1/126"]),
-                    );
-                }
-
-                // macOS strict_route MUST be true
-                obj.insert("strict_route".to_string(), json!(true));
+            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
+            if is_tun
+                && let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
+                && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
+            {
+                obj.remove("interface_name");
             }
         }
     }

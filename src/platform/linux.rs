@@ -120,9 +120,17 @@ impl PlatformStrategy for LinuxPlatform {
 
     fn tun_permission_error_guide(&self, err: &str, singbox_bin: &Path) -> String {
         let bin_display = singbox_bin.display();
-        format!(
-            "TUN 模式启动失败 ({err}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行，或在终端执行 sudo setcap cap_net_admin=+ep {bin_display} (Linux) 授权免密运行。"
-        )
+        if err.contains("add address")
+            && (err.contains("permission denied") || err.contains("operation not permitted"))
+        {
+            format!(
+                "TUN 模式配置网卡地址失败 ({err}): 可能是系统禁用了 IPv6 导致无法分配 IPv6 地址。请检查并开启系统 IPv6 (执行 sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0)，或在入站 (inbounds) 配置中移除 IPv6 地址。"
+            )
+        } else {
+            format!(
+                "TUN 模式启动失败 ({err}): 创建虚拟网卡需系统管理员 (root) 权限。请输入系统 Sudo 密码授权运行，或在终端执行 sudo setcap cap_net_admin=+ep {bin_display} (Linux) 授权免密运行。"
+            )
+        }
     }
 
     fn is_pid_alive(&self, pid: u32) -> bool {
@@ -283,13 +291,11 @@ impl PlatformStrategy for LinuxPlatform {
 
                         let is_subout = comm == "subout"
                             || comm.contains("subout")
-                            || cmdline
-                                .as_deref()
-                                .is_some_and(|c| {
-                                    c.contains("subout")
-                                        || c.contains(&config_path_str)
-                                        || c.contains("sing-box-running.json")
-                                });
+                            || cmdline.as_deref().is_some_and(|c| {
+                                c.contains("subout")
+                                    || c.contains(&config_path_str)
+                                    || c.contains("sing-box-running.json")
+                            });
 
                         if is_subout {
                             continue;
@@ -299,14 +305,12 @@ impl PlatformStrategy for LinuxPlatform {
                             || exe_path
                                 .as_deref()
                                 .is_some_and(|p| p.ends_with("/sing-box"))
-                            || cmdline
-                                .as_deref()
-                                .is_some_and(|c| {
-                                    c.starts_with("sing-box ")
-                                        || c.contains("/sing-box ")
-                                        || c.contains("sing-box run")
-                                        || c == "sing-box"
-                                });
+                            || cmdline.as_deref().is_some_and(|c| {
+                                c.starts_with("sing-box ")
+                                    || c.contains("/sing-box ")
+                                    || c.contains("sing-box run")
+                                    || c == "sing-box"
+                            });
 
                         if is_singbox && seen_pids.insert(pid) {
                             results.push(ConflictingProcessInfo {
@@ -615,7 +619,33 @@ impl PlatformStrategy for LinuxPlatform {
         }
     }
 
-    fn enable_system_proxy(&self, _port: u16, _sudo_pass: Option<&str>) {}
+    fn enable_system_proxy(&self, port: u16, _sudo_pass: Option<&str>) {
+        #[cfg(unix)]
+        {
+            let port_str = port.to_string();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy", "mode", "manual"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.http", "host", "127.0.0.1"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.http", "port", &port_str])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.https", "host", "127.0.0.1"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.https", "port", &port_str])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"])
+                .output();
+            let _ = std::process::Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.socks", "port", &port_str])
+                .output();
+        }
+    }
 
     fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {
         #[cfg(unix)]
@@ -632,28 +662,8 @@ impl PlatformStrategy for LinuxPlatform {
         clean_linux_tun_network(sudo_pass);
     }
 
-    fn sanitize_inbound(&self, inbound: &mut Value) {
-        if let Some(obj) = inbound.as_object_mut() {
-            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun {
-                if !obj.contains_key("strict_route") {
-                    obj.insert("strict_route".to_string(), serde_json::json!(false));
-                }
-                if let Some(addr_arr) = obj.get_mut("address").and_then(|v| v.as_array_mut()) {
-                    let has_ipv6 = addr_arr
-                        .iter()
-                        .any(|a| a.as_str().is_some_and(|s| s.contains(':')));
-                    if !has_ipv6 {
-                        addr_arr.push(serde_json::json!("fd00::1/126"));
-                    }
-                } else if !obj.contains_key("address") {
-                    obj.insert(
-                        "address".to_string(),
-                        serde_json::json!(["172.19.0.1/30", "fd00::1/126"]),
-                    );
-                }
-            }
-        }
+    fn sanitize_inbound(&self, _inbound: &mut Value) {
+        // 所见即所得：遵循用户原始入站配置，不做任何隐式增加或修改
     }
 
     fn default_tun_interface_name(&self) -> &'static str {
@@ -689,14 +699,21 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn standard_singbox_candidates(&self, _binary_name: &str) -> Vec<PathBuf> {
-        vec![
+        let mut candidates = vec![
             PathBuf::from("/usr/local/bin/sing-box"),
             PathBuf::from("/usr/bin/sing-box"),
             PathBuf::from("/bin/sing-box"),
             PathBuf::from("/usr/sbin/sing-box"),
             PathBuf::from("/var/lib/subout/sing-box/sing-box"),
             PathBuf::from("/var/lib/subout/bin/sing-box"),
-        ]
+            PathBuf::from("/opt/bin/sing-box"),
+            PathBuf::from("/opt/sing-box/sing-box"),
+            PathBuf::from("/snap/bin/sing-box"),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            candidates.push(PathBuf::from(home).join(".local/bin/sing-box"));
+        }
+        candidates
     }
 
     fn legacy_db_candidates(&self, _config_dir: &Path) -> Vec<PathBuf> {
@@ -704,6 +721,29 @@ impl PlatformStrategy for LinuxPlatform {
     }
 
     fn find_in_path(&self, cmd_name: &str) -> Option<PathBuf> {
+        // 1. Direct PATH traversal (POSIX-compliant, does not depend on `which` being installed)
+        if let Some(paths) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&paths) {
+                let p = dir.join(cmd_name);
+                if p.is_file() {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(meta) = p.metadata()
+                            && meta.permissions().mode() & 0o111 != 0
+                        {
+                            return Some(p);
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to `which` command if available
         if let Ok(output) = std::process::Command::new("which").arg(cmd_name).output()
             && output.status.success()
         {

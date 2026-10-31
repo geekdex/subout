@@ -227,6 +227,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route("/api/service/restart", post(service_api::restart_service))
         .route("/api/service/takeover", post(service_api::takeover_service))
         .route(
+            "/api/service/system-proxy",
+            post(service_api::set_system_proxy),
+        )
+        .route(
             "/api/service/kill-external",
             post(service_api::kill_external_service),
         )
@@ -282,9 +286,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             let try_port = 1234 + i;
             let addr = SocketAddr::from(([0, 0, 0, 0], try_port));
             if let Ok(l) = tokio::net::TcpListener::bind(addr).await {
-                println!(
-                    "[Server] Subout Panel running on http://localhost:{try_port}"
-                );
+                println!("[Server] Subout Panel running on http://localhost:{try_port}");
                 bind_result = Some(l);
                 break;
             }
