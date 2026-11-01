@@ -3,6 +3,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
 };
+use futures_util::FutureExt;
 
 use crate::kernel;
 use crate::web::{AppState, check_auth};
@@ -48,13 +49,31 @@ pub async fn download_kernel(
         .kernel_download_cancel
         .store(false, std::sync::atomic::Ordering::SeqCst);
     let status_lock_clone = state.kernel_download_status.clone();
+    let status_lock_for_panic = state.kernel_download_status.clone();
     let cancel_flag_clone = state.kernel_download_cancel.clone();
 
     tokio::spawn(async move {
-        if let Err(e) =
-            kernel::download_and_install_kernel(status_lock_clone, cancel_flag_clone).await
-        {
-            eprintln!("[Kernel] Download and install task ended: {e}");
+        // catch_unwind 兜底：下载任务若因 panic 终止，这里将状态置为 error，
+        // 避免前端永远轮询到 "downloading" 的僵尸状态（进度条卡死无任何反馈）
+        let result = std::panic::AssertUnwindSafe(
+            kernel::download_and_install_kernel(status_lock_clone, cancel_flag_clone),
+        )
+        .catch_unwind()
+        .await;
+
+        match result {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                eprintln!("[Kernel] Download and install task ended: {e}");
+            }
+            Err(panic_err) => {
+                eprintln!("[Kernel] Download task panicked: {panic_err:?}");
+                let mut st = status_lock_for_panic.write().await;
+                if st.status == "downloading" || st.status == "extracting" {
+                    st.status = "error".to_string();
+                    st.error = Some("内核下载任务异常终止，请重试或手动安装内核".to_string());
+                }
+            }
         }
     });
 

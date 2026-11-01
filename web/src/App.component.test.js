@@ -34,7 +34,7 @@ const mockFetch = vi.fn().mockImplementation((url) => {
   if (urlStr.includes("/api/kernel/info")) {
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ is_installed: true, version: "1.13.19" }),
+      json: () => Promise.resolve({ is_installed: true, version: "1.14.4" }),
     });
   }
   if (urlStr.includes("/api/service/status")) {
