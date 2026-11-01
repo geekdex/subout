@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub const MIN_SUPPORTED_SINGBOX_VERSION: &str = "1.12.0";
-pub const SINGBOX_VERSION: &str = "1.13.19";
+pub const SINGBOX_VERSION: &str = "1.14.4";
 
 #[derive(Clone, Debug)]
 pub struct KernelTarget {
@@ -25,49 +25,49 @@ pub fn get_supported_targets() -> Vec<KernelTarget> {
             os: "windows",
             arch: "amd64",
             archive_type: "zip",
-            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-windows-amd64.zip",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-amd64.zip",
             binary_name: "sing-box.exe",
         },
         KernelTarget {
             os: "windows",
             arch: "arm64",
             archive_type: "zip",
-            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-windows-arm64.zip",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-arm64.zip",
             binary_name: "sing-box.exe",
         },
         KernelTarget {
             os: "linux",
             arch: "amd64",
             archive_type: "tar.gz",
-            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-amd64.tar.gz",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz",
             binary_name: "sing-box",
         },
         KernelTarget {
             os: "linux",
             arch: "arm64",
             archive_type: "tar.gz",
-            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-arm64.tar.gz",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-arm64.tar.gz",
             binary_name: "sing-box",
         },
         KernelTarget {
             os: "linux",
             arch: "armv7",
             archive_type: "tar.gz",
-            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-armv7.tar.gz",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-armv7.tar.gz",
             binary_name: "sing-box",
         },
         KernelTarget {
             os: "darwin",
             arch: "amd64",
             archive_type: "tar.gz",
-            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-darwin-amd64.tar.gz",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-darwin-amd64.tar.gz",
             binary_name: "sing-box",
         },
         KernelTarget {
             os: "darwin",
             arch: "arm64",
             archive_type: "tar.gz",
-            url: "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-darwin-arm64.tar.gz",
+            url: "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-darwin-arm64.tar.gz",
             binary_name: "sing-box",
         },
     ]
@@ -291,8 +291,11 @@ pub async fn download_and_install_kernel(
         st.error = None;
     }
 
+    // 仅限制连接与读取超时，不限制总时长：大文件在慢速网络下可能超过任意总超时，
+    // 而读取超时足以检测连接停滞（60 秒收不到数据即报错）
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(60))
         .build()?;
 
     let response = match client.get(target.url).send().await {
@@ -323,15 +326,22 @@ pub async fn download_and_install_kernel(
 
     let mut stream = response.bytes_stream();
 
-    let mut downloaded_data = Vec::with_capacity(if total_size > 0 {
-        total_size as usize
-    } else {
-        15 * 1024 * 1024
+    // 预分配容量做上限保护（128MB），防止异常的 Content-Length 导致过度分配
+    let mut downloaded_data = Vec::with_capacity(match total_size {
+        0 => 16 * 1024 * 1024,
+        n if n <= 128 * 1024 * 1024 => n as usize,
+        _ => 128 * 1024 * 1024,
     });
     let mut downloaded_bytes: u64 = 0;
-    let mut last_speed_time = std::time::Instant::now();
-    let mut last_speed_bytes: u64 = 0;
-    let mut last_reported_progress = 0.0; // 优化：记录上次报告的进度，确保单调性
+
+    // 滑动窗口测速：每秒结算一次，窗口内沿用上次速度，避免读锁与数值抖动
+    let mut speed_window_start = std::time::Instant::now();
+    let mut speed_window_bytes: u64 = 0;
+    let mut speed_bytes_per_sec: u64 = 0;
+
+    // 进度单调递增；状态写入按 200ms 节流，避免频繁锁竞争
+    let mut last_reported_progress = 0.0f64;
+    let mut last_update_time: Option<std::time::Instant> = None;
 
     while let Some(chunk_res) = stream.next().await {
         if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
@@ -353,55 +363,40 @@ pub async fn download_and_install_kernel(
         };
 
         downloaded_bytes += chunk.len() as u64;
+        speed_window_bytes += chunk.len() as u64;
         downloaded_data.extend_from_slice(&chunk);
 
         let now = std::time::Instant::now();
-        let elapsed = now.duration_since(last_speed_time).as_secs_f64();
 
-        // 优化：只在 1 秒或以上时计算速度，降低抖动
-        // 这样可以避免在 macOS 上网络延迟导致的瞬间波动
-        let speed = if elapsed >= 1.0 {
-            let diff = downloaded_bytes.saturating_sub(last_speed_bytes);
-            let s = (diff as f64 / elapsed) as u64;
-            last_speed_time = now;
-            last_speed_bytes = downloaded_bytes;
-            s
-        } else {
-            // 在聚合窗口内，保持上一次计算的速度值
-            // 避免每次都报告 0，导致进度条显示抖动
-            {
-                let st = status_lock.blocking_read();
-                st.speed_bytes_per_sec
+        if now.duration_since(speed_window_start) >= std::time::Duration::from_secs(1) {
+            let elapsed_secs = speed_window_start.elapsed().as_secs_f64();
+            if elapsed_secs > 0.0 {
+                speed_bytes_per_sec = (speed_window_bytes as f64 / elapsed_secs) as u64;
             }
-        };
+            speed_window_start = now;
+            speed_window_bytes = 0;
+        }
 
-        // 优化：进度条单调性保证
-        let new_progress = if total_size > 0 {
-            ((downloaded_bytes as f64 / total_size as f64) * 100.0).min(100.0)
-        } else {
-            0.0
-        };
+        if total_size > 0 {
+            let new_progress =
+                ((downloaded_bytes as f64 / total_size as f64) * 100.0).min(100.0);
+            if new_progress > last_reported_progress {
+                last_reported_progress = new_progress;
+            }
+        }
 
-        // 只在进度确实增加时更新，避免网络乱序导致的回退
-        let progress_to_report = if new_progress >= last_reported_progress {
-            last_reported_progress = new_progress;
-            new_progress
-        } else {
-            last_reported_progress
-        };
-
-        // 优化：降低更新频率，避免过于频繁的状态写入
-        // 只在进度增加至少 1% 或每秒更新一次时才报告
-        let should_update = {
-            let st = status_lock.blocking_read();
-            (progress_to_report - st.progress).abs() >= 1.0 || elapsed >= 1.0
-        };
-
+        // 注意：这里绝不能使用 blocking_read()/blocking_write()——
+        // 它们会经 future::block_on 在异步运行时线程上直接 panic，
+        // 这正是下载任务静默崩溃、进度停在 0% 的根因。
+        // 所有跟踪状态均保存在本地变量中，仅在需要写入时获取写锁。
+        let should_update = last_update_time
+            .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(200));
         if should_update {
             let mut st = status_lock.write().await;
             st.downloaded_bytes = downloaded_bytes;
-            st.progress = progress_to_report;
-            st.speed_bytes_per_sec = speed;
+            st.progress = last_reported_progress;
+            st.speed_bytes_per_sec = speed_bytes_per_sec;
+            last_update_time = Some(now);
         }
     }
 
@@ -412,20 +407,31 @@ pub async fn download_and_install_kernel(
         return Err(anyhow!("下载已取消"));
     }
 
-    // Extract
+    // Extract（进度置为 extracting 前先补写最终下载数值——节流可能跳过最后一段增量）
     {
         let mut st = status_lock.write().await;
         st.status = "extracting".to_string();
         st.progress = 100.0;
+        st.downloaded_bytes = downloaded_bytes;
+        if st.total_bytes == 0 {
+            st.total_bytes = downloaded_bytes;
+        }
+        st.speed_bytes_per_sec = 0;
     }
 
+    // 解压与版本校验是阻塞的文件/子进程操作，放入 blocking 线程池执行，
+    // 避免占用异步 runtime worker 线程
     let kernel_dir = get_kernel_dir();
-    let binary_path = match extract_archive(
-        &downloaded_data,
-        target.archive_type,
-        &kernel_dir,
-        target.binary_name,
-    ) {
+    let archive_type = target.archive_type;
+    let binary_name = target.binary_name;
+    let archive_data = downloaded_data;
+    let extract_result = tokio::task::spawn_blocking(move || {
+        extract_archive(&archive_data, archive_type, &kernel_dir, binary_name)
+    })
+    .await
+    .map_err(|e| anyhow!("内核解压任务执行异常: {e}"))?;
+
+    let binary_path = match extract_result {
         Ok(p) => p,
         Err(e) => {
             let err_msg = format!("解压内核文件失败: {e}");
@@ -437,7 +443,14 @@ pub async fn download_and_install_kernel(
     };
 
     // Verify installation
-    if let Some(_ver) = get_installed_kernel_version(&binary_path) {
+    let verify_path = binary_path.clone();
+    let installed_version = tokio::task::spawn_blocking(move || {
+        get_installed_kernel_version(&verify_path)
+    })
+    .await
+    .map_err(|e| anyhow!("内核校验任务执行异常: {e}"))?;
+
+    if installed_version.is_some() {
         let mut st = status_lock.write().await;
         st.status = "ready".to_string();
         st.progress = 100.0;
@@ -467,7 +480,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             win_amd64.url,
-            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-windows-amd64.zip"
+            "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-amd64.zip"
         );
         assert_eq!(win_amd64.binary_name, "sing-box.exe");
 
@@ -477,7 +490,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             linux_amd64.url,
-            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-amd64.tar.gz"
+            "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz"
         );
         assert_eq!(linux_amd64.binary_name, "sing-box");
 
@@ -487,7 +500,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             linux_armv7.url,
-            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-armv7.tar.gz"
+            "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-armv7.tar.gz"
         );
         assert_eq!(linux_armv7.binary_name, "sing-box");
 
@@ -497,7 +510,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             darwin_arm64.url,
-            "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-darwin-arm64.tar.gz"
+            "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-darwin-arm64.tar.gz"
         );
         assert_eq!(darwin_arm64.binary_name, "sing-box");
     }

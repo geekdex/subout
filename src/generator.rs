@@ -127,11 +127,50 @@ pub fn sanitize_dns_value(dns: &mut Value) {
     }
 }
 
+/// sing-box 1.14 移除了 legacy 特殊出站（block/dns）：
+/// 将路由规则中对它们的引用就地迁移为对应的 rule action
+/// （reject / hijack-dns，自 sing-box 1.11 起可用，兼容所有受支持内核版本）。
+/// `legacy_actions` 为出站定义中收集到的 (tag, action) 映射，
+/// 用于迁移使用了非约定 tag 名（如 "dns-out"）的 legacy 特殊出站引用。
+/// 返回 true 表示规则已被迁移。
+fn migrate_legacy_special_outbound_rule(
+    rule_obj: &mut serde_json::Map<String, Value>,
+    legacy_actions: &[(String, String)],
+) -> bool {
+    let Some(ob) = rule_obj.get("outbound").and_then(|o| o.as_str()) else {
+        return false;
+    };
+    let action = if matches!(ob, "block" | "dns") {
+        Some(if ob == "block" { "reject" } else { "hijack-dns" })
+    } else {
+        legacy_actions
+            .iter()
+            .find(|(tag, _)| tag == ob)
+            .map(|(_, action)| action.as_str())
+    };
+    if let Some(action) = action {
+        rule_obj.remove("outbound");
+        rule_obj.insert("action".to_string(), json!(action));
+        true
+    } else {
+        false
+    }
+}
+
 pub fn sanitize_route_value(route: &mut Value) {
     if let Some(obj) = route.as_object_mut() {
         // Ensure auto_detect_interface is true to prevent routing loops if not specified
         if !obj.contains_key("auto_detect_interface") {
             obj.insert("auto_detect_interface".to_string(), json!(true));
+        }
+
+        // sing-box 1.14: legacy 特殊出站引用迁移为 rule action（仅约定名 block/dns）
+        if let Some(rules) = obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
+            for rule in rules {
+                if let Some(rule_obj) = rule.as_object_mut() {
+                    migrate_legacy_special_outbound_rule(rule_obj, &[]);
+                }
+            }
         }
         // Remove empty direct detour from rule_sets to avoid "detour to empty direct outbound" error
         if let Some(rule_sets) = obj.get_mut("rule_set").and_then(|rs| rs.as_array_mut()) {
@@ -198,14 +237,86 @@ pub fn sanitize_runtime_config(config: &mut Value) {
     if let Some(inbounds) = root.get_mut("inbounds") {
         sanitize_inbounds_value(inbounds);
     }
+    // sing-box 1.14: 先收集 legacy 特殊出站（block/dns）的 (tag, action) 映射，
+    // 用于迁移路由规则中对非约定命名（如 tag 为 "dns-out"）的 legacy 出站引用
+    let legacy_actions: Vec<(String, String)> = root
+        .get("outbounds")
+        .and_then(|o| o.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|o| {
+                    let t = o.get("type").and_then(|t| t.as_str())?;
+                    if matches!(t, "block" | "dns") {
+                        let tag = o.get("tag").and_then(|t| t.as_str())?;
+                        let action = if t == "block" { "reject" } else { "hijack-dns" };
+                        Some((tag.to_string(), action.to_string()))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     if let Some(outbounds) = root.get_mut("outbounds") {
         sanitize_outbounds_value(outbounds);
+        // sing-box 1.14: 移除 legacy 特殊出站定义（block/dns），
+        // 引用它们的路由规则会迁移为 rule action（见下）
+        if let Some(arr) = outbounds.as_array_mut() {
+            arr.retain(|o| {
+                let t = o.get("type").and_then(|t| t.as_str());
+                t != Some("block") && t != Some("dns")
+            });
+            // 分组出站（selector/urltest 等）成员中的 legacy 引用同步清理，避免悬挂 tag
+            if !legacy_actions.is_empty() {
+                for o in arr.iter_mut() {
+                    if let Some(members) = o.get_mut("outbounds").and_then(|m| m.as_array_mut()) {
+                        members.retain(|m| {
+                            m.as_str().is_none_or(|tag| {
+                                legacy_actions.iter().all(|(t, _)| t != tag)
+                            })
+                        });
+                    }
+                }
+            }
+        }
     }
     if let Some(route) = root.get_mut("route") {
         sanitize_route_value(route);
+        // 二次迁移：处理引用了非约定命名 legacy 出站的路由规则
+        if !legacy_actions.is_empty()
+            && let Some(rules) = route.get_mut("rules").and_then(|r| r.as_array_mut())
+        {
+            for rule in rules {
+                if let Some(rule_obj) = rule.as_object_mut() {
+                    migrate_legacy_special_outbound_rule(rule_obj, &legacy_actions);
+                }
+            }
+        }
     }
     if let Some(http_clients) = root.get_mut("http_clients") {
         sanitize_http_clients_value(http_clients);
+    }
+
+    // sing-box 1.14 将 "missing route.default_domain_resolver" 从废弃警告升级为启动错误。
+    // 若配置了 DNS 服务器但未指定解析器，自动指向首个非 fakeip 的服务器。
+    // （先取出 owned 值，避免与 route 的可变借用冲突）
+    let resolver_tag = root
+        .get("dns")
+        .and_then(|d| d.get("servers"))
+        .and_then(|s| s.as_array())
+        .and_then(|servers| {
+            servers
+                .iter()
+                .find(|srv| srv.get("type").and_then(|t| t.as_str()) != Some("fakeip"))
+                .and_then(|srv| srv.get("tag").and_then(|t| t.as_str()))
+        })
+        .map(str::to_string);
+    if let Some(route_obj) = root.get_mut("route").and_then(|r| r.as_object_mut())
+        && !route_obj.contains_key("default_domain_resolver")
+        && let Some(tag) = resolver_tag
+    {
+        route_obj.insert("default_domain_resolver".to_string(), json!(tag));
     }
 }
 
@@ -236,10 +347,12 @@ pub fn generate_config_with_base(
 
 /// Synchronize the given configuration with the latest resources in the database (enabled nodes and outbound groups),
 /// ensuring:
-/// 1. `direct` and `block` system outbounds are ALWAYS present and placed first.
+/// 1. `direct` system outbound is ALWAYS present and placed first.
 /// 2. Outbound groups from DB are updated with resolved valid node members.
 /// 3. All enabled nodes from the database are imported as single node outbounds.
 /// 4. Any route / dns items pointing to outbounds that no longer exist are automatically repaired to "direct".
+/// 5. Route rules referencing legacy special outbounds (block/dns, removed in sing-box 1.14)
+///    are migrated to rule actions (reject / hijack-dns).
 pub fn sync_config_with_latest_resources(
     conn: &Connection,
     base_config: &Value,
@@ -292,18 +405,14 @@ pub fn sync_config_with_latest_resources(
         }
     }
 
-    // Ensure direct & block exist if base_config didn't have them
+    // Ensure direct exists if base_config didn't have it.
+    // 注：不再自动补充 legacy "block" 特殊出站——sing-box 1.14 已移除该类型，
+    // 引用它的路由规则会在下方修复逻辑中迁移为 "action": "reject"。
     if !system_outbounds
         .iter()
         .any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("direct"))
     {
         system_outbounds.push(json!({"type": "direct", "tag": "direct"}));
-    }
-    if !system_outbounds
-        .iter()
-        .any(|o| o.get("tag").and_then(|t| t.as_str()) == Some("block"))
-    {
-        system_outbounds.push(json!({"type": "block", "tag": "block"}));
     }
 
     // 2. Fetch outbound groups from DB and compute resolved nodes
@@ -444,8 +553,19 @@ pub fn sync_config_with_latest_resources(
             }
             if let Some(rules) = route_obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
                 for (idx, rule) in rules.iter_mut().enumerate() {
-                    if let Some(rule_obj) = rule.as_object_mut()
-                        && let Some(ob) = rule_obj.get("outbound").and_then(|o| o.as_str())
+                    let Some(rule_obj) = rule.as_object_mut() else {
+                        continue;
+                    };
+                    // sing-box 1.14: legacy 特殊出站引用优先迁移为 rule action，
+                    // 避免被下方缺 tag 修复逻辑错误地改写为 direct
+                    if migrate_legacy_special_outbound_rule(rule_obj, &[]) {
+                        repaired_tags.push(format!(
+                            "route.rules[{}].outbound (legacy special outbound -> rule action)",
+                            idx + 1
+                        ));
+                        continue;
+                    }
+                    if let Some(ob) = rule_obj.get("outbound").and_then(|o| o.as_str())
                         && !all_valid_tags.contains(ob)
                     {
                         repaired_tags.push(format!(
@@ -711,10 +831,14 @@ mod tests {
         let (updated, repaired) =
             sync_config_with_latest_resources(&conn, &base_config, &[]).unwrap();
 
-        // Check outbounds: direct and block must exist
+        // Check outbounds: direct must exist, and legacy block must NOT be auto-added
         let outbounds = updated.get("outbounds").unwrap().as_array().unwrap();
         assert_eq!(outbounds[0].get("tag").unwrap().as_str(), Some("direct"));
-        assert_eq!(outbounds[1].get("tag").unwrap().as_str(), Some("block"));
+        assert!(
+            outbounds
+                .iter()
+                .all(|o| o.get("type").and_then(|t| t.as_str()) != Some("block"))
+        );
         assert!(
             outbounds
                 .iter()
@@ -756,6 +880,81 @@ mod tests {
         sanitize_runtime_config(&mut cfg);
         assert!(cfg["dns"].get("independent_cache").is_none());
         assert_eq!(cfg["dns"]["strategy"], "ipv4_only");
+    }
+
+    #[test]
+    fn test_sanitize_runtime_config_migrates_legacy_special_outbounds() {
+        let mut cfg = json!({
+            "dns": {
+                "servers": [
+                    { "type": "local", "tag": "local-dns" }
+                ]
+            },
+            "outbounds": [
+                { "type": "direct", "tag": "direct" },
+                { "type": "block", "tag": "block" },
+                { "type": "dns", "tag": "dns-out" },
+                { "type": "selector", "tag": "proxy", "outbounds": ["direct", "block", "dns-out"] }
+            ],
+            "route": {
+                "rules": [
+                    { "domain": ["ads.example.com"], "outbound": "block" },
+                    { "protocol": "dns", "outbound": "dns-out" },
+                    { "ip_is_private": true, "outbound": "direct" }
+                ]
+            }
+        });
+        sanitize_runtime_config(&mut cfg);
+
+        // legacy 特殊出站定义被移除
+        let outbounds = cfg["outbounds"].as_array().unwrap();
+        assert!(
+            outbounds
+                .iter()
+                .all(|o| o.get("type").and_then(|t| t.as_str()) != Some("block"))
+        );
+        assert!(
+            outbounds
+                .iter()
+                .all(|o| o.get("type").and_then(|t| t.as_str()) != Some("dns"))
+        );
+
+        // 路由规则迁移为 rule action
+        let rules = cfg["route"]["rules"].as_array().unwrap();
+        assert_eq!(rules[0]["action"], "reject");
+        assert!(rules[0].get("outbound").is_none());
+        assert_eq!(rules[1]["action"], "hijack-dns");
+        assert!(rules[1].get("outbound").is_none());
+        // 普通出站引用不受影响
+        assert_eq!(rules[2]["outbound"], "direct");
+
+        // 分组成员中的 legacy 引用被清理
+        let selector = outbounds
+            .iter()
+            .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("proxy"))
+            .unwrap();
+        let members = selector.get("outbounds").unwrap().as_array().unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0], "direct");
+
+        // default_domain_resolver 自动补全
+        assert_eq!(cfg["route"]["default_domain_resolver"], "local-dns");
+    }
+
+    #[test]
+    fn test_sanitize_runtime_config_keeps_existing_domain_resolver() {
+        let mut cfg = json!({
+            "dns": {
+                "servers": [
+                    { "type": "local", "tag": "local-dns" }
+                ]
+            },
+            "route": {
+                "default_domain_resolver": "custom-resolver"
+            }
+        });
+        sanitize_runtime_config(&mut cfg);
+        assert_eq!(cfg["route"]["default_domain_resolver"], "custom-resolver");
     }
 
     #[test]

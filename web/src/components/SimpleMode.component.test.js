@@ -25,8 +25,8 @@ describe("KernelDownloadCard", () => {
       arch: "amd64",
       supported: true,
       download_url:
-        "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-linux-amd64.tar.gz",
-      filename: "sing-box-1.13.19-linux-amd64.tar.gz",
+        "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz",
+      filename: "sing-box-1.14.4-linux-amd64.tar.gz",
       is_installed: false,
       binary_path: "/root/.config/subout/bin/sing-box",
       version: null,
@@ -50,10 +50,10 @@ describe("KernelDownloadCard", () => {
 
   it("shows ready badge and NO re-download prompt when kernel is installed and healthy", async () => {
     kernelInfo.value.is_installed = true;
-    kernelInfo.value.version = "sing-box version 1.13.19";
+    kernelInfo.value.version = "sing-box version 1.14.4";
     const wrapper = mount(KernelDownloadCard);
     expect(wrapper.text()).toContain("已安装就绪");
-    expect(wrapper.text()).toContain("sing-box version 1.13.19");
+    expect(wrapper.text()).toContain("sing-box version 1.14.4");
     expect(wrapper.text()).not.toContain("重新下载内核");
   });
 
@@ -419,7 +419,7 @@ describe("DashboardView - Mode Switch Confirmation", () => {
     const { kernelInfo, serviceStatus } = await import("../store.js");
 
     kernelInfo.value.is_installed = true;
-    kernelInfo.value.version = "sing-box version 1.13.19";
+    kernelInfo.value.version = "sing-box version 1.14.4";
     kernelInfo.value.download_status = { status: "idle" };
     serviceStatus.value.running = false;
     serviceStatus.value.conflicting_processes = [];
@@ -437,7 +437,7 @@ describe("DashboardView - Mode Switch Confirmation", () => {
           json: () =>
             Promise.resolve({
               is_installed: true,
-              version: "sing-box version 1.13.19",
+              version: "sing-box version 1.14.4",
               download_status: { status: "idle" },
             }),
         });
@@ -467,7 +467,7 @@ describe("DashboardView - Mode Switch Confirmation", () => {
     const { kernelInfo, serviceStatus } = await import("../store.js");
 
     kernelInfo.value.is_installed = true;
-    kernelInfo.value.version = "sing-box version 1.13.19";
+    kernelInfo.value.version = "sing-box version 1.14.4";
     serviceStatus.value.running = true;
     serviceStatus.value.ready = true;
     serviceStatus.value.pid = 12345;

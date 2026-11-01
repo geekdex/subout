@@ -457,14 +457,12 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         selector_val["default"] = json!("AUTO-Test");
     }
 
+    // 注：不再生成 legacy "block" 特殊出站——sing-box 1.14 已移除该类型，
+    // 拦截需求由路由规则 "action": "reject" 实现（rule action 自 1.11 起可用）
     let mut outbounds_val = vec![
         json!({
             "type": "direct",
             "tag": "direct"
-        }),
-        json!({
-            "type": "block",
-            "tag": "block"
         }),
         selector_val,
     ];
@@ -498,9 +496,10 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     ];
 
     if cfg.route.block_ads {
+        // sing-box 1.14 已移除 legacy "block" 特殊出站，改用 rule action 拦截
         route_rules.push(json!({
             "rule_set": "geosite-category-ads-all",
-            "outbound": "block"
+            "action": "reject"
         }));
     }
 
