@@ -378,8 +378,7 @@ pub async fn download_and_install_kernel(
         }
 
         if total_size > 0 {
-            let new_progress =
-                ((downloaded_bytes as f64 / total_size as f64) * 100.0).min(100.0);
+            let new_progress = ((downloaded_bytes as f64 / total_size as f64) * 100.0).min(100.0);
             if new_progress > last_reported_progress {
                 last_reported_progress = new_progress;
             }
@@ -444,11 +443,10 @@ pub async fn download_and_install_kernel(
 
     // Verify installation
     let verify_path = binary_path.clone();
-    let installed_version = tokio::task::spawn_blocking(move || {
-        get_installed_kernel_version(&verify_path)
-    })
-    .await
-    .map_err(|e| anyhow!("内核校验任务执行异常: {e}"))?;
+    let installed_version =
+        tokio::task::spawn_blocking(move || get_installed_kernel_version(&verify_path))
+            .await
+            .map_err(|e| anyhow!("内核校验任务执行异常: {e}"))?;
 
     if installed_version.is_some() {
         let mut st = status_lock.write().await;

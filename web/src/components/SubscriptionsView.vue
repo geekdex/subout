@@ -150,7 +150,7 @@
                     <input
                       type="checkbox"
                       :checked="sub.enabled !== false"
-                      @change="toggleEnabled(sub, $event.target.checked)"
+                      @change="toggleEnabled(sub, $event)"
                     />
                     <span class="slider"></span>
                   </label>
@@ -578,7 +578,7 @@ import {
   API_BASE,
   subscriptions,
   showToast,
-  confirmDialog,
+  choiceDialog,
 } from "../store.js";
 
 const selectedSubIds = ref([]);
@@ -749,6 +749,7 @@ const openAddModal = () => {
   modal.editId = null;
   modal.data.label = "";
   modal.data.url = "";
+  modal.data.enabled = true;
   modal.data.keywordsText = `公告\n提示\n通知\n到期\n流量\n官网\n购买\n地址\n订阅\n更新\n警告\n说明\n剩余\n充值\n防失联\n电报\n群\nnotice\nannouncement\nwarning\ninfo\nexpire\ntraffic`;
   deleteOnUpdate.value = true;
   modal.show = true;
@@ -759,6 +760,7 @@ const openEditModal = (sub) => {
   modal.editId = sub.id;
   modal.data.label = sub.label;
   modal.data.url = sub.url;
+  modal.data.enabled = sub.enabled !== false;
 
   // Format keywords back to newline separated list
   try {
@@ -794,8 +796,9 @@ const saveSub = async () => {
     label: modal.data.label,
     url: modal.data.url,
     filter_keywords,
-    enabled: true,
+    enabled: modal.isEdit ? modal.data.enabled !== false : true,
     delete_on_update: deleteOnUpdate.value,
+    clean_nodes: false,
   };
 
   try {
@@ -825,7 +828,7 @@ const saveSub = async () => {
   }
 };
 
-const toggleEnabled = async (sub, enabled) => {
+const updateSubEnabled = async (sub, enabled, cleanNodes = false) => {
   try {
     const res = await fetch(`${API_BASE}/api/subscriptions/${sub.id}`, {
       method: "PUT",
@@ -838,6 +841,7 @@ const toggleEnabled = async (sub, enabled) => {
         url: sub.url,
         filter_keywords: sub.filter_keywords,
         enabled,
+        clean_nodes: cleanNodes,
         delete_on_update:
           sub.delete_on_update !== false &&
           sub.delete_on_update !== 0 &&
@@ -846,13 +850,80 @@ const toggleEnabled = async (sub, enabled) => {
       }),
     });
     if (res.ok) {
-      showToast(enabled ? "订阅已启用" : "订阅已禁用");
+      if (!enabled) {
+        showToast(
+          cleanNodes
+            ? "订阅已停用，并已同步清空节点池对应节点"
+            : "订阅已停用（保留节点池现有节点）",
+        );
+      } else {
+        showToast("订阅已启用");
+      }
       sub.enabled = enabled;
+      return true;
     } else {
       showToast("修改状态失败", "danger");
+      return false;
     }
   } catch {
     showToast("修改状态失败", "danger");
+    return false;
+  }
+};
+
+const toggleEnabled = async (sub, eventOrChecked) => {
+  const targetChecked =
+    typeof eventOrChecked === "boolean"
+      ? eventOrChecked
+      : Boolean(eventOrChecked?.target?.checked);
+  const targetEl =
+    typeof eventOrChecked === "object" && eventOrChecked?.target
+      ? eventOrChecked.target
+      : null;
+
+  if (!targetChecked) {
+    const choice = await choiceDialog(
+      `您正在停用订阅【${sub.label}】。是否同步清空节点池中属于该订阅的节点？`,
+      {
+        title: "停用订阅源",
+        tip: "• 同步清空节点池：立即从节点池中移除该订阅的所有节点\n• 仅停用订阅：保留节点池现有节点，后续不再自动抓取更新",
+        confirmText: "同步清空节点池",
+        secondaryText: "仅停用订阅",
+        cancelText: "取消",
+        isDanger: true,
+      },
+    );
+    if (choice === "cancel") {
+      if (targetEl) targetEl.checked = true;
+      return;
+    }
+    const cleanNodes = choice === "confirm";
+    const ok = await updateSubEnabled(sub, false, cleanNodes);
+    if (!ok && targetEl) {
+      targetEl.checked = true;
+    }
+  } else {
+    const choice = await choiceDialog(
+      `订阅【${sub.label}】已启用。是否立即从远程抓取最新节点并同步到节点池？`,
+      {
+        title: "启用订阅源",
+        tip: "• 立即抓取同步：立刻拉取该订阅并将最新节点载入节点池\n• 仅启用订阅：恢复自动更新调度，暂不立即触发抓取",
+        confirmText: "立即抓取同步",
+        secondaryText: "仅启用订阅",
+        cancelText: "取消",
+        isDanger: false,
+      },
+    );
+    if (choice === "cancel") {
+      if (targetEl) targetEl.checked = false;
+      return;
+    }
+    const ok = await updateSubEnabled(sub, true, false);
+    if (!ok && targetEl) {
+      targetEl.checked = false;
+    } else if (ok && choice === "confirm") {
+      await triggerFetch(sub.id);
+    }
   }
 };
 
@@ -870,7 +941,7 @@ const triggerFetch = async (id) => {
 
     if (res.ok) {
       const data = await res.json();
-      showToast(data.results[0] || "抓取成功");
+      showToast(data.results?.[0] || "抓取成功");
       loadSubscriptions();
     } else {
       showToast("抓取订阅节点失败", "danger");
@@ -881,21 +952,38 @@ const triggerFetch = async (id) => {
 };
 
 const deleteSub = async (id) => {
-  if (
-    !(await confirmDialog("确定要删除该订阅源以及其包含的所有节点吗？", {
-      isDanger: true,
-    }))
-  )
-    return;
+  const sub = subscriptions.value.find((s) => s.id === id);
+  const label = sub?.label || `#${id}`;
 
+  const choice = await choiceDialog(
+    `确定要删除订阅源【${label}】吗？请选择是否同步从节点池中清空对应节点：`,
+    {
+      title: "删除订阅源",
+      tip: "• 同步清空节点池：彻底删除该订阅以及节点池中属于该订阅的所有节点\n• 保留节点池节点：删除该订阅，但节点池中的节点将转为自定义独立节点保留",
+      confirmText: "同步清空节点池",
+      secondaryText: "保留节点池节点",
+      cancelText: "取消",
+      isDanger: true,
+    },
+  );
+  if (choice === "cancel") return;
+
+  const cleanNodes = choice === "confirm";
   try {
-    const res = await fetch(`${API_BASE}/api/subscriptions/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token.value}` },
-    });
+    const res = await fetch(
+      `${API_BASE}/api/subscriptions/${id}?clean_nodes=${cleanNodes}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token.value}` },
+      },
+    );
 
     if (res.ok) {
-      showToast("订阅源已删除");
+      showToast(
+        cleanNodes
+          ? "订阅源已删除，节点池对应节点已清空"
+          : "订阅源已删除，节点已转为自定义节点保留",
+      );
       // Remove from selected list if checked
       selectedSubIds.value = selectedSubIds.value.filter((sid) => sid !== id);
       loadSubscriptions();
@@ -909,14 +997,22 @@ const deleteSub = async (id) => {
 
 const batchDeleteSubs = async () => {
   if (selectedSubIds.value.length === 0) return;
-  if (
-    !(await confirmDialog(
-      `确定要批量删除这 ${selectedSubIds.value.length} 个订阅源，及其下的所有节点吗？`,
-      { isDanger: true },
-    ))
-  )
-    return;
+  const count = selectedSubIds.value.length;
 
+  const choice = await choiceDialog(
+    `确定要批量删除选中的这 ${count} 个订阅源吗？请选择是否同步从节点池中清空对应节点：`,
+    {
+      title: "批量删除订阅源",
+      tip: "• 同步清空节点池：删除所选订阅，并彻底清空节点池中属于这些订阅的所有节点\n• 保留节点池节点：删除所选订阅，但节点池中对应的节点将转为自定义独立节点保留",
+      confirmText: "同步清空节点池",
+      secondaryText: "保留节点池节点",
+      cancelText: "取消",
+      isDanger: true,
+    },
+  );
+  if (choice === "cancel") return;
+
+  const cleanNodes = choice === "confirm";
   try {
     const res = await fetch(`${API_BASE}/api/subscriptions/batch-delete`, {
       method: "POST",
@@ -924,11 +1020,18 @@ const batchDeleteSubs = async () => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token.value}`,
       },
-      body: JSON.stringify({ ids: selectedSubIds.value }),
+      body: JSON.stringify({
+        ids: selectedSubIds.value,
+        clean_nodes: cleanNodes,
+      }),
     });
 
     if (res.ok) {
-      showToast("所选订阅源已批量删除");
+      showToast(
+        cleanNodes
+          ? "所选订阅源已批量删除，节点池对应节点已清空"
+          : "所选订阅源已批量删除，节点已转为自定义节点保留",
+      );
       selectedSubIds.value = [];
       loadSubscriptions();
     } else {

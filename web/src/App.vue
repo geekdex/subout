@@ -534,6 +534,23 @@
         >
           {{ dialog.message }}
         </p>
+        <div
+          v-if="dialog.tip"
+          style="
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            line-height: 1.5;
+            white-space: pre-line;
+            margin-top: 0.75rem;
+            padding: 0.65rem 0.85rem;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+            border-left: 3px solid var(--secondary, #3b82f6);
+            text-align: left;
+          "
+        >
+          {{ dialog.tip }}
+        </div>
         <div v-if="dialog.type === 'prompt'" style="margin-top: 1rem">
           <input
             v-model="dialog.inputValue"
@@ -547,9 +564,23 @@
           />
         </div>
       </div>
-      <div class="modal-footer">
+      <div
+        class="modal-footer"
+        :style="
+          dialog.type === 'choice'
+            ? 'display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0.5rem;'
+            : ''
+        "
+      >
         <button class="btn btn-secondary" @click="handleDialogCancel">
           {{ dialog.cancelText }}
+        </button>
+        <button
+          v-if="dialog.type === 'choice' && dialog.secondaryText"
+          class="btn btn-secondary"
+          @click="handleDialogSecondary"
+        >
+          {{ dialog.secondaryText }}
         </button>
         <button
           class="btn"
@@ -728,9 +759,19 @@ const handleDialogConfirm = () => {
   if (dialog.type === "confirm") {
     dialog.show = false;
     if (dialog.resolve) dialog.resolve(true);
+  } else if (dialog.type === "choice") {
+    dialog.show = false;
+    if (dialog.resolve) dialog.resolve("confirm");
   } else if (dialog.type === "prompt") {
     dialog.show = false;
     if (dialog.resolve) dialog.resolve(dialog.inputValue);
+  }
+};
+
+const handleDialogSecondary = () => {
+  if (dialog.type === "choice") {
+    dialog.show = false;
+    if (dialog.resolve) dialog.resolve("secondary");
   }
 };
 
@@ -739,6 +780,8 @@ const handleDialogCancel = () => {
   if (dialog.resolve) {
     if (dialog.type === "confirm") {
       dialog.resolve(false);
+    } else if (dialog.type === "choice") {
+      dialog.resolve("cancel");
     } else {
       dialog.resolve(null);
     }

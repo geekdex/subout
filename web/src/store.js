@@ -375,17 +375,59 @@ export function logout() {
 // Global Dialog State
 export const dialog = reactive({
   show: false,
-  type: "confirm", // "confirm" | "prompt"
+  type: "confirm", // "confirm" | "prompt" | "choice"
   title: "",
   message: "",
+  tip: "",
   inputValue: "",
   inputType: "text", // "text" | "password"
   inputPlaceholder: "",
   confirmText: "确定",
+  secondaryText: "",
   cancelText: "取消",
   isDanger: false,
   resolve: null,
 });
+
+/**
+ * Custom 3-way Choice Dialog
+ * @param {string} message - The question or notice message
+ * @param {object} options - Options
+ * @param {string} options.title - Dialog Title
+ * @param {string} options.tip - Optional detail/tip explanation
+ * @param {string} options.confirmText - Primary button text
+ * @param {string} options.secondaryText - Secondary button text
+ * @param {string} options.cancelText - Cancel button text
+ * @param {boolean} options.isDanger - Whether primary action is destructive
+ * @returns {Promise<'confirm'|'secondary'|'cancel'>}
+ */
+export function choiceDialog(
+  message,
+  {
+    title = "操作选择",
+    tip = "",
+    confirmText = "确定",
+    secondaryText = "次要操作",
+    cancelText = "取消",
+    isDanger = false,
+  } = {},
+) {
+  return new Promise((resolve) => {
+    dialog.type = "choice";
+    dialog.title = title;
+    dialog.message = message;
+    dialog.tip = tip;
+    dialog.confirmText = confirmText;
+    dialog.secondaryText = secondaryText;
+    dialog.cancelText = cancelText;
+    dialog.isDanger = isDanger;
+    dialog.inputValue = "";
+    dialog.inputType = "text";
+    dialog.inputPlaceholder = "";
+    dialog.resolve = resolve;
+    dialog.show = true;
+  });
+}
 
 /**
  * Custom Confirmation Dialog
@@ -410,7 +452,9 @@ export function confirmDialog(
     dialog.type = "confirm";
     dialog.title = title;
     dialog.message = message;
+    dialog.tip = "";
     dialog.confirmText = confirmText;
+    dialog.secondaryText = "";
     dialog.cancelText = cancelText;
     dialog.isDanger = isDanger;
     dialog.inputValue = "";
@@ -450,10 +494,12 @@ export function promptDialog(
     dialog.type = "prompt";
     dialog.title = title;
     dialog.message = message;
+    dialog.tip = "";
     dialog.inputValue = defaultValue;
     dialog.inputType = inputType;
     dialog.inputPlaceholder = inputPlaceholder;
     dialog.confirmText = confirmText;
+    dialog.secondaryText = "";
     dialog.cancelText = cancelText;
     dialog.isDanger = isDanger;
     dialog.resolve = resolve;

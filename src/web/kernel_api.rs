@@ -55,9 +55,10 @@ pub async fn download_kernel(
     tokio::spawn(async move {
         // catch_unwind 兜底：下载任务若因 panic 终止，这里将状态置为 error，
         // 避免前端永远轮询到 "downloading" 的僵尸状态（进度条卡死无任何反馈）
-        let result = std::panic::AssertUnwindSafe(
-            kernel::download_and_install_kernel(status_lock_clone, cancel_flag_clone),
-        )
+        let result = std::panic::AssertUnwindSafe(kernel::download_and_install_kernel(
+            status_lock_clone,
+            cancel_flag_clone,
+        ))
         .catch_unwind()
         .await;
 

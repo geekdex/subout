@@ -6,16 +6,22 @@ import { mount, flushPromises } from "@vue/test-utils";
 // Mock 依赖
 // ============================================================
 
-const { mockToken, mockShowToast, mockConfirmDialog, sharedSubscriptions } =
-  vi.hoisted(() => {
-    const { ref } = require("vue");
-    return {
-      mockToken: ref("test-token"),
-      mockShowToast: vi.fn(),
-      mockConfirmDialog: vi.fn(() => Promise.resolve(true)),
-      sharedSubscriptions: ref([]),
-    };
-  });
+const {
+  mockToken,
+  mockShowToast,
+  mockConfirmDialog,
+  mockChoiceDialog,
+  sharedSubscriptions,
+} = vi.hoisted(() => {
+  const { ref } = require("vue");
+  return {
+    mockToken: ref("test-token"),
+    mockShowToast: vi.fn(),
+    mockConfirmDialog: vi.fn(() => Promise.resolve(true)),
+    mockChoiceDialog: vi.fn(() => Promise.resolve("confirm")),
+    sharedSubscriptions: ref([]),
+  };
+});
 
 vi.mock("../store.js", () => ({
   API_BASE: "",
@@ -23,6 +29,7 @@ vi.mock("../store.js", () => ({
   subscriptions: sharedSubscriptions,
   showToast: mockShowToast,
   confirmDialog: mockConfirmDialog,
+  choiceDialog: mockChoiceDialog,
 }));
 
 import SubscriptionsView from "./SubscriptionsView.vue";
@@ -59,7 +66,7 @@ const mockSubs = [
 // ============================================================
 
 function createMockFetch(opts = {}) {
-  const { subs = mockSubs } = opts;
+  const { subs = JSON.parse(JSON.stringify(mockSubs)) } = opts;
   return vi.fn((url, options = {}) => {
     const urlStr = String(url);
     const path = urlStr.split("?")[0];
@@ -103,6 +110,10 @@ async function mountSubsView(fetchMock = createMockFetch()) {
 describe("SubscriptionsView - 订阅管理", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockChoiceDialog.mockReset();
+    mockChoiceDialog.mockResolvedValue("confirm");
+    mockConfirmDialog.mockReset();
+    mockConfirmDialog.mockResolvedValue(true);
     mockToken.value = "test-token";
   });
 
@@ -219,15 +230,23 @@ describe("SubscriptionsView - 订阅管理", () => {
     });
   });
 
-  describe("启停订阅", () => {
-    it("切换 enabled 触发 PUT 请求", async () => {
+  describe("启停订阅与同步选择", () => {
+    it("停用订阅并选择同步清空节点池触发 PUT 请求 clean_nodes: true", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("confirm");
       const wrapper = await mountSubsView();
       global.fetch.mockClear();
 
-      // 找到首行的 switch（label.switch 内 checkbox）
       const switchInput = wrapper.find('label.switch input[type="checkbox"]');
-      // 订阅A enabled=true，切换为 false
       await switchInput.setValue(false);
+
+      expect(mockChoiceDialog).toHaveBeenCalledWith(
+        expect.stringContaining("您正在停用订阅【订阅A】"),
+        expect.objectContaining({
+          confirmText: "同步清空节点池",
+          secondaryText: "仅停用订阅",
+          isDanger: true,
+        }),
+      );
 
       const putCall = global.fetch.mock.calls.find(
         ([u, o]) =>
@@ -238,7 +257,131 @@ describe("SubscriptionsView - 订阅管理", () => {
       expect(url).toBe("/api/subscriptions/1");
       const body = JSON.parse(opts.body);
       expect(body.enabled).toBe(false);
-      expect(mockShowToast).toHaveBeenCalledWith("订阅已禁用");
+      expect(body.clean_nodes).toBe(true);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "订阅已停用，并已同步清空节点池对应节点",
+      );
+    });
+
+    it("停用订阅并选择仅停用保留节点触发 PUT 请求 clean_nodes: false", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("secondary");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const switchInput = wrapper.find('label.switch input[type="checkbox"]');
+      await switchInput.setValue(false);
+
+      const putCall = global.fetch.mock.calls.find(
+        ([u, o]) =>
+          String(u).match(/^\/api\/subscriptions\/\d+$/) && o?.method === "PUT",
+      );
+      expect(putCall).toBeDefined();
+      const [, opts] = putCall;
+      const body = JSON.parse(opts.body);
+      expect(body.enabled).toBe(false);
+      expect(body.clean_nodes).toBe(false);
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "订阅已停用（保留节点池现有节点）",
+      );
+    });
+
+    it("停用订阅选择取消时不触发 PUT 请求并恢复开关状态", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("cancel");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const switchInput = wrapper.find('label.switch input[type="checkbox"]');
+      await switchInput.setValue(false);
+
+      const putCalls = global.fetch.mock.calls.filter(
+        ([u, o]) =>
+          String(u).match(/^\/api\/subscriptions\/\d+$/) && o?.method === "PUT",
+      );
+      expect(putCalls.length).toBe(0);
+    });
+
+    it("启用已停用订阅并选择立即抓取同步触发 PUT 并抓取", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("confirm");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const switchInputs = wrapper.findAll(
+        'label.switch input[type="checkbox"]',
+      );
+      // 订阅B enabled=false，切换为 true
+      await switchInputs[1].setValue(true);
+      await flushPromises();
+      await flushPromises();
+
+      expect(mockChoiceDialog).toHaveBeenCalledWith(
+        expect.stringContaining("订阅【订阅B】已启用"),
+        expect.objectContaining({
+          confirmText: "立即抓取同步",
+          secondaryText: "仅启用订阅",
+          isDanger: false,
+        }),
+      );
+
+      const putCall = global.fetch.mock.calls.find(
+        ([u, o]) =>
+          String(u).match(/^\/api\/subscriptions\/\d+$/) && o?.method === "PUT",
+      );
+      expect(putCall).toBeDefined();
+      const [url, opts] = putCall;
+      expect(url).toBe("/api/subscriptions/2");
+      const body = JSON.parse(opts.body);
+      expect(body.enabled).toBe(true);
+
+      const fetchCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/subscriptions/fetch" && o?.method === "POST",
+      );
+      expect(fetchCall).toBeDefined();
+      expect(JSON.parse(fetchCall[1].body)).toEqual({ subscription_id: 2 });
+    });
+
+    it("启用已停用订阅并选择仅启用触发 PUT 但不抓取", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("secondary");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const switchInputs = wrapper.findAll(
+        'label.switch input[type="checkbox"]',
+      );
+      await switchInputs[1].setValue(true);
+      await flushPromises();
+      await flushPromises();
+
+      const putCall = global.fetch.mock.calls.find(
+        ([u, o]) =>
+          String(u).match(/^\/api\/subscriptions\/\d+$/) && o?.method === "PUT",
+      );
+      expect(putCall).toBeDefined();
+      const body = JSON.parse(putCall[1].body);
+      expect(body.enabled).toBe(true);
+      expect(mockShowToast).toHaveBeenCalledWith("订阅已启用");
+
+      await flushPromises();
+      const fetchCalls = global.fetch.mock.calls.filter(
+        ([u, o]) => u === "/api/subscriptions/fetch" && o?.method === "POST",
+      );
+      expect(fetchCalls.length).toBe(0);
+    });
+
+    it("启用已停用订阅选择取消时不触发 PUT 请求", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("cancel");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const switchInputs = wrapper.findAll(
+        'label.switch input[type="checkbox"]',
+      );
+      await switchInputs[1].setValue(true);
+
+      const putCalls = global.fetch.mock.calls.filter(
+        ([u, o]) =>
+          String(u).match(/^\/api\/subscriptions\/\d+$/) && o?.method === "PUT",
+      );
+      expect(putCalls.length).toBe(0);
     });
   });
 
@@ -247,7 +390,6 @@ describe("SubscriptionsView - 订阅管理", () => {
       const wrapper = await mountSubsView();
       global.fetch.mockClear();
 
-      // 找到首行的"抓取"按钮
       const fetchBtn = wrapper
         .findAll("button")
         .find((b) => b.text().trim() === "抓取" || b.text().includes("抓取"));
@@ -263,8 +405,9 @@ describe("SubscriptionsView - 订阅管理", () => {
     });
   });
 
-  describe("删除订阅", () => {
-    it("点击删除 → confirmDialog → DELETE 请求", async () => {
+  describe("删除订阅与节点池同步选择", () => {
+    it("点击删除并选择同步清空节点池 → DELETE 请求带 clean_nodes=true", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("confirm");
       const wrapper = await mountSubsView();
       global.fetch.mockClear();
 
@@ -274,21 +417,53 @@ describe("SubscriptionsView - 订阅管理", () => {
       await deleteBtn.trigger("click");
       await flushPromises();
 
-      expect(mockConfirmDialog).toHaveBeenCalled();
+      expect(mockChoiceDialog).toHaveBeenCalledWith(
+        expect.stringContaining("确定要删除订阅源【订阅A】吗？"),
+        expect.objectContaining({
+          confirmText: "同步清空节点池",
+          secondaryText: "保留节点池节点",
+          isDanger: true,
+        }),
+      );
+
       const deleteCall = global.fetch.mock.calls.find(
         ([u, o]) =>
-          String(u).match(/^\/api\/subscriptions\/\d+$/) &&
-          o?.method === "DELETE",
+          String(u).includes("/api/subscriptions/1") && o?.method === "DELETE",
       );
       expect(deleteCall).toBeDefined();
       const [url, opts] = deleteCall;
-      expect(url).toBe("/api/subscriptions/1");
+      expect(url).toContain("clean_nodes=true");
       expect(opts.method).toBe("DELETE");
-      expect(mockShowToast).toHaveBeenCalledWith("订阅源已删除");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "订阅源已删除，节点池对应节点已清空",
+      );
     });
 
-    it("confirmDialog 返回 false 时不删除", async () => {
-      mockConfirmDialog.mockResolvedValueOnce(false);
+    it("点击删除并选择保留节点池节点 → DELETE 请求带 clean_nodes=false", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("secondary");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const deleteBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().trim() === "删除");
+      await deleteBtn.trigger("click");
+      await flushPromises();
+
+      const deleteCall = global.fetch.mock.calls.find(
+        ([u, o]) =>
+          String(u).includes("/api/subscriptions/1") && o?.method === "DELETE",
+      );
+      expect(deleteCall).toBeDefined();
+      const [url] = deleteCall;
+      expect(url).toContain("clean_nodes=false");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "订阅源已删除，节点已转为自定义节点保留",
+      );
+    });
+
+    it("点击删除并选择取消 → 不触发 DELETE 请求", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("cancel");
       const wrapper = await mountSubsView();
       global.fetch.mockClear();
 
@@ -300,25 +475,59 @@ describe("SubscriptionsView - 订阅管理", () => {
 
       const deleteCalls = global.fetch.mock.calls.filter(
         ([u, o]) =>
-          String(u).match(/^\/api\/subscriptions\/\d+$/) &&
-          o?.method === "DELETE",
+          String(u).includes("/api/subscriptions/1") && o?.method === "DELETE",
       );
       expect(deleteCalls.length).toBe(0);
     });
   });
 
-  describe("批量删除", () => {
-    it("勾选订阅后点击批量删除触发 batch-delete", async () => {
+  describe("批量删除与节点池同步选择", () => {
+    it("批量删除选择同步清空节点池 → POST batch-delete clean_nodes: true", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("confirm");
       const wrapper = await mountSubsView();
       global.fetch.mockClear();
 
-      // 行内 checkbox（v-model="selectedSubIds"）
       const checkboxes = wrapper.findAll('tbody input[type="checkbox"]');
-      // 假设首行 checkbox 是 selectedSubIds（排除 switch checkbox，但订阅列表里可能只有 selectedSubIds 的 checkbox）
-      // 检查首行 checkbox
       await checkboxes[0].setValue(true);
 
-      // 找批量删除按钮
+      const batchBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("批量删除"));
+      if (batchBtn) {
+        await batchBtn.trigger("click");
+        await flushPromises();
+
+        expect(mockChoiceDialog).toHaveBeenCalledWith(
+          expect.stringContaining("确定要批量删除选中的这 1 个订阅源吗？"),
+          expect.objectContaining({
+            confirmText: "同步清空节点池",
+            secondaryText: "保留节点池节点",
+            isDanger: true,
+          }),
+        );
+
+        const batchCall = global.fetch.mock.calls.find(
+          ([u, o]) =>
+            u === "/api/subscriptions/batch-delete" && o?.method === "POST",
+        );
+        expect(batchCall).toBeDefined();
+        const body = JSON.parse(batchCall[1].body);
+        expect(body.ids).toContain(1);
+        expect(body.clean_nodes).toBe(true);
+        expect(mockShowToast).toHaveBeenCalledWith(
+          "所选订阅源已批量删除，节点池对应节点已清空",
+        );
+      }
+    });
+
+    it("批量删除选择保留节点池节点 → POST batch-delete clean_nodes: false", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("secondary");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const checkboxes = wrapper.findAll('tbody input[type="checkbox"]');
+      await checkboxes[0].setValue(true);
+
       const batchBtn = wrapper
         .findAll("button")
         .find((b) => b.text().includes("批量删除"));
@@ -332,9 +541,59 @@ describe("SubscriptionsView - 订阅管理", () => {
         );
         expect(batchCall).toBeDefined();
         const body = JSON.parse(batchCall[1].body);
-        expect(body.ids).toContain(1);
-        expect(mockShowToast).toHaveBeenCalledWith("所选订阅源已批量删除");
+        expect(body.clean_nodes).toBe(false);
+        expect(mockShowToast).toHaveBeenCalledWith(
+          "所选订阅源已批量删除，节点已转为自定义节点保留",
+        );
       }
+    });
+
+    it("批量删除选择取消 → 不触发 POST 请求", async () => {
+      mockChoiceDialog.mockResolvedValueOnce("cancel");
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      const checkboxes = wrapper.findAll('tbody input[type="checkbox"]');
+      await checkboxes[0].setValue(true);
+
+      const batchBtn = wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("批量删除"));
+      if (batchBtn) {
+        await batchBtn.trigger("click");
+        await flushPromises();
+
+        const batchCalls = global.fetch.mock.calls.filter(
+          ([u, o]) =>
+            u === "/api/subscriptions/batch-delete" && o?.method === "POST",
+        );
+        expect(batchCalls.length).toBe(0);
+      }
+    });
+  });
+
+  describe("编辑订阅保留停用状态", () => {
+    it("编辑停用的订阅时保留 enabled: false", async () => {
+      const wrapper = await mountSubsView();
+      global.fetch.mockClear();
+
+      // 订阅B 是第二个订阅 (id: 2, enabled: false)
+      const editBtns = wrapper
+        .findAll("button")
+        .filter((b) => b.text().trim() === "编辑");
+      await editBtns[1].trigger("click");
+      await flushPromises();
+
+      const form = wrapper.find("form");
+      await form.trigger("submit.prevent");
+      await flushPromises();
+
+      const putCall = global.fetch.mock.calls.find(
+        ([u, o]) => u === "/api/subscriptions/2" && o?.method === "PUT",
+      );
+      expect(putCall).toBeDefined();
+      const body = JSON.parse(putCall[1].body);
+      expect(body.enabled).toBe(false);
     });
   });
 

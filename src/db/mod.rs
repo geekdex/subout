@@ -394,9 +394,26 @@ pub fn update_subscription(
     Ok(())
 }
 
-pub fn delete_subscription(conn: &Connection, id: i64) -> Result<()> {
+pub fn clean_subscription_nodes(conn: &Connection, sub_id: i64) -> Result<usize> {
+    let affected = conn.execute("DELETE FROM nodes WHERE subscription_id = ?", [sub_id])?;
+    Ok(affected)
+}
+
+pub fn convert_subscription_nodes_to_custom(conn: &Connection, sub_id: i64) -> Result<usize> {
+    let affected = conn.execute(
+        "UPDATE nodes SET subscription_id = NULL, is_custom = 1 WHERE subscription_id = ?",
+        [sub_id],
+    )?;
+    Ok(affected)
+}
+
+pub fn delete_subscription(conn: &Connection, id: i64, clean_nodes: bool) -> Result<()> {
+    if clean_nodes {
+        clean_subscription_nodes(conn, id)?;
+    } else {
+        convert_subscription_nodes_to_custom(conn, id)?;
+    }
     conn.execute("DELETE FROM subscriptions WHERE id = ?", [id])?;
-    conn.execute("DELETE FROM nodes WHERE subscription_id = ?", [id])?;
     Ok(())
 }
 
@@ -1243,5 +1260,99 @@ mod tests {
             summary.last_tested_at,
             Some("2026-09-08 10:03:00".to_string())
         );
+    }
+
+    #[test]
+    fn test_clean_and_convert_subscription_nodes() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        let sub_id =
+            add_subscription(&conn, "https://example.com/sub", "测试订阅", "[]", true).unwrap();
+
+        save_node(
+            &conn,
+            Some(sub_id),
+            "sub_node_1",
+            "vless",
+            "1.1.1.1",
+            443,
+            "{}",
+            true,
+            false,
+        )
+        .unwrap();
+
+        save_node(
+            &conn,
+            Some(sub_id),
+            "sub_node_2",
+            "vmess",
+            "2.2.2.2",
+            443,
+            "{}",
+            true,
+            false,
+        )
+        .unwrap();
+
+        // Test convert to custom
+        let converted = convert_subscription_nodes_to_custom(&conn, sub_id).unwrap();
+        assert_eq!(converted, 2);
+
+        let nodes = get_nodes(&conn).unwrap();
+        assert_eq!(nodes.len(), 2);
+        for n in &nodes {
+            assert!(n.is_custom);
+            assert_eq!(n.subscription_id, None);
+        }
+
+        // Add a node with sub_id again
+        save_node(
+            &conn,
+            Some(sub_id),
+            "sub_node_3",
+            "trojan",
+            "3.3.3.3",
+            443,
+            "{}",
+            true,
+            false,
+        )
+        .unwrap();
+
+        // Clean nodes
+        let cleaned = clean_subscription_nodes(&conn, sub_id).unwrap();
+        assert_eq!(cleaned, 1);
+
+        let nodes_after = get_nodes(&conn).unwrap();
+        assert_eq!(nodes_after.len(), 2); // only the 2 converted custom nodes remain
+
+        // Test delete_subscription with clean_nodes = false
+        let sub_id2 =
+            add_subscription(&conn, "https://example.com/sub2", "测试订阅2", "[]", true).unwrap();
+        save_node(
+            &conn,
+            Some(sub_id2),
+            "sub2_node_1",
+            "ss",
+            "4.4.4.4",
+            443,
+            "{}",
+            true,
+            false,
+        )
+        .unwrap();
+
+        delete_subscription(&conn, sub_id2, false).unwrap();
+        let subs = get_subscriptions(&conn).unwrap();
+        assert_eq!(subs.len(), 1); // only sub_id remains
+        let all_nodes = get_nodes(&conn).unwrap();
+        assert_eq!(all_nodes.len(), 3); // 2 previous + 1 converted
+
+        // Test delete_subscription with clean_nodes = true
+        delete_subscription(&conn, sub_id, true).unwrap();
+        let subs_final = get_subscriptions(&conn).unwrap();
+        assert_eq!(subs_final.len(), 0);
     }
 }
