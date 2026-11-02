@@ -54,7 +54,8 @@
 
 * **Linux & macOS (Bash)**:
   ```bash
-  sudo ./install.sh
+  # 推荐以普通用户身份运行：自动编译前端与后端，仅在安装系统服务时提权 sudo
+  ./install.sh
   ```
 * **Windows (PowerShell 管理员)**:
   ```powershell
@@ -197,8 +198,8 @@ cargo run -- web -p 1234
 # 仅编译单二进制 Release 产物
 cargo build --release
 
-# 一键本地构建 + 覆盖安装并重启系统守护服务
-sudo ./install.sh   # Linux & macOS
+# 一键本地构建 + 覆盖安装并重启系统守护服务 (推荐普通用户执行，按需提权)
+./install.sh        # Linux & macOS
 .\install.ps1        # Windows (PowerShell 管理员)
 ```
 

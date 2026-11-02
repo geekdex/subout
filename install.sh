@@ -28,6 +28,7 @@ TARGET_TAG=""
 MIRROR_URL=""
 GITHUB_REPO="geekdex/subout"
 CUSTOM_BIN_PATH=""
+SKIP_BUILD=false
 
 # Help message
 show_help() {
@@ -45,6 +46,7 @@ show_help() {
     echo "  -b, --bin <path>        指定本地 subout 二进制文件进行安装"
     echo "      --bin-dir <dir>     自定义二进制安装目录 (默认: /usr/local/bin)"
     echo "      --no-service        仅安装二进制文件，不配置/启动系统守护服务"
+    echo "      --skip-build        本地源码安装时跳过编译，直接使用已有的 target/release/subout"
     echo "  -u, --uninstall         卸载 subout 并停止守护服务"
     echo "      --purge             卸载时连同数据目录、配置与日志一同彻底清理"
     echo "  -t, --tag, --version    指定安装的 GitHub Release 版本标签 (如 v0.1.0)"
@@ -53,8 +55,8 @@ show_help() {
     echo "  -h, --help              显示此帮助信息"
     echo
     echo "示例:"
-    echo "  # 本地源码开发构建安装 (在代码目录中运行，自动 pnpm build + cargo build --release 并安装)"
-    echo "  sudo ./install.sh"
+    echo "  # 本地源码开发构建安装 (在代码目录中运行，自动以当前用户 pnpm build + cargo build 并提权安装)"
+    echo "  ./install.sh"
     echo
     echo "  # 在线一键下载最新 Release 并安装 (README 推荐普通用户使用)"
     echo "  curl -fsSL https://raw.githubusercontent.com/geekdex/subout/main/install.sh | bash"
@@ -103,6 +105,10 @@ while [[ $# -gt 0 ]]; do
             NO_SERVICE=true
             shift
             ;;
+        --skip-build|--no-build)
+            SKIP_BUILD=true
+            shift
+            ;;
         -u|--uninstall)
             UNINSTALL=true
             shift
@@ -145,7 +151,7 @@ if [[ $EUID -ne 0 ]]; then
     fi
 fi
 
-# Ensure developer toolchains (cargo, pnpm, node, npm) are in PATH even when running under sudo
+# Ensure developer toolchains (cargo, pnpm, node, npm, fnm, nvm, etc.) are in PATH
 setup_dev_env_paths() {
     local candidate_paths=(
         "$HOME/.cargo/bin"
@@ -154,35 +160,135 @@ setup_dev_env_paths() {
         "/usr/local/bin"
         "/usr/local/sbin"
         "$HOME/.local/share/pnpm"
+        "$HOME/.local/share/pnpm/bin"
         "$HOME/.pnpm"
         "$HOME/.local/bin"
     )
+
+    add_toolchain_dirs() {
+        local uh="$1"
+        [[ -z "$uh" || ! -d "$uh" ]] && return 0
+
+        # Cargo
+        candidate_paths+=("$uh/.cargo/bin")
+
+        # pnpm global bin paths
+        candidate_paths+=(
+            "$uh/.local/share/pnpm"
+            "$uh/.local/share/pnpm/bin"
+            "$uh/.pnpm"
+            "$uh/Library/pnpm"
+            "$uh/.local/bin"
+        )
+
+        # fnm (Fast Node Manager) - XDG, legacy, macOS, and version installations
+        candidate_paths+=(
+            "$uh/.local/share/fnm/aliases/default/bin"
+            "$uh/.local/share/fnm/current/bin"
+            "$uh/.local/share/fnm"
+            "$uh/.fnm/aliases/default/bin"
+            "$uh/.fnm/current/bin"
+            "$uh/.fnm"
+            "$uh/Library/Application Support/fnm/aliases/default/bin"
+            "$uh/Library/Application Support/fnm/current/bin"
+            "$uh/Library/Application Support/fnm"
+        )
+        if [[ -d "$uh/.local/share/fnm/node-versions" ]]; then
+            for fnm_ver in "$uh/.local/share/fnm/node-versions"/*/installation/bin; do
+                [[ -d "$fnm_ver" ]] && candidate_paths+=("$fnm_ver")
+            done
+        fi
+        if [[ -d "$uh/.fnm/node-versions" ]]; then
+            for fnm_ver in "$uh/.fnm/node-versions"/*/installation/bin; do
+                [[ -d "$fnm_ver" ]] && candidate_paths+=("$fnm_ver")
+            done
+        fi
+
+        # nvm (Node Version Manager)
+        if [[ -d "$uh/.nvm/versions/node" ]]; then
+            for node_ver in "$uh/.nvm/versions/node"/*; do
+                [[ -d "$node_ver/bin" ]] && candidate_paths+=("$node_ver/bin")
+            done
+        fi
+        candidate_paths+=("$uh/.nvm/current/bin")
+
+        # volta
+        candidate_paths+=("$uh/.volta/bin")
+
+        # bun
+        candidate_paths+=("$uh/.bun/bin")
+
+        # mise / rtx
+        candidate_paths+=(
+            "$uh/.local/share/mise/shims"
+            "$uh/.local/bin/mise"
+        )
+        if [[ -d "$uh/.local/share/mise/installs/node" ]]; then
+            for mise_ver in "$uh/.local/share/mise/installs/node"/*/bin; do
+                [[ -d "$mise_ver" ]] && candidate_paths+=("$mise_ver")
+            done
+        fi
+
+        # asdf
+        candidate_paths+=("$uh/.asdf/shims" "$uh/.asdf/bin")
+        if [[ -d "$uh/.asdf/installs/nodejs" ]]; then
+            for asdf_ver in "$uh/.asdf/installs/nodejs"/*/bin; do
+                [[ -d "$asdf_ver" ]] && candidate_paths+=("$asdf_ver")
+            done
+        fi
+
+        # proto
+        candidate_paths+=("$uh/.proto/shims" "$uh/.proto/bin")
+
+        # n
+        candidate_paths+=("$uh/n/bin" "/usr/local/n/versions/node"/*/bin)
+    }
+
+    # Add paths for current user
+    add_toolchain_dirs "$HOME"
+
+    # If executed via sudo, also scan original user's home and runtime session
     if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
         local user_home
         user_home="$(eval echo "~$SUDO_USER" 2>/dev/null || true)"
         if [[ -n "$user_home" ]]; then
-            candidate_paths+=(
-                "$user_home/.cargo/bin"
-                "$user_home/.local/share/pnpm"
-                "$user_home/.pnpm"
-                "$user_home/.local/bin"
-                "$user_home/.fnm/current/bin"
-            )
-            # Check nvm node paths if present
-            if [[ -d "$user_home/.nvm/versions/node" ]]; then
-                for node_ver in "$user_home/.nvm/versions/node"/*; do
-                    if [[ -d "$node_ver/bin" ]]; then
-                        candidate_paths+=("$node_ver/bin")
-                    fi
-                done
-            fi
+            add_toolchain_dirs "$user_home"
+        fi
+
+        # Check active fnm multishell paths under /run/user/<uid>/fnm_multishells
+        local user_uid
+        user_uid="$(id -u "$SUDO_USER" 2>/dev/null || true)"
+        if [[ -n "$user_uid" && -d "/run/user/$user_uid/fnm_multishells" ]]; then
+            for ms in "/run/user/$user_uid/fnm_multishells"/*/bin; do
+                [[ -d "$ms" ]] && candidate_paths+=("$ms")
+            done
         fi
     fi
+
+    # Append to PATH without duplicates
     for p in "${candidate_paths[@]}"; do
         if [[ -d "$p" && ":$PATH:" != *":$p:"* ]]; then
             export PATH="$p:$PATH"
         fi
     done
+
+    # If fnm is available but node or pnpm isn't in PATH yet, try fnm env
+    if (! command -v node >/dev/null 2>&1 || ! command -v pnpm >/dev/null 2>&1) && command -v fnm >/dev/null 2>&1; then
+        local fnm_out
+        fnm_out="$(fnm env --shell bash 2>/dev/null || true)"
+        if [[ -n "$fnm_out" ]]; then
+            eval "$fnm_out"
+        fi
+    fi
+}
+
+# Run compilation commands as the non-root developer to prevent root-owned file pollution in source repo
+run_as_build_user() {
+    if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" && $EUID -eq 0 ]]; then
+        sudo -u "$SUDO_USER" -H env "PATH=$PATH" "$@"
+    else
+        "$@"
+    fi
 }
 
 # Detect Operating System and Architecture
@@ -402,62 +508,94 @@ if [[ -n "$CUSTOM_BIN_PATH" && -f "$CUSTOM_BIN_PATH" ]]; then
 
 # 1.2 Local Development Mode: Build frontend (pnpm build) + Build backend (cargo build --release) (Requirement 2)
 elif [[ "$IS_LOCAL_SOURCE" == "true" && "$FROM_RELEASE" != "true" ]]; then
-    echo -e "${BLUE}[1/4] 检测到本地源码仓库，正在执行完整开发编译构建...${NC}"
     setup_dev_env_paths
 
-    # Step 1.1: Build Frontend in web directory (pnpm build)
-    echo -e "${BLUE}  -> [步骤 1/2] 进入 web 目录编译前端 UI (pnpm build)...${NC}"
+    COMPILED_BIN="${SCRIPT_DIR}/target/release/${APP_NAME}"
     WEB_DIR="${SCRIPT_DIR}/web"
 
-    # Select package manager (prefer pnpm)
-    PKG_MGR=""
-    if command -v pnpm >/dev/null 2>&1; then
-        PKG_MGR="pnpm"
-    elif command -v npm >/dev/null 2>&1; then
-        PKG_MGR="npm"
-        echo -e "${YELLOW}  提示: 系统未安装 pnpm，自动降级使用 npm 进行构建...${NC}"
+    if [[ "$SKIP_BUILD" == "true" ]]; then
+        echo -e "${BLUE}[1/4] 已指定 --skip-build，跳过前端与后端编译...${NC}"
+        if [[ ! -f "$COMPILED_BIN" ]]; then
+            echo -e "${RED}错误: 未找到预先编译的二进制文件: ${COMPILED_BIN}${NC}"
+            echo -e "请先运行 'cargo build --release'，或不要使用 --skip-build 参数。"
+            exit 1
+        fi
+        SOURCE_BIN="$COMPILED_BIN"
     else
-        echo -e "${RED}错误: 未检测到 pnpm 或 npm/node。构建前端 UI 需要 Node.js 与 pnpm/npm 环境。${NC}"
-        echo -e "请先安装 Node.js 与 pnpm (例如: npm install -g pnpm)。"
-        exit 1
+        echo -e "${BLUE}[1/4] 检测到本地源码仓库，正在执行完整开发编译构建...${NC}"
+        if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" && $EUID -eq 0 ]]; then
+            echo -e "${YELLOW}  提示: 检测到以 root/sudo 运行本地源码构建。为保护代码仓库权限，${NC}"
+            echo -e "${YELLOW}        编译过程将自动以原用户 (${SUDO_USER}) 身份执行。${NC}"
+        fi
+
+        # Step 1.1: Build Frontend in web directory (pnpm build)
+        echo -e "${BLUE}  -> [步骤 1/2] 准备编译前端 UI...${NC}"
+
+        # Select package manager (prefer pnpm)
+        PKG_MGR=""
+        if command -v pnpm >/dev/null 2>&1; then
+            PKG_MGR="pnpm"
+        elif command -v npm >/dev/null 2>&1; then
+            PKG_MGR="npm"
+            echo -e "${YELLOW}  提示: 系统未安装 pnpm，自动降级使用 npm 进行构建...${NC}"
+        fi
+
+        # If package manager missing but dist/index.html already exists, reuse it gracefully!
+        if [[ -z "$PKG_MGR" ]]; then
+            if [[ -f "${WEB_DIR}/dist/index.html" ]]; then
+                echo -e "${YELLOW}  提示: 当前环境未检测到 pnpm 或 npm/node，但检测到已存在的 ${WEB_DIR}/dist/index.html。${NC}"
+                echo -e "${YELLOW}        将直接复用现有前端产物继续后端构建...${NC}"
+            else
+                echo -e "${RED}错误: 未检测到 pnpm 或 npm/node。构建前端 UI 需要 Node.js 与 pnpm/npm 环境。${NC}"
+                echo -e "请先安装 Node.js 与 pnpm (例如: npm install -g pnpm)。"
+                echo -e "提示: 如果你在用户目录下配置了 Node/pnpm，推荐直接运行 ${BOLD}./install.sh${NC} (无需 sudo)。"
+                exit 1
+            fi
+        else
+            echo -e "${BLUE}  -> 使用 ${PKG_MGR} 编译前端 UI (web 目录)...${NC}"
+            # Install dependencies if node_modules is missing
+            if [[ ! -d "${WEB_DIR}/node_modules" ]]; then
+                echo -e "${BLUE}  -> 前端依赖未初始化，正在执行 ${PKG_MGR} install...${NC}"
+                (cd "$WEB_DIR" && run_as_build_user $PKG_MGR install)
+            fi
+
+            # Execute build
+            if [[ "$PKG_MGR" == "pnpm" ]]; then
+                (cd "$WEB_DIR" && run_as_build_user pnpm build)
+            else
+                (cd "$WEB_DIR" && run_as_build_user npm run build)
+            fi
+
+            if [[ ! -f "${WEB_DIR}/dist/index.html" ]]; then
+                echo -e "${RED}错误: 前端 UI 构建失败，未生成 ${WEB_DIR}/dist/index.html${NC}"
+                exit 1
+            fi
+            echo -e "${GREEN}  ✓ 前端 UI 构建完成 (${WEB_DIR}/dist/index.html)${NC}"
+        fi
+
+        # Step 1.2: Build Backend with Cargo
+        echo -e "${BLUE}  -> [步骤 2/2] 返回项目根目录编译后端 (cargo build --release)...${NC}"
+        if ! command -v cargo >/dev/null 2>&1; then
+            if [[ -f "$COMPILED_BIN" ]]; then
+                echo -e "${YELLOW}  提示: 当前环境未找到 cargo 命令，但检测到已有二进制 ${COMPILED_BIN}。${NC}"
+                echo -e "${YELLOW}        将直接使用现有编译产物进行安装。${NC}"
+            else
+                echo -e "${RED}错误: 未检测到 cargo 命令。请先安装 Rust 工具链 (https://rustup.rs)。${NC}"
+                echo -e "提示: 如果你在用户目录下安装了 rustup，推荐直接运行 ${BOLD}./install.sh${NC} (无需 sudo)。"
+                exit 1
+            fi
+        else
+            (cd "$SCRIPT_DIR" && run_as_build_user cargo build --release)
+        fi
+
+        if [[ ! -f "$COMPILED_BIN" ]]; then
+            echo -e "${RED}错误: cargo 编译产物不存在: ${COMPILED_BIN}${NC}"
+            exit 1
+        fi
+
+        SOURCE_BIN="$COMPILED_BIN"
+        echo -e "${GREEN}  ✓ 本地构建成功: ${SOURCE_BIN}${NC}"
     fi
-
-    # Install dependencies if node_modules is missing
-    if [[ ! -d "${WEB_DIR}/node_modules" ]]; then
-        echo -e "${BLUE}  -> 前端依赖未初始化，正在执行 ${PKG_MGR} install...${NC}"
-        (cd "$WEB_DIR" && $PKG_MGR install)
-    fi
-
-    # Execute build
-    if [[ "$PKG_MGR" == "pnpm" ]]; then
-        (cd "$WEB_DIR" && pnpm build)
-    else
-        (cd "$WEB_DIR" && npm run build)
-    fi
-
-    if [[ ! -f "${WEB_DIR}/dist/index.html" ]]; then
-        echo -e "${RED}错误: 前端 UI 构建失败，未生成 ${WEB_DIR}/dist/index.html${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}  ✓ 前端 UI 构建完成 (${WEB_DIR}/dist/index.html)${NC}"
-
-    # Step 1.2: Build Backend with Cargo
-    echo -e "${BLUE}  -> [步骤 2/2] 返回项目根目录编译后端 (cargo build --release)...${NC}"
-    if ! command -v cargo >/dev/null 2>&1; then
-        echo -e "${RED}错误: 未检测到 cargo 命令。请先安装 Rust 工具链 (https://rustup.rs)。${NC}"
-        exit 1
-    fi
-
-    (cd "$SCRIPT_DIR" && cargo build --release)
-    COMPILED_BIN="${SCRIPT_DIR}/target/release/${APP_NAME}"
-
-    if [[ ! -f "$COMPILED_BIN" ]]; then
-        echo -e "${RED}错误: cargo 编译产物不存在: ${COMPILED_BIN}${NC}"
-        exit 1
-    fi
-
-    SOURCE_BIN="$COMPILED_BIN"
-    echo -e "${GREEN}  ✓ 本地构建成功: ${SOURCE_BIN}${NC}"
 
 # 1.3 Online Release Mode: Fetch latest release from GitHub (Requirement 3)
 else
