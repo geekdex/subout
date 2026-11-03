@@ -9,3 +9,4 @@ web/dist
 .temp_singbox_*
 .kiro
 .cargo
+/sing-box-docs
