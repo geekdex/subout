@@ -24,6 +24,7 @@ flate2 = "1.0"
 tar = "0.4"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 futures-util = "0.3"
+uuid = { version = "1.10", features = ["v4", "fast-rng"] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

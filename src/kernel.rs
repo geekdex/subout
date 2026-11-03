@@ -7,8 +7,62 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub const MIN_SUPPORTED_SINGBOX_VERSION: &str = "1.12.0";
-pub const SINGBOX_VERSION: &str = "1.14.4";
+/// 支持的内核版本模式列表（支持泛版本匹配，后续可扩充）
+pub const SUPPORTED_KERNEL_VERSIONS: &[&str] = &["1.14.*"];
+
+/// 强制绑定的标准安装版本（自动下载时使用）
+pub const PINNED_KERNEL_VERSION: &str = "1.14.4";
+pub const MIN_SUPPORTED_SINGBOX_VERSION: &str = "1.14.0";
+pub const SINGBOX_VERSION: &str = PINNED_KERNEL_VERSION;
+
+/// Check if a version string satisfies any pattern in `SUPPORTED_KERNEL_VERSIONS`
+pub fn is_supported_kernel_version(v_str: &str) -> bool {
+    // If gatekeeper disabled via env var (e.g. for testing/development):
+    if std::env::var("SUBOUT_DISABLE_GATEKEEPER")
+        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
+        return true;
+    }
+
+    let Some((v_maj, v_min, v_pat)) = crate::paths::parse_semver(v_str) else {
+        return false;
+    };
+
+    for &pattern in SUPPORTED_KERNEL_VERSIONS {
+        let pattern_trimmed = pattern.trim();
+        if let Some(prefix) = pattern_trimmed.strip_suffix(".*") {
+            let parts: Vec<&str> = prefix.split('.').collect();
+            if parts.len() == 2
+                && let (Ok(p_maj), Ok(p_min)) = (parts[0].parse::<u64>(), parts[1].parse::<u64>())
+                && v_maj == p_maj
+                && v_min == p_min
+            {
+                return true;
+            } else if parts.len() == 1
+                && let Ok(p_maj) = parts[0].parse::<u64>()
+                && v_maj == p_maj
+            {
+                return true;
+            }
+        } else if let Some((p_maj, p_min, p_pat)) = crate::paths::parse_semver(pattern_trimmed)
+            && (v_maj, v_min, v_pat) == (p_maj, p_min, p_pat)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Global check if local kernel is ready and valid
+pub fn is_kernel_ready() -> bool {
+    let maybe_exec = get_singbox_executable();
+    if let Some(ref p) = maybe_exec
+        && let Some(v_str) = get_installed_kernel_version(p)
+    {
+        return is_supported_kernel_version(&v_str);
+    }
+    false
+}
 
 #[derive(Clone, Debug)]
 pub struct KernelTarget {
@@ -157,6 +211,7 @@ pub struct KernelInfoResponse {
     pub version: Option<String>,
     pub min_version: String,
     pub recommended_version: String,
+    pub supported_versions: Vec<String>,
     pub is_version_satisfies: bool,
     pub download_status: KernelDownloadStatus,
 }
@@ -172,11 +227,7 @@ pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
         (false, default_path.to_string_lossy().to_string(), None)
     };
 
-    let min_ver = std::env::var("SUBOUT_MIN_SINGBOX_VERSION")
-        .unwrap_or_else(|_| MIN_SUPPORTED_SINGBOX_VERSION.to_string());
-    let is_version_satisfies = version
-        .as_deref()
-        .is_some_and(|v| crate::paths::is_version_ge(v, &min_ver));
+    let is_version_satisfies = version.as_deref().is_some_and(is_supported_kernel_version);
 
     let os = std::env::consts::OS.to_string();
     let arch = std::env::consts::ARCH.to_string();
@@ -185,7 +236,7 @@ pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
         Some(t) => {
             let fname = format!(
                 "sing-box-{}-{}-{}.{}",
-                SINGBOX_VERSION, t.os, t.arch, t.archive_type
+                PINNED_KERNEL_VERSION, t.os, t.arch, t.archive_type
             );
             (true, Some(t.url.to_string()), Some(fname))
         }
@@ -201,8 +252,12 @@ pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
         is_installed,
         binary_path,
         version,
-        min_version: min_ver,
-        recommended_version: SINGBOX_VERSION.to_string(),
+        min_version: "1.14.0".to_string(),
+        recommended_version: PINNED_KERNEL_VERSION.to_string(),
+        supported_versions: SUPPORTED_KERNEL_VERSIONS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
         is_version_satisfies,
         download_status: status.clone(),
     }
@@ -378,8 +433,7 @@ pub async fn download_and_install_kernel(
         }
 
         if total_size > 0 {
-            let new_progress =
-                ((downloaded_bytes as f64 / total_size as f64) * 100.0).min(100.0);
+            let new_progress = ((downloaded_bytes as f64 / total_size as f64) * 100.0).min(100.0);
             if new_progress > last_reported_progress {
                 last_reported_progress = new_progress;
             }
@@ -444,11 +498,10 @@ pub async fn download_and_install_kernel(
 
     // Verify installation
     let verify_path = binary_path.clone();
-    let installed_version = tokio::task::spawn_blocking(move || {
-        get_installed_kernel_version(&verify_path)
-    })
-    .await
-    .map_err(|e| anyhow!("内核校验任务执行异常: {e}"))?;
+    let installed_version =
+        tokio::task::spawn_blocking(move || get_installed_kernel_version(&verify_path))
+            .await
+            .map_err(|e| anyhow!("内核校验任务执行异常: {e}"))?;
 
     if installed_version.is_some() {
         let mut st = status_lock.write().await;
@@ -527,5 +580,18 @@ mod tests {
         {
             assert!(target.is_some());
         }
+    }
+
+    #[test]
+    fn test_is_supported_kernel_version() {
+        assert!(is_supported_kernel_version("sing-box version 1.14.4"));
+        assert!(is_supported_kernel_version("sing-box version 1.14.0"));
+        assert!(is_supported_kernel_version("1.14.12"));
+        assert!(is_supported_kernel_version("v1.14.4"));
+
+        assert!(!is_supported_kernel_version("sing-box version 1.13.5"));
+        assert!(!is_supported_kernel_version("sing-box version 1.12.0"));
+        assert!(!is_supported_kernel_version("sing-box version 1.15.0"));
+        assert!(!is_supported_kernel_version("unknown string"));
     }
 }

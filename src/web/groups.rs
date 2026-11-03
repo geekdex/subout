@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::db;
 use crate::web::{AppState, check_auth, get_db_conn, subscriptions::BatchDeleteRequest};
@@ -44,12 +44,47 @@ fn resolve_static_nodes_if_dynamic(
             subscriptions: payload.subscriptions.clone(),
             include_keywords: payload.include_keywords.clone(),
             exclude_keywords: payload.exclude_keywords.clone(),
+            updated_at: None,
         };
         if let Ok(resolved) = db::resolve_group_nodes(conn, &dummy_group) {
             return Some(serde_json::to_string(&resolved).unwrap_or_else(|_| "[]".to_string()));
         }
     }
     payload.static_nodes.clone()
+}
+
+#[derive(Serialize)]
+pub struct NodeGroupsListResponse {
+    pub groups: Vec<db::OutboundGroup>,
+    pub version_code: i64,
+}
+
+pub async fn get_node_groups(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<NodeGroupsListResponse>, (StatusCode, Json<serde_json::Value>)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|status| (status, Json(serde_json::json!({ "error": "未授权" }))))?;
+    let conn = get_db_conn(&state.db_path).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "数据库连接失败" })),
+        )
+    })?;
+    let groups = db::get_outbound_groups(&conn).map_err(|e| {
+        eprintln!("[groups::get_node_groups] Failed to query outbound_groups: {e:?}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("获取节点组合列表失败: {}", e) })),
+        )
+    })?;
+    let version_code = db::get_node_group_version_code(&conn).unwrap_or(0);
+
+    Ok(Json(NodeGroupsListResponse {
+        groups,
+        version_code,
+    }))
 }
 
 pub async fn get_groups(

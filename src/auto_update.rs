@@ -147,25 +147,39 @@ pub async fn run_auto_update_process(
     let run_impl = async {
         // Step 1: Select currently running configuration as the base template
         update_log("步骤 1: 正在选择当前运行的配置作为基础模板...");
-        let (running_id, history_detail, full_config) = {
+        let (running_profile_opt, full_config) = {
             let conn = Connection::open(db_path)?;
             conn.busy_timeout(std::time::Duration::from_secs(5))?;
-            let running_id_str =
-                crate::db::get_setting(&conn, "running_config_id")?.unwrap_or_default();
-            if running_id_str.is_empty() {
-                return Err(anyhow!("未开启运行配置，请先在面板配置并保存运行配置"));
-            }
-            let running_id: i64 = running_id_str.parse()?;
-            let history = crate::db::get_config_history_detail(&conn, running_id)?
-                .ok_or_else(|| anyhow!("未找到运行中的配置模板(ID: {running_id})"))?;
-            let history_detail = history.detail.clone();
-            let content_str = history.content.ok_or_else(|| anyhow!("配置模板内容为空"))?;
-            let full_config: Value = serde_json::from_str(&content_str)?;
-            (running_id, history_detail, full_config)
+            let profile_opt = crate::db::get_running_config_profile(&conn)?;
+            let cfg_val: Value = if let Some(ref p) = profile_opt {
+                serde_json::from_str(&p.content).unwrap_or_else(|_| {
+                    json!({
+                        "log": { "level": "info", "timestamp": true },
+                        "dns": {},
+                        "inbounds": [],
+                        "outbounds": [{ "type": "direct", "tag": "direct" }],
+                        "route": {}
+                    })
+                })
+            } else {
+                json!({
+                    "log": { "level": "info", "timestamp": true },
+                    "dns": {},
+                    "inbounds": [],
+                    "outbounds": [{ "type": "direct", "tag": "direct" }],
+                    "route": {}
+                })
+            };
+            (profile_opt, cfg_val)
         };
-        update_log(&format!(
-            "  -> 已载入当前运行配置模板 (ID: {running_id}, 备注: {history_detail})"
-        ));
+        if let Some(ref p) = running_profile_opt {
+            update_log(&format!(
+                "  -> 已载入当前运行配置模板 (ID: {}, 名称: '{}', 平台: '{}')",
+                p.id, p.name, p.platform
+            ));
+        } else {
+            update_log("  -> 提示: 当前未绑定运行配置，将仅更新订阅节点池与节点组合");
+        }
 
         // Step 2: Update all active subscriptions in subscription management
         update_log("步骤 2: 正在挨个更新订阅源管理中的所有节点...");
@@ -268,6 +282,14 @@ pub async fn run_auto_update_process(
             }
             tx.commit()?;
         }
+        let new_vcode = {
+            let conn_vcode = Connection::open(db_path)?;
+            conn_vcode.busy_timeout(std::time::Duration::from_secs(5))?;
+            crate::db::refresh_node_group_version_code(&conn_vcode)?
+        };
+        update_log(&format!(
+            "  -> 节点组合全局 versionCode 已更新: {new_vcode}"
+        ));
 
         // Step 5: Construct updated outbounds and repair route/dns references
         update_log(
@@ -325,56 +347,86 @@ pub async fn run_auto_update_process(
         }
         update_log("  -> sing-box 校验成功！");
 
-        // Step 7: Save to disk and execute restart via SingBoxServiceManager
-        update_log("步骤 7: 正在部署配置文件至 sing-box 运行环境...");
-        let running_config_path = crate::service::SingBoxServiceManager::get_running_config_path();
-        if let Some(parent) = running_config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let new_config_str = serde_json::to_string_pretty(&final_config)?;
-        std::fs::write(&running_config_path, &new_config_str)?;
-        update_log(&format!(
-            "  -> 配置文件已成功保存至 {}",
-            running_config_path.display()
-        ));
+        // Step 7: Overwrite running config if sync enabled & save snapshot
+        let sync_running = {
+            let conn = Connection::open(db_path)?;
+            conn.busy_timeout(std::time::Duration::from_secs(5))?;
+            crate::db::get_setting(&conn, "auto_update_sync_running")?
+                .unwrap_or_else(|| "1".to_string())
+                == "1"
+        };
 
-        // Save history config and update active config id
-        let new_history_desc =
-            format!("自动更新配置 (包含已更新策略组和代理节点, 清理超时节点: {deleted_count} 个)");
-        let new_content_json = serde_json::to_string(&final_config)?;
-        {
-            let conn_hist = Connection::open(db_path)?;
-            conn_hist.busy_timeout(std::time::Duration::from_secs(5))?;
-            conn_hist.execute(
-                "INSERT INTO config_history (change_type, action, detail, content) VALUES ('配置列表', '自动更新', ?, ?)",
-                rusqlite::params![new_history_desc, new_content_json],
-            )?;
-            let new_history_id = conn_hist.last_insert_rowid();
-            crate::db::update_setting(
-                &conn_hist,
-                "running_config_id",
-                &new_history_id.to_string(),
+        if sync_running && let Some(profile) = running_profile_opt {
+            update_log(&format!(
+                "步骤 7: 同步更新当前绑定的本机运行配置 [{}]...",
+                profile.name
+            ));
+
+            let conn_update = Connection::open(db_path)?;
+            conn_update.busy_timeout(std::time::Duration::from_secs(5))?;
+
+            // 1. Snapshot old state before overwriting
+            let now_str_snap = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let snap_desc = format!(
+                "自动更新前快照 [{}] (时间: {}, 清理超时节点: {} 个)",
+                profile.name, now_str_snap, deleted_count
+            );
+            crate::db::log_history_with_config_id(
+                &conn_update,
+                Some(profile.id),
+                "auto_update",
+                "覆盖运行配置",
+                &snap_desc,
+                Some(&profile.content),
             )?;
             update_log(&format!(
-                "  -> 已生成全新历史配置记录 (ID: {new_history_id}) 并设置为当前运行配置"
+                "  -> 已创建变更前历史快照存档 (配置ID: {})",
+                profile.id
             ));
-        }
 
-        // Restart sing-box service if service manager is available
-        if let Some(ref mgr) = service_mgr_for_run {
-            if mgr.is_running().await {
-                update_log("  -> sing-box 服务正在运行，正在重启服务应用最新节点配置...");
-                match mgr.restart_with_sudo(&final_config, None).await {
-                    Ok(()) => {
-                        update_log("  -> sing-box 核心服务已成功重启并生效！");
-                    }
-                    Err(e) => {
-                        update_log(&format!("  -> 警告: 重启 sing-box 服务失败: {e}"));
-                    }
-                }
-            } else {
-                update_log("  -> sing-box 核心服务当前未运行，最新配置已就绪。");
+            // 2. Overwrite running config in configs table directly
+            let new_content_pretty = serde_json::to_string_pretty(&final_config)?;
+            let latest_vcode = crate::db::get_node_group_version_code(&conn_update)?;
+            conn_update.execute(
+                "UPDATE configs SET content = ?, version_code = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                rusqlite::params![new_content_pretty, latest_vcode, profile.id],
+            )?;
+            update_log("  -> 本机运行配置已直接覆盖更新完成");
+
+            // 3. Write to running_config_path
+            let running_config_path =
+                crate::service::SingBoxServiceManager::get_running_config_path();
+            if let Some(parent) = running_config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
+            std::fs::write(&running_config_path, &new_content_pretty)?;
+            update_log(&format!(
+                "  -> 配置文件已部署至 {}",
+                running_config_path.display()
+            ));
+
+            // 4. Reload service if auto_update_reload_service is enabled and service is currently running
+            let reload_enabled =
+                crate::db::get_setting(&conn_update, "auto_update_reload_service")?
+                    .unwrap_or_else(|| "1".to_string())
+                    == "1";
+            if reload_enabled && let Some(ref mgr) = service_mgr_for_run {
+                if mgr.is_running().await {
+                    update_log("步骤 8: sing-box 服务正在运行，正在重启服务应用最新节点配置...");
+                    match mgr.restart_with_sudo(&final_config, None).await {
+                        Ok(()) => {
+                            update_log("  -> sing-box 核心服务已成功平滑重启并生效！");
+                        }
+                        Err(e) => {
+                            update_log(&format!("  -> ⚠️ 警告: 重启 sing-box 服务失败: {e}"));
+                        }
+                    }
+                } else {
+                    update_log("  -> sing-box 核心服务当前未运行，最新配置已就绪。");
+                }
+            }
+        } else {
+            update_log("步骤 7: 未勾选同步更新运行配置或未绑定运行配置，跳过覆盖运行配置。");
         }
 
         let next_run_time_str = Local::now()

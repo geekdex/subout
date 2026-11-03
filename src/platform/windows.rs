@@ -242,8 +242,6 @@ impl PlatformStrategy for WindowsPlatform {
                         let cmdline_lower = cmdline.to_lowercase();
                         let is_subout_instance = cmdline.contains(&config_path_str)
                             || cmdline.contains(&config_path_norm)
-                            || cmdline_lower.contains("sing-box.json")
-                            || cmdline_lower.contains("sing-box-running.json")
                             || cmdline_lower.contains("subout")
                             || ppid == current_pid
                             || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
@@ -290,6 +288,48 @@ impl PlatformStrategy for WindowsPlatform {
         format!(
             "终止/接管外部进程 (PID: {pid}) 失败：进程仍在运行。请以管理员身份运行 Subout，或在 PowerShell (管理员) 中执行 Stop-Service sing-box; Set-Service sing-box -StartupType Disabled / taskkill /F /PID {pid} 终止该进程"
         )
+    }
+
+    fn diagnose_takeover_conflict(
+        &self,
+    ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
+        Box::pin(async move {
+            let running_config_path =
+                crate::service::SingBoxServiceManager::get_running_config_path();
+            let conflicts = self.detect_conflicting_processes(None, &running_config_path);
+            let pids: Vec<u32> = conflicts.iter().map(|c| c.pid).collect();
+
+            if !pids.is_empty() {
+                return Ok(crate::platform::TakeoverDiagnoseResult {
+                    has_conflict: true,
+                    conflict_type: Some("running_processes".to_string()),
+                    suggestion_command: Some(format!(
+                        "taskkill /F /PID {}",
+                        pids.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(" /PID ")
+                    )),
+                    message: format!(
+                        "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。",
+                        pids.len(),
+                        pids.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    pids,
+                });
+            }
+
+            Ok(crate::platform::TakeoverDiagnoseResult {
+                has_conflict: false,
+                conflict_type: None,
+                suggestion_command: None,
+                message: "未检测到外部冲突进程。".to_string(),
+                pids: vec![],
+            })
+        })
     }
 
     fn enable_system_proxy(&self, port: u16, _sudo_pass: Option<&str>) {
@@ -548,11 +588,10 @@ pub fn filter_conflicting_processes(
 
         let is_subout_instance = cmdline.as_deref().is_some_and(|c| {
             let c_lower = c.to_lowercase();
-            c_lower.contains("subout")
+            c_lower.contains("subout.exe")
+                || c_lower.contains("subout web")
                 || c.contains(&config_path_str)
                 || c.contains(&config_path_norm)
-                || c_lower.contains("sing-box.json")
-                || c_lower.contains("sing-box-running.json")
         });
 
         if is_subout_instance {
@@ -746,20 +785,24 @@ mod tests {
                 command_line: Some(r"sing-box.exe run -c C:\etc\sing-box\config.json".to_string()),
                 executable_path: Some(r"C:\Program Files\sing-box\sing-box.exe".to_string()),
             },
+            // Release mode sing-box from a different installation path (e.g. ProgramData)
+            // Dev mode instance must detect this as a conflicting external process
+            CimProcessItem {
+                process_id: Some(9999),
+                parent_process_id: Some(1234),
+                name: Some("sing-box.exe".to_string()),
+                command_line: Some(
+                    r"sing-box.exe run -c C:\ProgramData\Subout\run\sing-box-running.json"
+                        .to_string(),
+                ),
+                executable_path: Some(r"C:\ProgramData\Subout\sing-box.exe".to_string()),
+            },
         ];
 
         let filtered =
             filter_conflicting_processes(items, current_pid, Some(managed_pid), config_path);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].pid, 8888);
-        assert_eq!(filtered[0].name, "sing-box.exe");
-        assert_eq!(
-            filtered[0].cmdline.as_deref(),
-            Some(r"sing-box.exe run -c C:\etc\sing-box\config.json")
-        );
-        assert_eq!(
-            filtered[0].exe_path.as_deref(),
-            Some(r"C:\Program Files\sing-box\sing-box.exe")
-        );
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|p| p.pid == 8888));
+        assert!(filtered.iter().any(|p| p.pid == 9999));
     }
 }

@@ -4,8 +4,8 @@ use sha2::{Digest, Sha256};
 
 pub mod models;
 pub use models::{
-    ConfigHistory, FastestNodeInfo, LatencyTierCount, Node, NodesPage, OutboundGroup, Settings,
-    SpeedTestSummary, Subscription,
+    ConfigHistory, ConfigProfile, FastestNodeInfo, LatencyTierCount, Node, NodeGroup, NodesPage,
+    OutboundGroup, Settings, SpeedTestSummary, Subscription,
 };
 
 pub fn hash_password(password: &str) -> String {
@@ -28,6 +28,7 @@ pub fn reset_db(conn: &Connection) -> Result<()> {
     conn.execute("DROP TABLE IF EXISTS outbound_groups", [])?;
     conn.execute("DROP TABLE IF EXISTS base_config", [])?;
     conn.execute("DROP TABLE IF EXISTS config_history", [])?;
+    conn.execute("DROP TABLE IF EXISTS configs", [])?;
     setup_database(conn)?;
     Ok(())
 }
@@ -110,8 +111,35 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
     )?;
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            description TEXT,
+            token TEXT UNIQUE NOT NULL,
+            version_code INTEGER DEFAULT 0,
+            content TEXT NOT NULL,
+            is_running_config INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_configs_token ON configs(token)",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_configs_platform ON configs(platform)",
+        [],
+    )?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS config_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_id INTEGER,
             change_type TEXT NOT NULL,
             action TEXT NOT NULL,
             detail TEXT NOT NULL,
@@ -121,6 +149,33 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
+
+    // Migration: check if config_history has config_id column
+    let has_config_id_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('config_history') WHERE name='config_id'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_config_id_col == 0 {
+        let _ = conn.execute(
+            "ALTER TABLE config_history ADD COLUMN config_id INTEGER",
+            [],
+        );
+    }
+
+    // Migration: check if outbound_groups has updated_at column
+    let has_group_updated_at: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('outbound_groups') WHERE name='updated_at'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_group_updated_at == 0 {
+        let _ = conn.execute("ALTER TABLE outbound_groups ADD COLUMN updated_at TEXT", []);
+    }
 
     // Migration: check if config_history has updated_at column
     let has_updated_at_col: i64 = conn
@@ -309,6 +364,91 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
             "INSERT INTO outbound_groups (tag, group_type, url, interval, tolerance, static_nodes) VALUES ('AUTO-Test', 'urltest', 'http://cp.cloudflare.com/generate_204', '3m', 50, '[]')",
             [],
         )?;
+    }
+
+    // Bootstrap v0.3 settings
+    let now_code: i64 = chrono::Local::now()
+        .format("%Y%m%d%H%M%S")
+        .to_string()
+        .parse()
+        .unwrap_or(0);
+    if get_setting(conn, "node_group_version_code")?.is_none() {
+        update_setting(conn, "node_group_version_code", &now_code.to_string())?;
+    }
+    if get_setting(conn, "app_mode")?.is_none() {
+        update_setting(conn, "app_mode", "simple")?;
+    }
+    if get_setting(conn, "auto_update_cron")?.is_none() {
+        update_setting(conn, "auto_update_cron", "0 4 * * *")?;
+    }
+    if get_setting(conn, "auto_update_sync_running")?.is_none() {
+        update_setting(conn, "auto_update_sync_running", "1")?;
+    }
+    if get_setting(conn, "auto_update_reload_service")?.is_none() {
+        update_setting(conn, "auto_update_reload_service", "1")?;
+    }
+
+    // Migration / Bootstrap default config profile in configs table
+    let configs_count: i64 = conn.query_row("SELECT COUNT(*) FROM configs", [], |r| r.get(0))?;
+    if configs_count == 0 {
+        let log_str = get_base_config_section(conn, "log")?
+            .unwrap_or_else(|| r#"{"level":"info","timestamp":true}"#.to_string());
+        let dns_str = get_base_config_section(conn, "dns")?.unwrap_or_else(|| "{}".to_string());
+        let inbounds_str =
+            get_base_config_section(conn, "inbounds")?.unwrap_or_else(|| "[]".to_string());
+        let outbounds_str =
+            get_base_config_section(conn, "outbounds")?.unwrap_or_else(|| "[]".to_string());
+        let route_str = get_base_config_section(conn, "route")?.unwrap_or_else(|| "{}".to_string());
+        let experimental_str =
+            get_base_config_section(conn, "experimental")?.unwrap_or_else(|| "{}".to_string());
+        let http_clients_str = get_base_config_section(conn, "http_clients")?.unwrap_or_default();
+
+        let mut root = serde_json::Map::new();
+        root.insert(
+            "log".to_string(),
+            serde_json::from_str(&log_str)
+                .unwrap_or(serde_json::json!({"level":"info","timestamp":true})),
+        );
+        root.insert(
+            "dns".to_string(),
+            serde_json::from_str(&dns_str).unwrap_or(serde_json::json!({})),
+        );
+        root.insert(
+            "inbounds".to_string(),
+            serde_json::from_str(&inbounds_str).unwrap_or(serde_json::json!([])),
+        );
+        root.insert(
+            "outbounds".to_string(),
+            serde_json::from_str(&outbounds_str).unwrap_or(serde_json::json!([])),
+        );
+        root.insert(
+            "route".to_string(),
+            serde_json::from_str(&route_str).unwrap_or(serde_json::json!({})),
+        );
+        root.insert(
+            "experimental".to_string(),
+            serde_json::from_str(&experimental_str).unwrap_or(serde_json::json!({})),
+        );
+        if let Ok(hc) = serde_json::from_str::<serde_json::Value>(&http_clients_str) {
+            root.insert("http_clients".to_string(), hc);
+        }
+        let content_json = serde_json::to_string_pretty(&serde_json::Value::Object(root))?;
+        let host_os = crate::platform::current_platform().os_name().to_string();
+        let default_token = uuid::Uuid::new_v4().to_string();
+
+        conn.execute(
+            "INSERT INTO configs (name, platform, description, token, version_code, content, is_running_config) VALUES (?, ?, ?, ?, ?, ?, 1)",
+            params![
+                "默认配置",
+                host_os,
+                "系统默认运行配置",
+                default_token,
+                now_code,
+                content_json
+            ],
+        )?;
+        let new_cfg_id = conn.last_insert_rowid();
+        update_setting(conn, "running_config_id", &new_cfg_id.to_string())?;
     }
 
     Ok(())
@@ -679,7 +819,7 @@ pub fn update_node_status(conn: &Connection, id: i64, enabled: bool) -> Result<(
 
 pub fn get_outbound_groups(conn: &Connection) -> Result<Vec<OutboundGroup>> {
     let mut stmt = conn.prepare(
-        "SELECT id, tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords FROM outbound_groups",
+        "SELECT id, tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords, updated_at FROM outbound_groups",
     )?;
     let groups = stmt
         .query_map([], |row| {
@@ -702,6 +842,7 @@ pub fn get_outbound_groups(conn: &Connection) -> Result<Vec<OutboundGroup>> {
                 subscriptions: row.get(8)?,
                 include_keywords: row.get(9)?,
                 exclude_keywords: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -723,9 +864,10 @@ pub fn save_outbound_group(
     exclude_keywords: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "INSERT OR REPLACE INTO outbound_groups (tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO outbound_groups (tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))",
         params![tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords],
     )?;
+    let _ = refresh_node_group_version_code(conn)?;
     Ok(())
 }
 
@@ -883,7 +1025,213 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
 
 pub fn delete_outbound_group(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM outbound_groups WHERE id = ?", [id])?;
+    let _ = refresh_node_group_version_code(conn)?;
     Ok(())
+}
+
+pub fn get_node_group_version_code(conn: &Connection) -> Result<i64> {
+    let val = get_setting(conn, "node_group_version_code")?.unwrap_or_default();
+    Ok(val.parse::<i64>().unwrap_or(0))
+}
+
+pub fn refresh_node_group_version_code(conn: &Connection) -> Result<i64> {
+    let now_code: i64 = chrono::Local::now()
+        .format("%Y%m%d%H%M%S")
+        .to_string()
+        .parse()
+        .unwrap_or(0);
+    update_setting(conn, "node_group_version_code", &now_code.to_string())?;
+    Ok(now_code)
+}
+
+pub fn get_config_profiles(
+    conn: &Connection,
+    platform: Option<&str>,
+) -> Result<Vec<ConfigProfile>> {
+    let (query, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = match platform {
+        Some(p) if !p.is_empty() && p != "all" => (
+            "SELECT id, name, platform, description, token, version_code, content, is_running_config, created_at, updated_at FROM configs WHERE platform = ? ORDER BY id ASC".to_string(),
+            vec![Box::new(p.to_string())],
+        ),
+        _ => (
+            "SELECT id, name, platform, description, token, version_code, content, is_running_config, created_at, updated_at FROM configs ORDER BY id ASC".to_string(),
+            vec![],
+        ),
+    };
+
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
+    let mut stmt = conn.prepare(&query)?;
+    let profiles = stmt
+        .query_map(params_slice.as_slice(), |row| {
+            let is_running_int: i32 = row.get(7)?;
+            Ok(ConfigProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                platform: row.get(2)?,
+                description: row.get(3)?,
+                token: row.get(4)?,
+                version_code: row.get(5)?,
+                content: row.get(6)?,
+                is_running_config: is_running_int != 0,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(profiles)
+}
+
+pub fn get_config_profile_by_id(conn: &Connection, id: i64) -> Result<Option<ConfigProfile>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, platform, description, token, version_code, content, is_running_config, created_at, updated_at FROM configs WHERE id = ?",
+    )?;
+    let mut rows = stmt.query([id])?;
+    if let Some(row) = rows.next()? {
+        let is_running_int: i32 = row.get(7)?;
+        Ok(Some(ConfigProfile {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            platform: row.get(2)?,
+            description: row.get(3)?,
+            token: row.get(4)?,
+            version_code: row.get(5)?,
+            content: row.get(6)?,
+            is_running_config: is_running_int != 0,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn get_config_profile_by_token(
+    conn: &Connection,
+    token: &str,
+) -> Result<Option<ConfigProfile>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, platform, description, token, version_code, content, is_running_config, created_at, updated_at FROM configs WHERE token = ?",
+    )?;
+    let mut rows = stmt.query([token])?;
+    if let Some(row) = rows.next()? {
+        let is_running_int: i32 = row.get(7)?;
+        Ok(Some(ConfigProfile {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            platform: row.get(2)?,
+            description: row.get(3)?,
+            token: row.get(4)?,
+            version_code: row.get(5)?,
+            content: row.get(6)?,
+            is_running_config: is_running_int != 0,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn get_running_config_profile(conn: &Connection) -> Result<Option<ConfigProfile>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, platform, description, token, version_code, content, is_running_config, created_at, updated_at FROM configs WHERE is_running_config = 1 LIMIT 1",
+    )?;
+    let mut rows = stmt.query([])?;
+    if let Some(row) = rows.next()? {
+        let is_running_int: i32 = row.get(7)?;
+        Ok(Some(ConfigProfile {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            platform: row.get(2)?,
+            description: row.get(3)?,
+            token: row.get(4)?,
+            version_code: row.get(5)?,
+            content: row.get(6)?,
+            is_running_config: is_running_int != 0,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn create_config_profile(
+    conn: &Connection,
+    name: &str,
+    platform: &str,
+    description: Option<&str>,
+    content: &str,
+) -> Result<ConfigProfile> {
+    let token = uuid::Uuid::new_v4().to_string();
+    let current_version_code = get_node_group_version_code(conn)?;
+    let platform_clean = platform.trim().to_lowercase();
+    conn.execute(
+        "INSERT INTO configs (name, platform, description, token, version_code, content, is_running_config) VALUES (?, ?, ?, ?, ?, ?, 0)",
+        params![name, platform_clean, description, token, current_version_code, content],
+    )?;
+    let id = conn.last_insert_rowid();
+    get_config_profile_by_id(conn, id)?.ok_or_else(|| anyhow::anyhow!("获取新建配置失败"))
+}
+
+pub fn update_config_profile(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    platform: &str,
+    description: Option<&str>,
+    content: &str,
+) -> Result<()> {
+    let platform_clean = platform.trim().to_lowercase();
+    conn.execute(
+        "UPDATE configs SET name = ?, platform = ?, description = ?, content = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+        params![name, platform_clean, description, content, id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_config_profile(conn: &Connection, id: i64) -> Result<()> {
+    let target =
+        get_config_profile_by_id(conn, id)?.ok_or_else(|| anyhow::anyhow!("待删除的配置不存在"))?;
+    if target.is_running_config {
+        return Err(anyhow::anyhow!("无法删除当前正在绑定的本机运行配置"));
+    }
+    conn.execute("DELETE FROM configs WHERE id = ?", [id])?;
+    Ok(())
+}
+
+pub fn reset_config_profile_token(conn: &Connection, id: i64) -> Result<String> {
+    let new_token = uuid::Uuid::new_v4().to_string();
+    let rows = conn.execute(
+        "UPDATE configs SET token = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+        params![new_token, id],
+    )?;
+    if rows == 0 {
+        return Err(anyhow::anyhow!("目标配置不存在"));
+    }
+    Ok(new_token)
+}
+
+pub fn set_running_config_profile(conn: &Connection, id: i64) -> Result<ConfigProfile> {
+    let profile =
+        get_config_profile_by_id(conn, id)?.ok_or_else(|| anyhow::anyhow!("目标配置不存在"))?;
+    let host_os = crate::platform::current_platform().os_name();
+    let prof_os = profile.platform.to_lowercase();
+
+    if prof_os != host_os {
+        return Err(anyhow::anyhow!(
+            "配置的目标平台 ({prof_os}) 与当前宿主机平台 ({host_os}) 不匹配，无法绑定为本机运行配置"
+        ));
+    }
+
+    conn.execute("UPDATE configs SET is_running_config = 0", [])?;
+    conn.execute(
+        "UPDATE configs SET is_running_config = 1, updated_at = datetime('now', 'localtime') WHERE id = ?",
+        [id],
+    )?;
+    update_setting(conn, "running_config_id", &id.to_string())?;
+
+    get_config_profile_by_id(conn, id)?.ok_or_else(|| anyhow::anyhow!("获取已更新运行配置失败"))
 }
 
 pub fn get_base_config_section(conn: &Connection, section: &str) -> Result<Option<String>> {
@@ -919,20 +1267,36 @@ pub fn log_history(
     Ok(())
 }
 
+pub fn log_history_with_config_id(
+    conn: &Connection,
+    config_id: Option<i64>,
+    change_type: &str,
+    action: &str,
+    detail: &str,
+    content: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO config_history (config_id, change_type, action, detail, content, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))",
+        params![config_id, change_type, action, detail, content],
+    )?;
+    Ok(())
+}
+
 pub fn get_config_history(conn: &Connection) -> Result<Vec<ConfigHistory>> {
     let mut stmt = conn.prepare(
-        "SELECT id, change_type, action, detail, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE change_type IN ('配置列表', '模板配置') ORDER BY id DESC",
+        "SELECT id, config_id, change_type, action, detail, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE change_type IN ('配置列表', '模板配置', 'auto_update', '自动更新') ORDER BY id DESC",
     )?;
     let history = stmt
         .query_map([], |row| {
             Ok(ConfigHistory {
                 id: row.get(0)?,
-                change_type: row.get(1)?,
-                action: row.get(2)?,
-                detail: row.get(3)?,
+                config_id: row.get(1)?,
+                change_type: row.get(2)?,
+                action: row.get(3)?,
+                detail: row.get(4)?,
                 content: None,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -941,18 +1305,19 @@ pub fn get_config_history(conn: &Connection) -> Result<Vec<ConfigHistory>> {
 
 pub fn get_config_history_detail(conn: &Connection, id: i64) -> Result<Option<ConfigHistory>> {
     let mut stmt = conn.prepare(
-        "SELECT id, change_type, action, detail, content, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE id = ?"
+        "SELECT id, config_id, change_type, action, detail, content, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE id = ?"
     )?;
     let mut rows = stmt.query([id])?;
     if let Some(row) = rows.next()? {
         Ok(Some(ConfigHistory {
             id: row.get(0)?,
-            change_type: row.get(1)?,
-            action: row.get(2)?,
-            detail: row.get(3)?,
-            content: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
+            config_id: row.get(1)?,
+            change_type: row.get(2)?,
+            action: row.get(3)?,
+            detail: row.get(4)?,
+            content: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
         }))
     } else {
         Ok(None)
@@ -1242,6 +1607,70 @@ mod tests {
         assert_eq!(
             summary.last_tested_at,
             Some("2026-09-08 10:03:00".to_string())
+        );
+    }
+
+    #[test]
+    fn test_config_profiles_crud_and_running_config() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        // Check bootstrap created 1 running config matching host platform
+        let profiles = get_config_profiles(&conn, None).unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert!(profiles[0].is_running_config);
+        let host_os = crate::platform::current_platform().os_name();
+        assert_eq!(profiles[0].platform, host_os);
+
+        // Version code should be initialized
+        let vcode = get_node_group_version_code(&conn).unwrap();
+        assert!(vcode > 0);
+
+        // Refresh version code
+        let new_vcode = refresh_node_group_version_code(&conn).unwrap();
+        assert!(new_vcode >= vcode);
+
+        // Create an Android profile
+        let android_profile = create_config_profile(
+            &conn,
+            "我的安卓手机",
+            "android",
+            Some("用于外网出差分流"),
+            r#"{"log":{},"dns":{},"inbounds":[],"outbounds":[],"route":{}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(android_profile.name, "我的安卓手机");
+        assert_eq!(android_profile.platform, "android");
+        assert!(!android_profile.is_running_config);
+        assert!(!android_profile.token.is_empty());
+
+        // Attempting to set Android config as host running config must fail
+        let set_res = set_running_config_profile(&conn, android_profile.id);
+        assert!(set_res.is_err());
+        let err_str = set_res.unwrap_err().to_string();
+        assert!(err_str.contains("不匹配"));
+
+        // Reset token
+        let old_token = android_profile.token.clone();
+        let new_token = reset_config_profile_token(&conn, android_profile.id).unwrap();
+        assert_ne!(old_token, new_token);
+
+        let fetched_by_token = get_config_profile_by_token(&conn, &new_token)
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched_by_token.id, android_profile.id);
+
+        // Cannot delete running config
+        let del_running_res = delete_config_profile(&conn, profiles[0].id);
+        assert!(del_running_res.is_err());
+
+        // Can delete Android non-running config
+        assert!(delete_config_profile(&conn, android_profile.id).is_ok());
+        assert!(
+            get_config_profile_by_id(&conn, android_profile.id)
+                .unwrap()
+                .is_none()
         );
     }
 }

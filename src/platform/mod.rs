@@ -10,8 +10,18 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use crate::service::ConflictingProcessInfo;
+use serde::{Deserialize, Serialize};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TakeoverDiagnoseResult {
+    pub has_conflict: bool,
+    pub conflict_type: Option<String>, // "systemd" | "launchd" | "respawn_script" | "running_processes"
+    pub suggestion_command: Option<String>,
+    pub message: String,
+    pub pids: Vec<u32>,
+}
 
 /// Strategy pattern interface for platform-specific capabilities.
 ///
@@ -73,6 +83,7 @@ pub trait PlatformStrategy: Send + Sync {
         sudo_pass: Option<&'a str>,
     ) -> BoxFuture<'a, Result<()>>;
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String;
+    fn diagnose_takeover_conflict(&self) -> BoxFuture<'_, Result<TakeoverDiagnoseResult>>;
 
     // ------------------------------------------------------------------------
     // 4. System Proxy & DNS Integration

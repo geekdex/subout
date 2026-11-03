@@ -183,9 +183,7 @@ impl PlatformStrategy for MacOsPlatform {
                             || full_cmd.contains("target/debug/subout")
                             || full_cmd.contains("target/release/subout")
                             || full_cmd.contains("cargo")
-                            || full_cmd.contains(&config_path_str)
-                            || full_cmd.contains("sing-box.json")
-                            || full_cmd.contains("sing-box-running.json");
+                            || full_cmd.contains(&config_path_str);
 
                         if is_subout {
                             continue;
@@ -294,8 +292,6 @@ impl PlatformStrategy for MacOsPlatform {
                             }
                             let full_cmd = parts[2..].join(" ");
                             let is_subout_instance = full_cmd.contains(&config_path_str)
-                                || full_cmd.contains("sing-box.json")
-                                || full_cmd.contains("sing-box-running.json")
                                 || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
                             if is_subout_instance {
                                 pids_to_kill.push(pid);
@@ -401,6 +397,101 @@ impl PlatformStrategy for MacOsPlatform {
                 "终止/接管外部进程 (PID: {pid}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 brew services stop sing-box / sudo kill -9 {pid}"
             )
         }
+    }
+
+    fn diagnose_takeover_conflict(
+        &self,
+    ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
+        Box::pin(async move {
+            let running_config_path =
+                crate::service::SingBoxServiceManager::get_running_config_path();
+            let conflicts = self.detect_conflicting_processes(None, &running_config_path);
+            let pids: Vec<u32> = conflicts.iter().map(|c| c.pid).collect();
+
+            // 1. Check launchd
+            let mut launchd_detected = false;
+            let mut plist_path = None;
+            if let Ok(output) = tokio::process::Command::new("launchctl")
+                .arg("list")
+                .output()
+                .await
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.contains("sing-box") || stdout.contains("singbox") {
+                    launchd_detected = true;
+                }
+            }
+
+            if !launchd_detected {
+                let candidate_dirs = [
+                    PathBuf::from("/Library/LaunchDaemons"),
+                    PathBuf::from("/Library/LaunchAgents"),
+                    dirs::home_dir()
+                        .map(|h| h.join("Library/LaunchAgents"))
+                        .unwrap_or_default(),
+                ];
+                for dir in &candidate_dirs {
+                    if let Ok(entries) = std::fs::read_dir(dir) {
+                        for entry in entries.flatten() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if name.contains("sing-box") || name.contains("singbox") {
+                                launchd_detected = true;
+                                plist_path = Some(entry.path().to_string_lossy().to_string());
+                                break;
+                            }
+                        }
+                    }
+                    if launchd_detected {
+                        break;
+                    }
+                }
+            }
+
+            if launchd_detected {
+                let unload_cmd = plist_path.map_or_else(
+                    || "brew services stop sing-box 或 launchctl unload".to_string(),
+                    |p| format!("sudo launchctl unload -w \"{p}\""),
+                );
+                return Ok(crate::platform::TakeoverDiagnoseResult {
+                    has_conflict: true,
+                    conflict_type: Some("launchd".to_string()),
+                    suggestion_command: Some(unload_cmd),
+                    message: "检测到外部 launchd 守护服务正在管理 sing-box，外部守护进程会自动保持运行。请先卸载外部服务守护。".to_string(),
+                    pids,
+                });
+            }
+
+            if !pids.is_empty() {
+                return Ok(crate::platform::TakeoverDiagnoseResult {
+                    has_conflict: true,
+                    conflict_type: Some("running_processes".to_string()),
+                    suggestion_command: Some(format!(
+                        "sudo kill -9 {}",
+                        pids.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )),
+                    message: format!(
+                        "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。",
+                        pids.len(),
+                        pids.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    pids,
+                });
+            }
+
+            Ok(crate::platform::TakeoverDiagnoseResult {
+                has_conflict: false,
+                conflict_type: None,
+                suggestion_command: None,
+                message: "未检测到外部守护服务或冲突进程。".to_string(),
+                pids: vec![],
+            })
+        })
     }
 
     fn enable_system_proxy(&self, port: u16, sudo_pass: Option<&str>) {

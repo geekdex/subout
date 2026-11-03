@@ -286,7 +286,18 @@ pub async fn set_system_mode(
         ));
     }
 
-    // 3. Update database settings
+    // 3. Lifecycle control: if service is currently running, gracefully stop it first to release TUN/proxy
+    let was_running = state.service_manager.is_running().await;
+    if was_running {
+        state.service_manager.stop().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("模式切换前优雅停止旧服务失败: {e}"),
+            )
+        })?;
+    }
+
+    // 4. Update database settings
     crate::db::update_setting(&conn, "app_mode", target_mode).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -300,22 +311,20 @@ pub async fn set_system_mode(
         )
     })?;
 
-    // 4. Handle service restart if requested or if service is currently running
-    let is_running = state.service_manager.is_running().await;
-    let should_restart = payload.restart_service.unwrap_or(false) || is_running;
-
-    if should_restart && is_running {
+    // 5. Handle service restart if requested
+    let should_restart = payload.restart_service.unwrap_or(false);
+    if should_restart {
         let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
         if let Err(e) = state
             .service_manager
-            .restart_with_sudo(&target_config, sudo_pass.as_deref())
+            .start_with_options(&target_config, sudo_pass.as_deref(), false, None)
             .await
         {
             // Rollback mode in database
             let _ = crate::db::update_setting(&conn, "app_mode", &current_mode);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("服务重载失败，已自动回滚为原模式: {e}"),
+                format!("模式切换后启动新服务失败，已自动回滚为原模式: {e}"),
             ));
         }
     }
@@ -323,7 +332,8 @@ pub async fn set_system_mode(
     Ok(Json(serde_json::json!({
         "status": "success",
         "app_mode": target_mode,
-        "service_restarted": should_restart && is_running
+        "service_restarted": should_restart,
+        "service_previously_running": was_running
     })))
 }
 

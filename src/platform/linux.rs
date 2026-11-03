@@ -206,9 +206,7 @@ impl PlatformStrategy for LinuxPlatform {
                             || full_cmd.contains("target/debug/subout")
                             || full_cmd.contains("target/release/subout")
                             || full_cmd.contains("cargo")
-                            || full_cmd.contains(&config_path_str)
-                            || full_cmd.contains("sing-box.json")
-                            || full_cmd.contains("sing-box-running.json");
+                            || full_cmd.contains(&config_path_str);
 
                         if is_subout {
                             continue;
@@ -292,9 +290,7 @@ impl PlatformStrategy for LinuxPlatform {
                         let is_subout = comm == "subout"
                             || comm.contains("subout")
                             || cmdline.as_deref().is_some_and(|c| {
-                                c.contains("subout")
-                                    || c.contains(&config_path_str)
-                                    || c.contains("sing-box-running.json")
+                                c.contains("subout") || c.contains(&config_path_str)
                             });
 
                         if is_subout {
@@ -436,8 +432,6 @@ impl PlatformStrategy for LinuxPlatform {
                             }
                             let full_cmd = parts[2..].join(" ");
                             let is_subout_instance = full_cmd.contains(&config_path_str)
-                                || full_cmd.contains("sing-box.json")
-                                || full_cmd.contains("sing-box-running.json")
                                 || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
                             if is_subout_instance {
                                 pids_to_kill.push(pid);
@@ -464,9 +458,7 @@ impl PlatformStrategy for LinuxPlatform {
                                     .map(|s| String::from_utf8_lossy(s).to_string())
                                     .collect::<Vec<_>>()
                                     .join(" ");
-                                if cmdline.contains(&config_path_str)
-                                    || cmdline.contains("sing-box-running.json")
-                                {
+                                if cmdline.contains(&config_path_str) {
                                     pids_to_kill.push(pid);
                                 }
                             }
@@ -617,6 +609,88 @@ impl PlatformStrategy for LinuxPlatform {
                 "终止/接管外部进程 (PID: {pid}) 失败：进程仍在运行。请检查输入的 Sudo 密码是否正确，或在系统终端执行 sudo systemctl stop sing-box && sudo systemctl disable sing-box / sudo kill -9 {pid}"
             )
         }
+    }
+
+    fn diagnose_takeover_conflict(
+        &self,
+    ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
+        Box::pin(async move {
+            let running_config_path =
+                crate::service::SingBoxServiceManager::get_running_config_path();
+            let conflicts = self.detect_conflicting_processes(None, &running_config_path);
+            let pids: Vec<u32> = conflicts.iter().map(|c| c.pid).collect();
+
+            // 1. Check systemd active state or unit files
+            let mut systemd_detected = false;
+            for unit in ["sing-box", "sing-box.service", "singbox", "singbox.service"] {
+                if let Ok(output) = tokio::process::Command::new("systemctl")
+                    .args(["is-active", unit])
+                    .output()
+                    .await
+                {
+                    let out_str = String::from_utf8_lossy(&output.stdout);
+                    if out_str.trim() == "active" {
+                        systemd_detected = true;
+                        break;
+                    }
+                }
+            }
+
+            if !systemd_detected {
+                for p in [
+                    "/etc/systemd/system/sing-box.service",
+                    "/etc/systemd/system/singbox.service",
+                    "/lib/systemd/system/sing-box.service",
+                    "/usr/lib/systemd/system/sing-box.service",
+                ] {
+                    if Path::new(p).exists() {
+                        systemd_detected = true;
+                        break;
+                    }
+                }
+            }
+
+            if systemd_detected {
+                return Ok(crate::platform::TakeoverDiagnoseResult {
+                    has_conflict: true,
+                    conflict_type: Some("systemd".to_string()),
+                    suggestion_command: Some("sudo systemctl stop sing-box && sudo systemctl disable sing-box".to_string()),
+                    message: "检测到外部 systemd 服务 (sing-box.service) 正在运行或已注册守护。由于 systemd 具备崩溃保活拉起机制，直接接管会被系统服务管理器重新拉起。请先在终端运行解除命令后再点击接管。".to_string(),
+                    pids,
+                });
+            }
+
+            if !pids.is_empty() {
+                return Ok(crate::platform::TakeoverDiagnoseResult {
+                    has_conflict: true,
+                    conflict_type: Some("running_processes".to_string()),
+                    suggestion_command: Some(format!(
+                        "sudo kill -9 {}",
+                        pids.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )),
+                    message: format!(
+                        "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。点击接管将自动终止并接管流量。",
+                        pids.len(),
+                        pids.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    pids,
+                });
+            }
+
+            Ok(crate::platform::TakeoverDiagnoseResult {
+                has_conflict: false,
+                conflict_type: None,
+                suggestion_command: None,
+                message: "未检测到外部冲突服务或进程，环境就绪。".to_string(),
+                pids: vec![],
+            })
+        })
     }
 
     fn enable_system_proxy(&self, port: u16, _sudo_pass: Option<&str>) {

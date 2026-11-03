@@ -15,13 +15,16 @@ use tower_http::cors::CorsLayer;
 use crate::db;
 
 pub mod auth;
+pub mod auto_update_api;
 pub mod config;
+pub mod configs_api;
 pub mod groups;
 pub mod kernel_api;
 pub mod nodes;
 pub mod service_api;
 pub mod settings;
 pub mod simple_api;
+pub mod sub_api;
 pub mod subscriptions;
 pub mod system;
 
@@ -104,8 +107,9 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
     });
 
     let app = Router::new()
-        // Front-end UI
+        // Front-end UI & Public hosting endpoints
         .route("/", get(serve_ui))
+        .route("/sub/:token", get(sub_api::serve_subscription))
         // Dashboard Stats
         .route("/api/dashboard/stats", get(get_dashboard_stats))
         // Auth APIs
@@ -123,6 +127,23 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route(
             "/api/settings/auto-update/trigger",
             post(settings::trigger_auto_update),
+        )
+        // Auto Update Center (v0.3 Independent Module)
+        .route(
+            "/api/auto-update/settings",
+            get(auto_update_api::get_settings).post(auto_update_api::save_settings),
+        )
+        .route(
+            "/api/auto-update/trigger",
+            post(auto_update_api::trigger_auto_update),
+        )
+        .route(
+            "/api/auto-update/history",
+            get(auto_update_api::get_history_snapshots),
+        )
+        .route(
+            "/api/auto-update/history/:id/rollback",
+            post(auto_update_api::rollback_snapshot),
         )
         // Subscriptions
         .route(
@@ -157,7 +178,19 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             get(nodes::get_speed_test_summary),
         )
         .route("/api/nodes/site-test", post(nodes::test_site_reachability))
-        // Outbound Groups
+        // Node Groups (v0.3 /api/node-groups and backward-compatible /api/groups)
+        .route(
+            "/api/node-groups",
+            get(groups::get_node_groups).post(groups::add_group),
+        )
+        .route(
+            "/api/node-groups/:id",
+            put(groups::update_group).delete(groups::delete_group),
+        )
+        .route(
+            "/api/node-groups/batch-delete",
+            post(groups::batch_delete_groups),
+        )
         .route(
             "/api/groups",
             get(groups::get_groups).post(groups::add_group),
@@ -171,7 +204,26 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             put(groups::update_group).delete(groups::delete_group),
         )
         .route("/api/groups/:id/sync", post(groups::sync_group))
-        // Configuration
+        // Multi-Platform Configuration Profiles (/api/configs)
+        .route(
+            "/api/configs",
+            get(configs_api::list_configs).post(configs_api::create_config),
+        )
+        .route(
+            "/api/configs/:id",
+            get(configs_api::get_config_detail)
+                .put(configs_api::update_config)
+                .delete(configs_api::delete_config),
+        )
+        .route(
+            "/api/configs/:id/reset-token",
+            post(configs_api::reset_token),
+        )
+        .route(
+            "/api/configs/set-running",
+            post(configs_api::set_running_config),
+        )
+        // Configuration Base / Running / Generated (backward compatibility)
         .route(
             "/api/config/base",
             get(config::get_base_config).post(config::save_base_config),
@@ -220,6 +272,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route("/api/kernel/status", get(kernel_api::get_kernel_status))
         .route("/api/kernel/download", post(kernel_api::download_kernel))
         .route("/api/kernel/cancel", post(kernel_api::cancel_download))
+        .route(
+            "/api/kernel/takeover-diagnose",
+            post(kernel_api::takeover_diagnose),
+        )
         // Integrated Service Management APIs
         .route("/api/service/status", get(service_api::get_service_status))
         .route("/api/service/start", post(service_api::start_service))
@@ -251,6 +307,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/simple-config/preview",
             post(simple_api::preview_simple_config),
         )
+        .layer(axum::middleware::from_fn(gatekeeper_middleware))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -395,6 +452,33 @@ pub async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Sta
         return Ok(());
     }
     Err(StatusCode::UNAUTHORIZED)
+}
+
+// Gatekeeper Middleware: Returns 428 Precondition Required for business APIs when sing-box is not ready
+async fn gatekeeper_middleware(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
+    let path = request.uri().path();
+    let is_whitelisted = path == "/"
+        || path.starts_with("/api/kernel/")
+        || path == "/api/system/info"
+        || path.starts_with("/api/auth/")
+        || path.starts_with("/sub/");
+
+    if is_whitelisted || crate::kernel::is_kernel_ready() {
+        Ok(next.run(request).await)
+    } else {
+        Err((
+            StatusCode::PRECONDITION_REQUIRED,
+            Json(serde_json::json!({
+                "error": "sing-box 内核未就绪或版本不合规，请先安装或配置 1.14.* 内核",
+                "code": 428,
+                "pinned_version": crate::kernel::PINNED_KERNEL_VERSION,
+                "supported_versions": crate::kernel::SUPPORTED_KERNEL_VERSIONS
+            })),
+        ))
+    }
 }
 
 // UI Handler

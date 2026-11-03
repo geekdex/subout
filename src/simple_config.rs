@@ -316,9 +316,10 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     }
 
     let has_nodes = !proxy_node_tags.is_empty();
+    let is_direct_all = cfg.route.mode == "direct_all";
 
     // Determine target proxy outbound
-    let target_proxy = if cfg.route.default_outbound == "direct" || !has_nodes {
+    let target_proxy = if is_direct_all || cfg.route.default_outbound == "direct" || !has_nodes {
         "direct".to_string()
     } else if cfg.route.default_outbound == "proxy" {
         "proxy".to_string()
@@ -330,7 +331,9 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         "AUTO-Test".to_string()
     };
 
-    let dns_servers = if is_fakeip_mode {
+    let dns_servers = if is_direct_all {
+        vec![build_dns_server("dns_local", &domestic_dns, None)]
+    } else if is_fakeip_mode {
         vec![
             build_dns_server("dns_local", &domestic_dns, None),
             build_dns_server("dns_fakeip", "fakeip", None),
@@ -351,7 +354,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
 
     let mut dns_rules = Vec::new();
 
-    if cfg.route.block_ads {
+    if !is_direct_all && cfg.route.block_ads {
         dns_rules.push(json!({
             "rule_set": "geosite-category-ads-all",
             "action": "predefined",
@@ -359,39 +362,41 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }));
     }
 
-    let remote_dns_tag = if has_nodes && target_proxy != "direct" {
-        if is_fakeip_mode {
-            "dns_fakeip"
+    if !is_direct_all {
+        let remote_dns_tag = if has_nodes && target_proxy != "direct" {
+            if is_fakeip_mode {
+                "dns_fakeip"
+            } else {
+                "dns_remote"
+            }
         } else {
-            "dns_remote"
-        }
-    } else {
-        "dns_local"
-    };
+            "dns_local"
+        };
 
-    match cfg.route.mode.as_str() {
-        "smart" => {
-            dns_rules.push(json!({
-                "rule_set": "geosite-cn",
-                "server": "dns_local"
-            }));
-            dns_rules.push(json!({
-                "rule_set": "geosite-geolocation-!cn",
-                "server": remote_dns_tag
-            }));
+        match cfg.route.mode.as_str() {
+            "smart" => {
+                dns_rules.push(json!({
+                    "rule_set": "geosite-cn",
+                    "server": "dns_local"
+                }));
+                dns_rules.push(json!({
+                    "rule_set": "geosite-geolocation-!cn",
+                    "server": remote_dns_tag
+                }));
+            }
+            "gfw" => {
+                dns_rules.push(json!({
+                    "rule_set": "geosite-geolocation-!cn",
+                    "server": remote_dns_tag
+                }));
+            }
+            "global" => {
+                dns_rules.push(json!({
+                    "server": remote_dns_tag
+                }));
+            }
+            _ => {}
         }
-        "gfw" => {
-            dns_rules.push(json!({
-                "rule_set": "geosite-geolocation-!cn",
-                "server": remote_dns_tag
-            }));
-        }
-        "global" => {
-            dns_rules.push(json!({
-                "server": remote_dns_tag
-            }));
-        }
-        _ => {}
     }
 
     // Simple Mode is strictly IPv4-only to avoid any dual-stack IPv6 DNS/routing leaks or blackholes
@@ -471,7 +476,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         outbounds_val.push(json!({
             "type": "urltest",
             "tag": "AUTO-Test",
-            "url": "http://cp.cloudflare.com/generate_204",
+            "url": "https://www.gstatic.com/generate_204",
             "interval": "3m",
             "tolerance": 50,
             "outbounds": proxy_node_tags.clone()
@@ -495,7 +500,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }),
     ];
 
-    if cfg.route.block_ads {
+    if !is_direct_all && cfg.route.block_ads {
         // sing-box 1.14 已移除 legacy "block" 特殊出站，改用 rule action 拦截
         route_rules.push(json!({
             "rule_set": "geosite-category-ads-all",
@@ -503,7 +508,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }));
     }
 
-    if cfg.route.bypass_lan {
+    if !is_direct_all && cfg.route.bypass_lan {
         route_rules.push(json!({
             "ip_is_private": true,
             "outbound": "direct"
@@ -511,6 +516,11 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     }
 
     match cfg.route.mode.as_str() {
+        "direct_all" => {
+            route_rules.push(json!({
+                "outbound": "direct"
+            }));
+        }
         "smart" => {
             route_rules.push(json!({
                 "rule_set": "geosite-cn",
@@ -588,13 +598,19 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }));
     }
 
+    let route_final = if is_direct_all {
+        "direct"
+    } else {
+        &target_proxy
+    };
+
     let route_val = json!({
         "auto_detect_interface": true,
         "default_domain_resolver": "dns_local",
         "default_http_client": "direct",
         "rules": route_rules,
         "rule_set": rule_sets,
-        "final": target_proxy
+        "final": route_final
     });
 
     let mut http_clients = vec![json!({
@@ -989,6 +1005,49 @@ mod tests {
         assert_eq!(
             generated_custom["log"]["output"].as_str(),
             Some("sing-box.log")
+        );
+    }
+
+    #[test]
+    fn test_simple_config_direct_all_mode() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        crate::db::save_node(
+            &conn,
+            None,
+            "US-Node",
+            "vless",
+            "1.2.3.4",
+            443,
+            &serde_json::json!({
+                "type": "vless",
+                "tag": "US-Node",
+                "server": "1.2.3.4",
+                "server_port": 443,
+                "uuid": "00000000-0000-0000-0000-000000000000"
+            })
+            .to_string(),
+            true,
+            true,
+        )
+        .unwrap();
+
+        let mut cfg = SimpleConfig::default();
+        cfg.route.mode = "direct_all".to_string();
+
+        let generated = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        assert_eq!(generated["route"]["final"].as_str(), Some("direct"));
+
+        // In direct_all, DNS servers only use dns_local
+        let dns_servers = generated["dns"]["servers"].as_array().unwrap();
+        assert_eq!(dns_servers.len(), 1);
+        assert_eq!(dns_servers[0]["tag"].as_str(), Some("dns_local"));
+
+        // Route rules should route all non-sniff traffic to direct
+        let route_rules = generated["route"]["rules"].as_array().unwrap();
+        assert!(
+            route_rules
+                .iter()
+                .any(|r| r.get("outbound").and_then(|o| o.as_str()) == Some("direct"))
         );
     }
 }

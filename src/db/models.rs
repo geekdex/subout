@@ -38,7 +38,7 @@ pub struct Node {
 pub struct OutboundGroup {
     pub id: i64,
     pub tag: String,
-    pub group_type: String, // "selector" or "urltest"
+    pub group_type: String, // "selector" or "urltest" or "fallback"
     pub url: Option<String>,
     pub interval: Option<String>,
     pub tolerance: Option<i64>,
@@ -47,6 +47,24 @@ pub struct OutboundGroup {
     pub subscriptions: Option<String>,
     pub include_keywords: Option<String>,
     pub exclude_keywords: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+pub type NodeGroup = OutboundGroup;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ConfigProfile {
+    pub id: i64,
+    pub name: String,
+    pub platform: String,
+    pub description: Option<String>,
+    pub token: String,
+    pub version_code: i64,
+    pub content: String,
+    pub is_running_config: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -66,6 +84,8 @@ pub struct NodesPage {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConfigHistory {
     pub id: i64,
+    #[serde(default)]
+    pub config_id: Option<i64>,
     pub change_type: String,
     pub action: String,
     pub detail: String,

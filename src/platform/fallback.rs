@@ -73,6 +73,20 @@ impl PlatformStrategy for FallbackPlatform {
         format!("终止外部进程 (PID: {pid}) 失败：进程仍在运行")
     }
 
+    fn diagnose_takeover_conflict(
+        &self,
+    ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
+        Box::pin(async move {
+            Ok(crate::platform::TakeoverDiagnoseResult {
+                has_conflict: false,
+                conflict_type: None,
+                suggestion_command: None,
+                message: "Fallback 平台无外部服务冲突。".to_string(),
+                pids: vec![],
+            })
+        })
+    }
+
     fn enable_system_proxy(&self, _port: u16, _sudo_pass: Option<&str>) {}
 
     fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {}

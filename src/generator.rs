@@ -141,7 +141,11 @@ fn migrate_legacy_special_outbound_rule(
         return false;
     };
     let action = if matches!(ob, "block" | "dns") {
-        Some(if ob == "block" { "reject" } else { "hijack-dns" })
+        Some(if ob == "block" {
+            "reject"
+        } else {
+            "hijack-dns"
+        })
     } else {
         legacy_actions
             .iter()
@@ -272,9 +276,8 @@ pub fn sanitize_runtime_config(config: &mut Value) {
                 for o in arr.iter_mut() {
                     if let Some(members) = o.get_mut("outbounds").and_then(|m| m.as_array_mut()) {
                         members.retain(|m| {
-                            m.as_str().is_none_or(|tag| {
-                                legacy_actions.iter().all(|(t, _)| t != tag)
-                            })
+                            m.as_str()
+                                .is_none_or(|tag| legacy_actions.iter().all(|(t, _)| t != tag))
                         });
                     }
                 }

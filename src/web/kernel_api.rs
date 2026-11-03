@@ -55,9 +55,10 @@ pub async fn download_kernel(
     tokio::spawn(async move {
         // catch_unwind 兜底：下载任务若因 panic 终止，这里将状态置为 error，
         // 避免前端永远轮询到 "downloading" 的僵尸状态（进度条卡死无任何反馈）
-        let result = std::panic::AssertUnwindSafe(
-            kernel::download_and_install_kernel(status_lock_clone, cancel_flag_clone),
-        )
+        let result = std::panic::AssertUnwindSafe(kernel::download_and_install_kernel(
+            status_lock_clone,
+            cancel_flag_clone,
+        ))
         .catch_unwind()
         .await;
 
@@ -106,4 +107,25 @@ pub async fn cancel_download(
         "status": "cancelled",
         "message": "已取消内核下载"
     })))
+}
+
+pub async fn takeover_diagnose(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<crate::platform::TakeoverDiagnoseResult>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    let res = crate::platform::current_platform()
+        .diagnose_takeover_conflict()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("接管诊断失败: {e}"),
+            )
+        })?;
+
+    Ok(Json(res))
 }

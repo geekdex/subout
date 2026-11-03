@@ -1,36 +1,30 @@
-import pluginVue from 'eslint-plugin-vue';
+import js from '@eslint/js';
 import globals from 'globals';
-import configPrettier from 'eslint-config-prettier';
+import reactHooks from 'eslint-plugin-react-hooks';
+import reactRefresh from 'eslint-plugin-react-refresh';
+import tseslint from 'typescript-eslint';
+import prettier from 'eslint-config-prettier';
 
-export default [
-  // 1. Language Options & Globals
+export default tseslint.config(
+  { ignores: ['dist', 'node_modules', 'coverage'] },
   {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
     languageOptions: {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-      globals: {
-        ...globals.browser,
-        ...globals.node,
-        ...globals.es2021,
-      },
+      ecmaVersion: 2020,
+      globals: globals.browser,
     },
-  },
-
-  // 2. Vue 3 Recommended Flat Configurations
-  ...pluginVue.configs['flat/recommended'],
-
-  // 3. Prettier configuration to disable formatting conflicts
-  configPrettier,
-
-  // 4. Custom project rules
-  {
-    files: ['**/*.js', '**/*.vue'],
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
     rules: {
-      'vue/multi-word-component-names': 'off', // Allow single-word components like App.vue or Dashboard.vue
-      'no-unused-vars': 'warn',
-      'no-undef': 'error',
-      'no-debugger': process.env.NODE_ENV === 'production' ? 'error' : 'warn',
-      'no-console': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'no-console': ['warn', { allow: ['warn', 'error', 'info'] }],
     },
   },
-];
+  prettier
+);
