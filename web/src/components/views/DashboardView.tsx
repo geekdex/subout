@@ -10,6 +10,7 @@ import {
   Radio,
   ExternalLink,
   ChevronRight,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
@@ -47,6 +48,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const isRunning = serviceStatus?.running ?? false;
   const hostOs = systemInfo?.host_os ?? "unknown";
+  const isSimpleMode = (systemInfo?.app_mode ?? "simple") === "simple";
 
   // Filter configs matching host platform
   const eligibleConfigs = configs.filter((c) => c.platform === hostOs);
@@ -197,78 +199,128 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Main Row: Running Config & Site Probes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 cols: Running Profile Management */}
+        {/* Left 2 cols: Running Profile / Simple Mode Status */}
         <div className="lg:col-span-2 glass-panel p-6 space-y-5">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div>
-              <h3 className="text-base font-semibold text-white">
-                本机运行配置绑定
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                sing-box 本地客户端仅能运行符合当前宿主操作系统（
-                <span className="font-medium text-slate-200">
-                  {hostOs.toUpperCase()}
-                </span>
-                ）的配置文件。
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigateTab("profiles")}
-              iconRight={<ChevronRight className="w-3.5 h-3.5" />}
-            >
-              配置中心
-            </Button>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-800/40 border border-slate-800">
-              <div className="space-y-1">
-                <span className="text-xs font-medium text-slate-400">
-                  选择本机生效配置文件
-                </span>
-                <div className="w-72">
-                  <Select
-                    value={runningProfile ? runningProfile.id.toString() : ""}
-                    disabled={switchingConfig}
-                    onChange={handleSelectRunningConfig}
-                    options={eligibleConfigs.map((c) => ({
-                      value: c.id.toString(),
-                      label: `${c.name} (${c.platform})`,
-                      description: `版本: ${c.version_code}`,
-                    }))}
-                    placeholder="选择适用于本机的配置..."
-                  />
-                </div>
-              </div>
-
-              {runningProfile && (
-                <div className="flex flex-col items-end gap-1.5">
-                  <Badge variant="success" dot size="md">
-                    当前运行: {runningProfile.name}
-                  </Badge>
-                  <span className="text-[11px] text-slate-500 font-mono">
-                    Token: {String(runningProfile.token || "").slice(0, 8)}...
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {eligibleConfigs.length === 0 && (
-              <div className="p-4 rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 text-xs text-amber-300 flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+          {isSimpleMode ? (
+            <>
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div>
-                  <p className="font-medium">
-                    未发现适用于 {hostOs.toUpperCase()} 平台的配置！
-                  </p>
-                  <p className="text-slate-400 mt-0.5">
-                    请前往「配置中心」新建一份针对当前操作系统的配置文件，并设为本机运行。
+                  <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>小白极简运行模式</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    小白模式下全局维护单一轻量配置，网络接管参数针对当前宿主平台（
+                    <span className="font-medium text-slate-200">
+                      {hostOs.toUpperCase()}
+                    </span>
+                    ）全自动推荐与自适应。
                   </p>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onNavigateTab("simple")}
+                  iconRight={<ChevronRight className="w-3.5 h-3.5" />}
+                >
+                  分流策略设置
+                </Button>
               </div>
-            )}
-          </div>
+
+              <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-slate-400">分流与出口状态</span>
+                  <div className="text-sm font-semibold text-white flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>开箱即用 · 智能分流与自动测速</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    国内网站与 IP 自动直连，国外受限网站通过最优节点代理加速，自动拦截恶意广告。
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onNavigateTab("simple")}
+                >
+                  调整策略
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-base font-semibold text-white">
+                    本机运行配置绑定
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    sing-box 本地客户端仅能运行符合当前宿主操作系统（
+                    <span className="font-medium text-slate-200">
+                      {hostOs.toUpperCase()}
+                    </span>
+                    ）的配置文件。
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onNavigateTab("profiles")}
+                  iconRight={<ChevronRight className="w-3.5 h-3.5" />}
+                >
+                  配置中心
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-800/40 border border-slate-800">
+                  <div className="space-y-1">
+                    <span className="text-xs font-medium text-slate-400">
+                      选择本机生效配置文件
+                    </span>
+                    <div className="w-72">
+                      <Select
+                        value={runningProfile ? runningProfile.id.toString() : ""}
+                        disabled={switchingConfig}
+                        onChange={handleSelectRunningConfig}
+                        options={eligibleConfigs.map((c) => ({
+                          value: c.id.toString(),
+                          label: `${c.name} (${c.platform})`,
+                          description: `版本: ${c.version_code}`,
+                        }))}
+                        placeholder="选择适用于本机的配置..."
+                      />
+                    </div>
+                  </div>
+
+                  {runningProfile && (
+                    <div className="flex flex-col items-end gap-1.5">
+                      <Badge variant="success" dot size="md">
+                        当前运行: {runningProfile.name}
+                      </Badge>
+                      <span className="text-[11px] text-slate-500 font-mono">
+                        Token: {String(runningProfile.token || "").slice(0, 8)}...
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {eligibleConfigs.length === 0 && (
+                  <div className="p-4 rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 text-xs text-amber-300 flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                    <div>
+                      <p className="font-medium">
+                        未发现适用于 {hostOs.toUpperCase()} 平台的配置！
+                      </p>
+                      <p className="text-slate-400 mt-0.5">
+                        请前往「配置中心」新建一份针对当前操作系统的配置文件，并设为本机运行。
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Right 1 col: Quick Connectivity Probe */}

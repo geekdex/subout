@@ -85,7 +85,10 @@ const AppContent: React.FC = () => {
       if (sys.status === "fulfilled") setSystemInfo(sys.value);
       if (cfgs.status === "fulfilled") setConfigs(cfgs.value);
       if (subs.status === "fulfilled") setSubscriptions(subs.value);
-      if (nds.status === "fulfilled") setNodes(nds.value);
+      if (nds.status === "fulfilled") {
+        const val = nds.value;
+        setNodes(Array.isArray(val) ? val : (val as any)?.nodes || []);
+      }
       if (grps.status === "fulfilled") {
         setNodeGroups(grps.value.groups);
         setVersionCode(String(grps.value.version_code ?? ""));
@@ -123,13 +126,18 @@ const AppContent: React.FC = () => {
     }
   }, [kernelLoading, isKernelReady, currentTab]);
 
-  const handleSwitchMode = async (mode: "simple" | "logical") => {
+  const handleSwitchMode = async (mode: "simple" | "expert") => {
     try {
       await api.setAppMode(mode, false);
       success(
         "已切换工作模式",
         `已切换至 ${mode === "simple" ? "小白模式" : "专业模式"}`,
       );
+      if (mode === "simple" && ["profiles", "groups", "auto-update"].includes(currentTab)) {
+        setCurrentTab("dashboard");
+      } else if (mode === "expert" && currentTab === "simple") {
+        setCurrentTab("dashboard");
+      }
       await loadAllData();
       await refreshStatus();
     } catch (err: unknown) {

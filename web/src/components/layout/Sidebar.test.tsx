@@ -11,7 +11,7 @@ describe('Sidebar & Header with numeric version_code', () => {
         currentTab="dashboard"
         onSelectTab={vi.fn()}
         isKernelReady={true}
-        appMode="simple"
+        appMode="expert"
         versionCode={20261103212000 as unknown as string}
         nodeCount={5}
       />
@@ -31,7 +31,7 @@ describe('Sidebar & Header with numeric version_code', () => {
           default_tun_stack: 'system',
           sudo_configured: true,
           portable_mode: false,
-          app_mode: 'simple',
+          app_mode: 'expert',
           running_config_id: 1,
         }}
         serviceStatus={{
@@ -45,7 +45,7 @@ describe('Sidebar & Header with numeric version_code', () => {
           cpu_usage: 1.2,
           memory_bytes: 10485760,
           last_error: null,
-          active_mode: 'simple',
+          active_mode: 'expert',
           running_config_id: 1,
         }}
         runningProfile={{

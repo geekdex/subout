@@ -13,14 +13,14 @@ import { getErrorMessage } from "../../utils/format";
 interface NodeGroupsViewProps {
   groups: NodeGroup[];
   versionCode: string;
-  nodes: NodeItem[];
+  nodes?: NodeItem[];
   onRefresh: () => void;
 }
 
 export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   groups,
   versionCode,
-  nodes,
+  nodes = [],
   onRefresh,
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
@@ -32,6 +32,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const { success, error } = useToast();
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
 
   const handleOpenCreate = () => {
     setEditingGroup(null);
@@ -99,7 +100,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
     if (!filter) return 0;
     try {
       const reg = new RegExp(filter, "i");
-      return nodes.filter((n) => reg.test(n.tag)).length;
+      return safeNodes.filter((n) => reg.test(n.tag || "")).length;
     } catch {
       return 0;
     }

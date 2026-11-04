@@ -19,11 +19,11 @@ import { useToast } from "../../hooks/useToast";
 import { formatLatency, getErrorMessage } from "../../utils/format";
 
 interface NodesViewProps {
-  nodes: NodeItem[];
+  nodes?: NodeItem[];
   onRefresh: () => void;
 }
 
-export const NodesView: React.FC<NodesViewProps> = ({ nodes, onRefresh }) => {
+export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) => {
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [testingAll, setTestingAll] = useState(false);
@@ -33,11 +33,13 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes, onRefresh }) => {
 
   const { success, error } = useToast();
 
-  const filteredNodes = nodes.filter(
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+
+  const filteredNodes = safeNodes.filter(
     (n) =>
-      n.tag.toLowerCase().includes(search.toLowerCase()) ||
-      n.server.toLowerCase().includes(search.toLowerCase()) ||
-      n.node_type.toLowerCase().includes(search.toLowerCase()),
+      (n.tag || "").toLowerCase().includes(search.toLowerCase()) ||
+      (n.server || "").toLowerCase().includes(search.toLowerCase()) ||
+      (n.node_type || "").toLowerCase().includes(search.toLowerCase()),
   );
 
   const handleSelectAll = () => {
@@ -61,7 +63,7 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes, onRefresh }) => {
     try {
       const res = await api.testNodeLatency(node.id);
       const l = res.latency_ms;
-      success("测速完成", `${node.tag}: ${l ? `${l} ms` : "超时"}`);
+      success("测速完成", `${node.tag}: ${l !== null && l !== undefined ? `${l} ms` : "超时"}`);
       onRefresh();
     } catch (err: unknown) {
       error("测速失败", getErrorMessage(err));
@@ -168,7 +170,8 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes, onRefresh }) => {
       header: "延迟",
       sortable: true,
       render: (node) => {
-        const { text, color } = formatLatency(node.latency_ms);
+        const rawLatency = node.last_tcp_latency ?? node.last_web_latency ?? node.latency_ms;
+        const { text, color } = formatLatency(rawLatency);
         return (
           <span className={`font-mono text-xs font-medium ${color}`}>
             {text}
@@ -222,7 +225,7 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes, onRefresh }) => {
             <Server className="w-5 h-5 text-sky-400" />
             <span>节点池管理 (Node Pool)</span>
             <Badge variant="info" size="sm">
-              共 {nodes.length} 个
+              共 {safeNodes.length} 个
             </Badge>
           </h2>
           <p className="text-xs text-slate-400 mt-1">

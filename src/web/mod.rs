@@ -167,6 +167,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/subscriptions/fetch",
             post(subscriptions::fetch_subscriptions),
         )
+        .route(
+            "/api/subscriptions/:id/fetch",
+            post(subscriptions::fetch_single_subscription),
+        )
         // Node Pool
         .route(
             "/api/nodes",
@@ -176,6 +180,8 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/nodes/:id",
             put(nodes::update_node).delete(nodes::delete_node),
         )
+        .route("/api/nodes/:id/test", post(nodes::ping_single_node))
+        .route("/api/nodes/test-all", post(nodes::ping_all_nodes))
         .route("/api/nodes/batch-delete", post(nodes::batch_delete_nodes))
         .route("/api/nodes/ping", post(nodes::ping_nodes))
         .route(

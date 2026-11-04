@@ -559,8 +559,22 @@ pub async fn ping_nodes(
         )
     })?;
 
+    let ids = if payload.ids.is_empty() {
+        let mut stmt = conn
+            .prepare("SELECT id FROM nodes WHERE enabled = 1")
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "查询节点失败".to_string()))?;
+        let node_ids: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "查询节点失败".to_string()))?
+            .filter_map(Result::ok)
+            .collect();
+        node_ids
+    } else {
+        payload.ids
+    };
+
     let mut nodes_to_ping = Vec::new();
-    for id in payload.ids {
+    for id in ids {
         let res: Result<(String, i64, String, String), rusqlite::Error> = conn.query_row(
             "SELECT server, port, raw_json, node_type FROM nodes WHERE id = ?",
             [id],
@@ -690,6 +704,45 @@ pub async fn ping_nodes(
     }
 
     Ok(Json(results))
+}
+
+pub async fn ping_single_node(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    let req = PingRequest {
+        ids: vec![id],
+        test_type: Some("tcp".to_string()),
+        target_url: None,
+    };
+    let res = ping_nodes(State(state), headers, Json(req)).await?;
+    let lat = res.first().and_then(|r| r.tcp_latency.or(r.latency));
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "latency_ms": lat
+    })))
+}
+
+pub async fn ping_all_nodes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    let req = PingRequest {
+        ids: vec![],
+        test_type: Some("tcp".to_string()),
+        target_url: None,
+    };
+    let _ = ping_nodes(State(state), headers, Json(req)).await?;
+    Ok(Json(serde_json::json!({ "success": true })))
 }
 
 pub async fn get_speed_test_summary(

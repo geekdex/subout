@@ -20,12 +20,12 @@ import { useToast } from "../../hooks/useToast";
 import { formatBytes, formatDate, getErrorMessage } from "../../utils/format";
 
 interface SubscriptionsViewProps {
-  subscriptions: Subscription[];
+  subscriptions?: Subscription[];
   onRefresh: () => void;
 }
 
 export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
-  subscriptions,
+  subscriptions = [],
   onRefresh,
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
@@ -39,6 +39,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const { success, error } = useToast();
+  const safeSubs = Array.isArray(subscriptions) ? subscriptions : [];
 
   const handleOpenCreate = () => {
     setEditingSub(null);
@@ -51,10 +52,10 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
 
   const handleOpenEdit = (sub: Subscription) => {
     setEditingSub(sub);
-    setName(sub.name);
+    setName(sub.label || sub.name || "");
     setUrl(sub.url);
     setUserAgent(sub.user_agent || "clashmeta");
-    setAutoUpdate(sub.auto_update);
+    setAutoUpdate(sub.auto_update ?? true);
     setModalOpen(true);
   };
 
@@ -144,14 +145,19 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
 
       {/* Subscription Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {subscriptions.map((sub) => {
-          const usedBytes = (sub.upload_bytes ?? 0) + (sub.download_bytes ?? 0);
-          const totalBytes = sub.total_bytes ?? 0;
+        {safeSubs.map((sub) => {
+          const uploadVal = sub.upload_bytes ?? sub.upload ?? 0;
+          const downloadVal = sub.download_bytes ?? sub.download ?? 0;
+          const totalBytes = sub.total_bytes ?? sub.total ?? 0;
+          const usedBytes = uploadVal + downloadVal;
           const usagePercent =
             totalBytes > 0
               ? Math.min(100, Math.round((usedBytes / totalBytes) * 100))
               : 0;
           const isSyncing = syncingId === sub.id;
+          const subTitle = sub.label || sub.name || `订阅 #${sub.id}`;
+          const expireVal = sub.expire_timestamp ?? sub.expire;
+          const lastFetchVal = sub.last_fetched || sub.last_updated_at;
 
           return (
             <div
@@ -162,10 +168,12 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <span>{sub.name}</span>
-                      <Badge variant="info" size="sm">
-                        {sub.node_count} 节点
-                      </Badge>
+                      <span>{subTitle}</span>
+                      {sub.node_count !== undefined && (
+                        <Badge variant="info" size="sm">
+                          {sub.node_count} 节点
+                        </Badge>
+                      )}
                     </h3>
                     <p
                       className="text-xs text-slate-400 font-mono truncate max-w-sm"
@@ -190,11 +198,11 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                       <div className="flex items-center gap-3">
                         <span className="flex items-center gap-1 text-[11px] text-slate-400">
                           <ArrowUp className="w-3 h-3 text-sky-400" />
-                          {formatBytes(sub.upload_bytes)}
+                          {formatBytes(uploadVal)}
                         </span>
                         <span className="flex items-center gap-1 text-[11px] text-slate-400">
                           <ArrowDown className="w-3 h-3 text-emerald-400" />
-                          {formatBytes(sub.download_bytes)}
+                          {formatBytes(downloadVal)}
                         </span>
                       </div>
                       <span className="text-xs font-mono font-medium text-slate-200">
@@ -216,14 +224,12 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                       />
                     </div>
 
-                    {sub.expire_timestamp && (
+                    {expireVal && (
                       <div className="flex items-center gap-1 text-[11px] text-slate-400">
                         <Calendar className="w-3 h-3 text-slate-500" />
                         <span>
                           到期:{" "}
-                          {new Date(
-                            sub.expire_timestamp * 1000,
-                          ).toLocaleDateString("zh-CN")}
+                          {new Date(expireVal * 1000).toLocaleDateString("zh-CN")}
                         </span>
                       </div>
                     )}
@@ -231,7 +237,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                 )}
 
                 <div className="text-[11px] text-slate-500 flex items-center justify-between">
-                  <span>最近拉取: {formatDate(sub.last_updated_at)}</span>
+                  <span>最近拉取: {formatDate(lastFetchVal)}</span>
                   <span>UA: {sub.user_agent || "clashmeta"}</span>
                 </div>
               </div>

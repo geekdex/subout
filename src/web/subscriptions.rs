@@ -12,6 +12,7 @@ use crate::web::{AppState, check_auth, get_db_conn};
 #[derive(Deserialize)]
 pub struct SubRequest {
     pub url: String,
+    #[serde(alias = "name")]
     pub label: String,
     pub filter_keywords: Option<String>,
     pub enabled: Option<bool>,
@@ -189,4 +190,33 @@ pub async fn fetch_subscriptions(
     };
 
     Ok(Json(FetchResponse { results }))
+}
+
+pub async fn fetch_single_subscription(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    fetcher::fetch_and_update_subscription(&state.db_path, id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("拉取订阅失败: {e}")))?;
+
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+    let node_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM nodes WHERE subscription_id = ?",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "node_count": node_count,
+        "message": format!("成功拉取订阅源并更新 {node_count} 个节点")
+    })))
 }

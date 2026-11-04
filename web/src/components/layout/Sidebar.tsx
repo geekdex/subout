@@ -29,7 +29,7 @@ interface SidebarProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   isKernelReady: boolean;
-  appMode: "simple" | "logical";
+  appMode: "simple" | "expert";
   versionCode?: string | number;
   nodeCount?: number;
 }
@@ -47,38 +47,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
     icon: React.ReactNode;
     requiresKernel: boolean;
     badge?: string;
-    showInMode?: "all" | "simple" | "logical";
+    showInMode: "all" | "simple" | "expert";
   }> = [
     {
       id: "dashboard",
       label: "控制面板",
       icon: <LayoutDashboard className="w-4 h-4" />,
       requiresKernel: false,
+      showInMode: "all",
     },
     {
       id: "simple",
       label: "小白模式",
       icon: <Sparkles className="w-4 h-4 text-amber-400" />,
       requiresKernel: true,
-      badge: appMode === "simple" ? "当前" : undefined,
+      showInMode: "simple",
     },
     {
       id: "profiles",
       label: "配置中心",
       icon: <Layers className="w-4 h-4" />,
       requiresKernel: true,
+      showInMode: "expert",
     },
     {
       id: "subscriptions",
       label: "订阅管理",
       icon: <Rss className="w-4 h-4" />,
       requiresKernel: true,
+      showInMode: "all",
     },
     {
       id: "nodes",
-      label: "节点管理",
+      label: appMode === "simple" ? "节点列表" : "节点池",
       icon: <Server className="w-4 h-4" />,
       requiresKernel: true,
+      showInMode: "all",
     },
     {
       id: "groups",
@@ -86,26 +90,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <FolderKanban className="w-4 h-4" />,
       requiresKernel: true,
       badge: versionCode ? `v${String(versionCode).slice(-4)}` : undefined,
+      showInMode: "expert",
     },
     {
       id: "auto-update",
       label: "自动更新中心",
       icon: <RefreshCw className="w-4 h-4" />,
       requiresKernel: true,
+      showInMode: "expert",
     },
     {
       id: "logs",
       label: "内核日志",
       icon: <FileText className="w-4 h-4" />,
       requiresKernel: false,
+      showInMode: "all",
     },
     {
       id: "settings",
       label: "系统设置",
       icon: <Settings className="w-4 h-4" />,
       requiresKernel: false,
+      showInMode: "all",
     },
   ];
+
+  const visibleNavItems = navItems.filter(
+    (item) => item.showInMode === "all" || item.showInMode === appMode,
+  );
 
   return (
     <aside className="w-64 bg-slate-900/90 border-r border-slate-800 flex flex-col shrink-0 select-none">
@@ -134,7 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="px-3 py-1.5 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
           导航菜单
         </div>
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isLocked = item.requiresKernel && !isKernelReady;
           const isActive = currentTab === item.id;
 

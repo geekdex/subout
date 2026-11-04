@@ -25,7 +25,7 @@ export interface ServiceStatus {
   cpu_usage: number;
   memory_bytes: number;
   last_error: string | null;
-  active_mode: "simple" | "logical";
+  active_mode: "simple" | "expert";
   running_config_id: number | null;
   system_proxy_enabled?: boolean;
 }
@@ -58,16 +58,21 @@ export interface TakeoverDiagnoseResult {
 export interface NodeItem {
   id: number;
   subscription_id: number | null;
+  subscription_label?: string | null;
   tag: string;
   node_type: string;
   server: string;
   port: number;
   raw_json: string;
   enabled: boolean;
-  is_active: boolean;
+  is_active?: boolean;
+  is_custom?: boolean;
   latency_ms?: number | null;
-  created_at: string;
-  updated_at: string;
+  last_tcp_latency?: number | null;
+  last_web_latency?: number | null;
+  last_tested_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface NodeGroup {
@@ -88,18 +93,25 @@ export interface NodeGroupsListResponse {
 
 export interface Subscription {
   id: number;
-  name: string;
+  name?: string;
+  label?: string;
   url: string;
-  user_agent: string;
+  user_agent?: string;
   enabled: boolean;
-  auto_update: boolean;
-  update_interval_mins: number;
-  last_updated_at: string | null;
-  node_count: number;
-  upload_bytes: number | null;
-  download_bytes: number | null;
-  total_bytes: number | null;
-  expire_timestamp: number | null;
+  auto_update?: boolean;
+  update_interval_mins?: number;
+  last_updated_at?: string | null;
+  last_fetched?: string | null;
+  last_error?: string | null;
+  node_count?: number;
+  upload_bytes?: number | null;
+  download_bytes?: number | null;
+  total_bytes?: number | null;
+  expire_timestamp?: number | null;
+  upload?: number | null;
+  download?: number | null;
+  total?: number | null;
+  expire?: number | null;
 }
 
 export interface SimpleDnsConfig {
@@ -138,9 +150,14 @@ export interface SimpleConfig {
 }
 
 export interface AutoUpdateSettings {
-  cron_expression: string;
-  sync_running_config: boolean;
-  reload_service: boolean;
+  cron_expression?: string;
+  cron?: string;
+  sync_running_config?: boolean;
+  sync_running?: boolean;
+  reload_service?: boolean;
+  interval?: string;
+  daily_time?: string;
+  enabled?: boolean;
 }
 
 export interface AutoUpdateSnapshot {
@@ -158,9 +175,13 @@ export interface AutoUpdateSnapshot {
 export interface SystemInfo {
   host_os: "linux" | "macos" | "windows" | "unknown";
   host_arch: string;
-  default_tun_stack: string;
-  sudo_configured: boolean;
-  portable_mode: boolean;
-  app_mode: "simple" | "logical";
+  os?: string;
+  is_linux?: boolean;
+  default_tun_stack?: string;
+  sudo_configured?: boolean;
+  portable_mode?: boolean;
+  app_mode: "simple" | "expert";
   running_config_id: number | null;
+  primary_lan_ip?: string | null;
+  lan_ips?: string[];
 }

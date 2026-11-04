@@ -336,36 +336,42 @@ pub fn get_config_for_mode(
             .unwrap_or(None)
             .unwrap_or_default();
 
-        if let Ok(id) = running_id_str.parse::<i64>()
-            && let Ok(Some(history)) = db::get_config_history_detail(conn, id)
-            && let Some(content_str) = history.content
-            && let Ok(c) = serde_json::from_str::<Value>(&content_str)
-        {
-            let log = c.get("log").cloned().unwrap_or(serde_json::json!({}));
-            let dns = c.get("dns").cloned().unwrap_or(serde_json::json!({}));
-            let inbounds = c.get("inbounds").cloned().unwrap_or(serde_json::json!([]));
-            let outbounds = c.get("outbounds").cloned().unwrap_or(serde_json::json!([]));
-            let route = c.get("route").cloned().unwrap_or(serde_json::json!({}));
-            let experimental = c
-                .get("experimental")
-                .cloned()
-                .unwrap_or(serde_json::json!({}));
-            let http_clients = c.get("http_clients").cloned();
-            return generator::generate_config_with_base(
-                log,
-                dns,
-                inbounds,
-                outbounds,
-                route,
-                experimental,
-                http_clients,
-            )
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("生成配置失败: {e}"),
+        if let Ok(id) = running_id_str.parse::<i64>() {
+            if let Ok(Some(prof)) = db::get_config_profile_by_id(conn, id)
+                && let Ok(c) = serde_json::from_str::<Value>(&prof.content)
+            {
+                return Ok(c);
+            }
+            if let Ok(Some(history)) = db::get_config_history_detail(conn, id)
+                && let Some(content_str) = history.content
+                && let Ok(c) = serde_json::from_str::<Value>(&content_str)
+            {
+                let log = c.get("log").cloned().unwrap_or(serde_json::json!({}));
+                let dns = c.get("dns").cloned().unwrap_or(serde_json::json!({}));
+                let inbounds = c.get("inbounds").cloned().unwrap_or(serde_json::json!([]));
+                let outbounds = c.get("outbounds").cloned().unwrap_or(serde_json::json!([]));
+                let route = c.get("route").cloned().unwrap_or(serde_json::json!({}));
+                let experimental = c
+                    .get("experimental")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                let http_clients = c.get("http_clients").cloned();
+                return generator::generate_config_with_base(
+                    log,
+                    dns,
+                    inbounds,
+                    outbounds,
+                    route,
+                    experimental,
+                    http_clients,
                 )
-            });
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("生成配置失败: {e}"),
+                    )
+                });
+            }
         }
 
         generator::generate_config(conn).map_err(|e| {

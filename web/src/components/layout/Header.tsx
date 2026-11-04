@@ -22,7 +22,7 @@ interface HeaderProps {
   onStopService: () => void;
   onRestartService: () => void;
   onToggleSystemProxy: (enabled: boolean) => void;
-  onSwitchMode: (mode: "simple" | "logical") => void;
+  onSwitchMode: (mode: "simple" | "expert") => void;
   onLogout: () => void;
 }
 
@@ -53,7 +53,12 @@ export const Header: React.FC<HeaderProps> = ({
           </Badge>
         )}
 
-        {runningProfile ? (
+        {appMode === "simple" ? (
+          <div className="flex items-center gap-1.5 text-xs text-sky-400 font-medium">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>小白极简模式</span>
+          </div>
+        ) : runningProfile ? (
           <div className="flex items-center gap-1.5 text-xs text-slate-300">
             <span className="text-slate-500">运行配置:</span>
             <span className="font-medium text-sky-400">
@@ -96,9 +101,9 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => onSwitchMode("logical")}
+            onClick={() => onSwitchMode("expert")}
             className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-all ${
-              appMode === "logical"
+              appMode === "expert"
                 ? "bg-sky-500 text-white font-medium shadow-sm"
                 : "text-slate-400 hover:text-slate-200"
             }`}

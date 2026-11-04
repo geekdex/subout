@@ -16,7 +16,11 @@ pub struct DirQuery {
 #[derive(Serialize)]
 pub struct SystemInfoResponse {
     pub os: String,
+    pub host_os: String,
+    pub host_arch: String,
     pub is_linux: bool,
+    pub app_mode: String,
+    pub running_config_id: Option<i64>,
     pub primary_lan_ip: Option<String>,
     pub lan_ips: Vec<String>,
 }
@@ -85,12 +89,31 @@ pub async fn get_system_info(
     check_auth(&state, &headers).await?;
     let platform = crate::platform::current_platform();
     let os = platform.os_name().to_string();
+    let host_os = os.clone();
+    let host_arch = std::env::consts::ARCH.to_string();
     let is_linux = platform.is_linux();
     let lan_ips = discover_host_lan_ips();
     let primary_lan_ip = lan_ips.first().cloned();
+
+    let (app_mode, running_config_id) = if let Ok(conn) = get_db_conn(&state.db_path) {
+        let mode = crate::db::get_setting(&conn, "app_mode")
+            .unwrap_or(None)
+            .unwrap_or_else(|| "simple".to_string());
+        let rc_id = crate::db::get_setting(&conn, "running_config_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse::<i64>().ok());
+        (mode, rc_id)
+    } else {
+        ("simple".to_string(), None)
+    };
+
     Ok(Json(SystemInfoResponse {
         os,
+        host_os,
+        host_arch,
         is_linux,
+        app_mode,
+        running_config_id,
         primary_lan_ip,
         lan_ips,
     }))
@@ -185,7 +208,9 @@ pub struct SystemModeResponse {
 
 #[derive(Deserialize)]
 pub struct SetModeRequest {
+    #[serde(alias = "mode")]
     pub app_mode: String,
+    #[serde(alias = "restart")]
     pub restart_service: Option<bool>,
     pub sudo_pass: Option<String>,
 }
@@ -245,7 +270,8 @@ pub async fn set_system_mode(
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let target_mode = if payload.app_mode == "expert" {
+    let mode_lower = payload.app_mode.trim().to_lowercase();
+    let target_mode = if mode_lower == "expert" || mode_lower == "logical" {
         "expert"
     } else {
         "simple"

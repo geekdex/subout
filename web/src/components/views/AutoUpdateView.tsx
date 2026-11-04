@@ -172,7 +172,7 @@ export const AutoUpdateView: React.FC = () => {
           <div className="space-y-3">
             <Input
               label="Cron 表达式"
-              value={settings.cron_expression}
+              value={settings.cron_expression || settings.cron || ""}
               onChange={(e) =>
                 setSettings({ ...settings, cron_expression: e.target.value })
               }
@@ -209,7 +209,7 @@ export const AutoUpdateView: React.FC = () => {
                 </p>
               </div>
               <Switch
-                checked={settings.sync_running_config}
+                checked={!!settings.sync_running_config}
                 onChange={(checked) =>
                   setSettings({ ...settings, sync_running_config: checked })
                 }
@@ -226,7 +226,7 @@ export const AutoUpdateView: React.FC = () => {
                 </p>
               </div>
               <Switch
-                checked={settings.reload_service}
+                checked={!!settings.reload_service}
                 onChange={(checked) =>
                   setSettings({ ...settings, reload_service: checked })
                 }

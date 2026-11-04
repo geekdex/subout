@@ -222,12 +222,17 @@ export const api = {
     return request<SystemInfo>("/api/system/info");
   },
   async setAppMode(
-    mode: "simple" | "logical",
+    mode: "simple" | "expert",
     restart = false,
-  ): Promise<{ success: boolean; mode: string }> {
+  ): Promise<{ success: boolean; app_mode: string }> {
     return request("/api/system/mode", {
       method: "POST",
-      body: JSON.stringify({ mode, restart }),
+      body: JSON.stringify({
+        app_mode: mode,
+        mode: mode,
+        restart_service: restart,
+        restart: restart,
+      }),
     });
   },
   async setSudoPassword(password: string): Promise<{ success: boolean; message?: string }> {
@@ -315,12 +320,16 @@ export const api = {
 
   // Simple Config
   async getSimpleConfig(): Promise<SimpleConfig> {
-    return request<SimpleConfig>("/api/simple-config");
+    const res = await request<any>("/api/simple-config");
+    return res?.config ? res.config : res;
   },
-  async saveSimpleConfig(cfg: SimpleConfig): Promise<{ success: boolean }> {
+  async saveSimpleConfig(
+    cfg: SimpleConfig,
+    apply = true,
+  ): Promise<{ success: boolean; generated?: any }> {
     return request("/api/simple-config", {
       method: "POST",
-      body: JSON.stringify(cfg),
+      body: JSON.stringify({ config: cfg, apply }),
     });
   },
 
@@ -353,7 +362,10 @@ export const api = {
 
   // Nodes
   async listNodes(): Promise<NodeItem[]> {
-    return request<NodeItem[]>("/api/nodes");
+    const res = await request<any>("/api/nodes?limit=10000");
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res?.nodes)) return res.nodes;
+    return [];
   },
   async saveNode(payload: Partial<NodeItem>): Promise<NodeItem> {
     return request<NodeItem>("/api/nodes", {
@@ -375,10 +387,30 @@ export const api = {
   async testNodeLatency(
     nodeId: number,
   ): Promise<{ latency_ms: number | null }> {
-    return request(`/api/nodes/${nodeId}/test`, { method: "POST" });
+    try {
+      return await request(`/api/nodes/${nodeId}/test`, { method: "POST" });
+    } catch {
+      const res = await request<Array<{ id: number; tcp_latency?: number | null; latency?: number | null }>>(
+        "/api/nodes/ping",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids: [nodeId], test_type: "tcp" }),
+        },
+      );
+      const first = res?.[0];
+      return { latency_ms: first?.tcp_latency ?? first?.latency ?? null };
+    }
   },
   async testAllNodesLatency(): Promise<{ success: boolean }> {
-    return request("/api/nodes/test-all", { method: "POST" });
+    try {
+      return await request("/api/nodes/test-all", { method: "POST" });
+    } catch {
+      await request("/api/nodes/ping", {
+        method: "POST",
+        body: JSON.stringify({ ids: [], test_type: "tcp" }),
+      });
+      return { success: true };
+    }
   },
 
   // Subscriptions
@@ -388,18 +420,36 @@ export const api = {
   async createSubscription(
     payload: Partial<Subscription>,
   ): Promise<Subscription> {
+    const label = payload.label || payload.name || "未命名订阅";
+    const body = {
+      label,
+      name: label,
+      url: payload.url,
+      enabled: payload.enabled ?? true,
+      filter_keywords: "[]",
+      delete_on_update: true,
+    };
     return request<Subscription>("/api/subscriptions", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
   },
   async updateSubscription(
     id: number,
     payload: Partial<Subscription>,
   ): Promise<Subscription> {
+    const label = payload.label || payload.name;
+    const body = {
+      label,
+      name: label,
+      url: payload.url,
+      enabled: payload.enabled,
+      filter_keywords: "[]",
+      delete_on_update: true,
+    };
     return request<Subscription>(`/api/subscriptions/${id}`, {
       method: "PUT",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
   },
   async deleteSubscription(id: number): Promise<{ success: boolean }> {
@@ -408,7 +458,15 @@ export const api = {
   async syncSubscription(
     id: number,
   ): Promise<{ success: boolean; node_count: number }> {
-    return request(`/api/subscriptions/${id}/fetch`, { method: "POST" });
+    try {
+      return await request(`/api/subscriptions/${id}/fetch`, { method: "POST" });
+    } catch {
+      await request("/api/subscriptions/fetch", {
+        method: "POST",
+        body: JSON.stringify({ subscription_id: id }),
+      });
+      return { success: true, node_count: 0 };
+    }
   },
 
   // Auto-Update
@@ -441,6 +499,12 @@ export const api = {
 
   // Logs
   async getServiceLogs(lines = 200): Promise<{ logs: string[] }> {
-    return request(`/api/service/logs?lines=${lines}`);
+    const res = await request<any>(`/api/service/logs?lines=${lines}`);
+    if (Array.isArray(res)) return { logs: res };
+    if (Array.isArray(res?.logs)) return { logs: res.logs };
+    return { logs: [] };
+  },
+  async clearServiceLogs(): Promise<{ success: boolean }> {
+    return request("/api/service/logs/clear", { method: "POST" });
   },
 };

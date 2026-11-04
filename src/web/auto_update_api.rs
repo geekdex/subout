@@ -12,9 +12,11 @@ use crate::web::{AppState, check_auth, get_db_conn};
 pub struct AutoUpdateSettingsResponse {
     pub enabled: bool,
     pub cron: String,
+    pub cron_expression: String,
     pub interval: String,
     pub daily_time: String,
     pub sync_running: bool,
+    pub sync_running_config: bool,
     pub reload_service: bool,
     pub last_run: Option<u64>,
     pub next_run: Option<u64>,
@@ -26,9 +28,11 @@ pub struct AutoUpdateSettingsResponse {
 #[derive(Deserialize)]
 pub struct SaveAutoUpdateSettingsRequest {
     pub enabled: Option<bool>,
+    #[serde(alias = "cron_expression")]
     pub cron: Option<String>,
     pub interval: Option<String>,
     pub daily_time: Option<String>,
+    #[serde(alias = "sync_running_config")]
     pub sync_running: Option<bool>,
     pub reload_service: Option<bool>,
 }
@@ -86,10 +90,12 @@ pub async fn get_settings(
 
     Ok(Json(AutoUpdateSettingsResponse {
         enabled,
-        cron,
+        cron: cron.clone(),
+        cron_expression: cron,
         interval,
         daily_time,
         sync_running,
+        sync_running_config: sync_running,
         reload_service,
         last_run,
         next_run,

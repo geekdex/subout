@@ -85,7 +85,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleSwitchMode = async (targetMode: "simple" | "logical") => {
+  const handleSwitchMode = async (targetMode: "simple" | "expert") => {
     if (systemInfo?.app_mode === targetMode) return;
     setSwitchingMode(true);
     try {
@@ -152,9 +152,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 disabled={switchingMode}
-                onClick={() => handleSwitchMode("logical")}
+                onClick={() => handleSwitchMode("expert")}
                 className={`p-4 rounded-xl border text-left transition-all ${
-                  systemInfo?.app_mode === "logical"
+                  systemInfo?.app_mode === "expert"
                     ? "border-sky-500 bg-sky-500/10 shadow-md shadow-sky-500/10"
                     : "border-slate-800 bg-slate-900/40 hover:border-slate-700"
                 }`}

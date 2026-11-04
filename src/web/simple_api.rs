@@ -24,6 +24,13 @@ pub struct SaveSimpleConfigRequest {
     pub takeover: Option<bool>,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum SaveSimpleConfigPayload {
+    Wrapped(SaveSimpleConfigRequest),
+    Direct(SimpleConfig),
+}
+
 pub async fn get_simple_config(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -44,14 +51,19 @@ pub async fn get_simple_config(
 pub async fn save_simple_config(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<SaveSimpleConfigRequest>,
+    Json(payload): Json<SaveSimpleConfigPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let generated = simple_config::generate_simple_singbox_config(&conn, &payload.config)
+    let (config, apply, sudo_pass, takeover) = match payload {
+        SaveSimpleConfigPayload::Wrapped(req) => (req.config, req.apply, req.sudo_pass, req.takeover),
+        SaveSimpleConfigPayload::Direct(cfg) => (cfg, Some(true), None, None),
+    };
+
+    let generated = simple_config::generate_simple_singbox_config(&conn, &config)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成简单配置失败: {e}")))?;
 
     let log = generated
@@ -95,19 +107,19 @@ pub async fn save_simple_config(
         ));
     }
 
-    simple_config::save_simple_config(&conn, &payload.config).map_err(|e| {
+    simple_config::save_simple_config(&conn, &config).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("保存配置失败: {e}"),
         )
     })?;
 
-    if payload.apply.unwrap_or(false) {
-        let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
-        let takeover = payload.takeover.unwrap_or(false);
+    if apply.unwrap_or(false) {
+        let pass = sudo_pass.filter(|p| !p.trim().is_empty());
+        let to = takeover.unwrap_or(false);
         if let Err(e) = state
             .service_manager
-            .restart_with_sudo_and_takeover(&generated, sudo_pass.as_deref(), takeover)
+            .restart_with_sudo_and_takeover(&generated, pass.as_deref(), to)
             .await
         {
             return Err((
@@ -119,7 +131,7 @@ pub async fn save_simple_config(
 
     Ok(Json(serde_json::json!({
         "status": "success",
-        "message": if payload.apply.unwrap_or(false) { "简单配置已保存并成功启动/重启 sing-box 服务" } else { "简单配置已保存" },
+        "message": if apply.unwrap_or(false) { "简单配置已保存并成功启动/重启 sing-box 服务" } else { "简单配置已保存" },
         "generated": generated
     })))
 }

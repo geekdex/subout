@@ -481,27 +481,53 @@ impl SingBoxServiceManager {
                 let running_id_str = crate::db::get_setting(&conn, "running_config_id")
                     .unwrap_or(None)
                     .unwrap_or_default();
-                if let Ok(id) = running_id_str.parse::<i64>()
-                    && let Ok(Some(history)) = crate::db::get_config_history_detail(&conn, id)
-                    && let Some(content_str) = history.content
-                    && let Ok(c) = serde_json::from_str::<Value>(&content_str)
-                {
-                    let level = c
-                        .get("log")
-                        .and_then(|l| l.get("level"))
-                        .and_then(|lv| lv.as_str())
-                        .map(str::to_lowercase);
-                    let disabled = c
-                        .get("log")
-                        .and_then(|l| l.get("disabled"))
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false);
-                    let output = c
-                        .get("log")
-                        .and_then(|l| l.get("output"))
-                        .and_then(|o| o.as_str())
-                        .map(std::string::ToString::to_string);
-                    (level.or(Some("info".to_string())), disabled, output)
+                if let Ok(id) = running_id_str.parse::<i64>() {
+                    let parsed_content = if let Ok(Some(prof)) = crate::db::get_config_profile_by_id(&conn, id) {
+                        serde_json::from_str::<Value>(&prof.content).ok()
+                    } else if let Ok(Some(history)) = crate::db::get_config_history_detail(&conn, id)
+                        && let Some(content_str) = history.content
+                    {
+                        serde_json::from_str::<Value>(&content_str).ok()
+                    } else {
+                        None
+                    };
+
+                    if let Some(c) = parsed_content {
+                        let level = c
+                            .get("log")
+                            .and_then(|l| l.get("level"))
+                            .and_then(|lv| lv.as_str())
+                            .map(str::to_lowercase);
+                        let disabled = c
+                            .get("log")
+                            .and_then(|l| l.get("disabled"))
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false);
+                        let output = c
+                            .get("log")
+                            .and_then(|l| l.get("output"))
+                            .and_then(|o| o.as_str())
+                            .map(std::string::ToString::to_string);
+                        (level.or(Some("info".to_string())), disabled, output)
+                    } else if let Ok(Some(log_str)) = crate::db::get_base_config_section(&conn, "log")
+                        && let Ok(c) = serde_json::from_str::<Value>(&log_str)
+                    {
+                        let level = c
+                            .get("level")
+                            .and_then(|lv| lv.as_str())
+                            .map(str::to_lowercase);
+                        let disabled = c
+                            .get("disabled")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false);
+                        let output = c
+                            .get("output")
+                            .and_then(|o| o.as_str())
+                            .map(std::string::ToString::to_string);
+                        (level.or(Some("info".to_string())), disabled, output)
+                    } else {
+                        (Some("info".to_string()), false, None)
+                    }
                 } else if let Ok(Some(log_str)) = crate::db::get_base_config_section(&conn, "log")
                     && let Ok(c) = serde_json::from_str::<Value>(&log_str)
                 {
@@ -1588,13 +1614,21 @@ pub fn get_mixed_port_for_active_mode(conn: &rusqlite::Connection) -> Option<u16
         let running_id_str = crate::db::get_setting(conn, "running_config_id")
             .unwrap_or(None)
             .unwrap_or_default();
-        if let Ok(id) = running_id_str.parse::<i64>()
-            && let Ok(Some(history)) = crate::db::get_config_history_detail(conn, id)
-            && let Some(content_str) = history.content
-            && let Ok(c) = serde_json::from_str::<Value>(&content_str)
-        {
-            get_mixed_port_from_config(&c)
-        } else if let Ok(Some(inbounds_str)) = crate::db::get_base_config_section(conn, "inbounds")
+        if let Ok(id) = running_id_str.parse::<i64>() {
+            let parsed_content = if let Ok(Some(prof)) = crate::db::get_config_profile_by_id(conn, id) {
+                serde_json::from_str::<Value>(&prof.content).ok()
+            } else if let Ok(Some(history)) = crate::db::get_config_history_detail(conn, id)
+                && let Some(content_str) = history.content
+            {
+                serde_json::from_str::<Value>(&content_str).ok()
+            } else {
+                None
+            };
+            if let Some(c) = parsed_content {
+                return get_mixed_port_from_config(&c);
+            }
+        }
+        if let Ok(Some(inbounds_str)) = crate::db::get_base_config_section(conn, "inbounds")
             && let Ok(inbounds_val) = serde_json::from_str::<Value>(&inbounds_str)
         {
             let dummy = serde_json::json!({ "inbounds": inbounds_val });
