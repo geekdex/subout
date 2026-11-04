@@ -5,11 +5,9 @@ import {
   Globe2,
   ShieldCheck,
   CheckCircle2,
-  SlidersHorizontal,
+  Save,
   Server,
   Lock,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
@@ -55,7 +53,6 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
   const [config, setConfig] = useState<SimpleConfig>(defaultSimpleConfig);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const { success, error } = useToast();
 
   const safeNodes = Array.isArray(nodes) ? nodes : [];
@@ -82,12 +79,15 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
     loadConfig();
   }, [loadConfig]);
 
-  const handleSave = async () => {
+  const handleSave = async (apply: boolean) => {
     if (!config) return;
     setSaving(true);
     try {
-      await api.saveSimpleConfig(config, true);
-      success("小白模式配置已保存并生效");
+      await api.saveSimpleConfig(config, apply);
+      success(
+        apply ? "小白模式配置已保存并生效" : "小白模式配置已保存",
+        apply ? "sing-box 已热重载并应用最新分流规则" : undefined,
+      );
     } catch (err: unknown) {
       error("保存配置失败", getErrorMessage(err));
     } finally {
@@ -170,15 +170,26 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
             开箱即用，免除繁杂配置。选择 4 种智能分流策略之一，系统自动完成网卡适配与规则前置注入。
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="md"
-          loading={saving}
-          onClick={handleSave}
-          icon={<CheckCircle2 className="w-4 h-4" />}
-        >
-          保存并应用
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            loading={saving}
+            onClick={() => handleSave(false)}
+            icon={<Save className="w-4 h-4" />}
+          >
+            保存设置
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            loading={saving}
+            onClick={() => handleSave(true)}
+            icon={<CheckCircle2 className="w-4 h-4" />}
+          >
+            保存并应用
+          </Button>
+        </div>
       </div>
 
       {/* 4 Routing Mode Cards */}
@@ -321,74 +332,6 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Advanced Inbound / DNS Toggles (Collapsible) */}
-      <div className="glass-panel p-4">
-        <button
-          type="button"
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="w-4 h-4 text-slate-400" />
-            <span className="font-medium">
-              高级网络适配选项 (默认已自动针对当前操作系统推荐最佳参数)
-            </span>
-          </div>
-          {showAdvanced ? (
-            <ChevronUp className="w-4 h-4 text-slate-400" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-slate-400" />
-          )}
-        </button>
-
-        {showAdvanced && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-800">
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400">接管方式</label>
-              <Select
-                value={config.inbound.inbound_type}
-                onChange={(val) =>
-                  setConfig({
-                    ...config,
-                    inbound: { ...config.inbound, inbound_type: val },
-                  })
-                }
-                options={[
-                  { value: "tun", label: "TUN 虚拟网卡 (全局透明代理，推荐)" },
-                  { value: "mixed", label: "Mixed 混合端口 (HTTP + SOCKS5)" },
-                ]}
-              />
-              <p className="text-[11px] text-slate-500">
-                TUN 模式全自动接管系统所有流量，Mixed 模式仅提供本地代理端口。
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400">DNS 预设方案</label>
-              <Select
-                value={config.dns.mode}
-                onChange={(val) =>
-                  setConfig({ ...config, dns: { ...config.dns, mode: val } })
-                }
-                options={[
-                  {
-                    value: "preset_fakeip",
-                    label: "FakeIP 虚拟 IP 池 (防污染最强，推荐)",
-                  },
-                  {
-                    value: "preset_domestic_foreign",
-                    label: "国内阿里 223.5.5.5 + 国外 DoH 1.1.1.1",
-                  },
-                ]}
-              />
-              <p className="text-[11px] text-slate-500">
-                FakeIP 通过虚拟网段避免向公共 DNS 发送真实查询，防 DNS 污染与泄漏效果最佳。
-              </p>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -229,9 +229,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({
         app_mode: mode,
-        mode: mode,
         restart_service: restart,
-        restart: restart,
       }),
     });
   },
@@ -270,7 +268,6 @@ export const api = {
       platform: payload.platform,
       description: payload.description,
       content: payload.content || payload.config_json,
-      config_json: payload.config_json || payload.content,
     };
     return request<ConfigProfile>("/api/configs", {
       method: "POST",
@@ -290,9 +287,10 @@ export const api = {
       config_json?: string;
     },
   ): Promise<ConfigProfile> {
+    const { config_json, ...rest } = payload;
     const body = {
-      ...payload,
-      content: payload.content || payload.config_json,
+      ...rest,
+      content: payload.content || config_json,
     };
     return request<ConfigProfile>(`/api/configs/${id}`, {
       method: "PUT",
@@ -421,13 +419,12 @@ export const api = {
     payload: Partial<Subscription>,
   ): Promise<Subscription> {
     const label = payload.label || payload.name || "未命名订阅";
-    const body = {
+    const body: Record<string, unknown> = {
       label,
-      name: label,
       url: payload.url,
       enabled: payload.enabled ?? true,
-      filter_keywords: "[]",
-      delete_on_update: true,
+      filter_keywords: payload.filter_keywords || "[]",
+      delete_on_update: payload.delete_on_update ?? true,
     };
     return request<Subscription>("/api/subscriptions", {
       method: "POST",
@@ -439,14 +436,13 @@ export const api = {
     payload: Partial<Subscription>,
   ): Promise<Subscription> {
     const label = payload.label || payload.name;
-    const body = {
+    const body: Record<string, unknown> = {
       label,
-      name: label,
       url: payload.url,
-      enabled: payload.enabled,
-      filter_keywords: "[]",
-      delete_on_update: true,
     };
+    if (payload.enabled !== undefined) body.enabled = payload.enabled;
+    if (payload.filter_keywords !== undefined) body.filter_keywords = payload.filter_keywords;
+    if (payload.delete_on_update !== undefined) body.delete_on_update = payload.delete_on_update;
     return request<Subscription>(`/api/subscriptions/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
@@ -476,9 +472,17 @@ export const api = {
   async saveAutoUpdateSettings(
     settings: AutoUpdateSettings,
   ): Promise<{ success: boolean }> {
+    const body: Record<string, unknown> = {
+      enabled: settings.enabled,
+      cron: settings.cron || settings.cron_expression,
+      sync_running: settings.sync_running ?? settings.sync_running_config,
+      reload_service: settings.reload_service,
+      interval: settings.interval,
+      daily_time: settings.daily_time,
+    };
     return request("/api/auto-update/settings", {
       method: "POST",
-      body: JSON.stringify(settings),
+      body: JSON.stringify(body),
     });
   },
   async triggerAutoUpdate(): Promise<{

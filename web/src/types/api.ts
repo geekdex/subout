@@ -98,6 +98,8 @@ export interface Subscription {
   url: string;
   user_agent?: string;
   enabled: boolean;
+  filter_keywords?: string;
+  delete_on_update?: boolean;
   auto_update?: boolean;
   update_interval_mins?: number;
   last_updated_at?: string | null;

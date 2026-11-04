@@ -9,7 +9,7 @@ use crate::db;
 use crate::fetcher;
 use crate::web::{AppState, check_auth, get_db_conn};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct SubRequest {
     pub url: String,
     #[serde(alias = "name")]
@@ -219,4 +219,38 @@ pub async fn fetch_single_subscription(
         "node_count": node_count,
         "message": format!("成功拉取订阅源并更新 {node_count} 个节点")
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sub_request_deserialization_with_label() {
+        let json_str = r#"{"label":"sub1","url":"https://example.com/sub"}"#;
+        let req: Result<SubRequest, _> = serde_json::from_str(json_str);
+        assert!(req.is_ok());
+        let req = req.unwrap();
+        assert_eq!(req.label, "sub1");
+        assert_eq!(req.url, "https://example.com/sub");
+    }
+
+    #[test]
+    fn test_sub_request_deserialization_with_name_alias() {
+        let json_str = r#"{"name":"sub2","url":"https://example.com/sub"}"#;
+        let req: Result<SubRequest, _> = serde_json::from_str(json_str);
+        assert!(req.is_ok());
+        let req = req.unwrap();
+        assert_eq!(req.label, "sub2");
+    }
+
+    #[test]
+    fn test_sub_request_duplicate_field_detection() {
+        // If both label and name alias are sent in same payload, serde correctly rejects with duplicate field
+        let json_str = r#"{"label":"sub3","name":"sub3","url":"https://example.com/sub"}"#;
+        let req: Result<SubRequest, _> = serde_json::from_str(json_str);
+        assert!(req.is_err());
+        let err_msg = req.unwrap_err().to_string();
+        assert!(err_msg.contains("duplicate field `label`"));
+    }
 }

@@ -73,6 +73,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
           url,
           user_agent: userAgent,
           auto_update: autoUpdate,
+          enabled: editingSub.enabled ?? true,
         });
         success("订阅已更新");
       } else {
