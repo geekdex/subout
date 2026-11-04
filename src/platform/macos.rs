@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::platform::{BoxFuture, PlatformStrategy};
+use crate::platform::{get_config_path_variants, BoxFuture, PlatformStrategy};
 use crate::service::ConflictingProcessInfo;
 
 pub struct MacOsPlatform;
@@ -123,12 +123,32 @@ impl PlatformStrategy for MacOsPlatform {
             // SAFETY: kill with signal 0 checks process existence without sending a signal.
             // pid is verified to be > 1 and <= i32::MAX.
             let res = unsafe { kill(pid as i32, 0) };
-            if res == 0 {
-                true
-            } else {
+            if res != 0 {
                 let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                errno == 1 // EPERM = 1
+                if errno != 1 {
+                    // Not found (ESRCH = 3) -> process does not exist
+                    return false;
+                }
             }
+
+            // kill with signal 0 returns 0 for Zombie processes (Z state), so verify with ps
+            if let Ok(output) = std::process::Command::new("ps")
+                .args(["-o", "state=", "-p", &pid.to_string()])
+                .output()
+            {
+                if !output.status.success() {
+                    return false;
+                }
+                let state = String::from_utf8_lossy(&output.stdout);
+                let trimmed = state.trim();
+                if trimmed.is_empty() || trimmed.starts_with('Z') || trimmed.contains("defunct") {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+
+            true
         }
         #[cfg(not(unix))]
         {
@@ -145,70 +165,112 @@ impl PlatformStrategy for MacOsPlatform {
         #[cfg(unix)]
         {
             let current_pid = std::process::id();
-            let config_path_str = running_config_path.to_string_lossy().to_string();
+            let config_variants = get_config_path_variants(running_config_path);
             let mut results: Vec<ConflictingProcessInfo> = Vec::new();
             let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
 
             if let Ok(output) = std::process::Command::new("ps")
-                .args(["-eo", "pid,ppid,comm,args"])
+                .args(["-eo", "pid,ppid,state,comm,args"])
                 .output()
                 && output.status.success()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
+                struct RawProc {
+                    pid: u32,
+                    comm: String,
+                    full_cmd: String,
+                }
+                let mut procs = Vec::new();
+                let mut children_map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+
                 for line in stdout.lines().skip(1) {
                     let trimmed = line.trim();
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                    if parts.len() >= 3
+                    if parts.len() >= 4
                         && let (Ok(pid), Ok(ppid)) =
                             (parts[0].parse::<u32>(), parts[1].parse::<u32>())
                     {
-                        if pid == current_pid || Some(pid) == managed_pid || pid == 0 || pid == 1 {
+                        if pid <= 1 {
                             continue;
                         }
-                        if ppid == current_pid
-                            || (managed_pid.is_some() && Some(ppid) == managed_pid)
-                        {
-                            continue;
+                        let state = parts[2];
+                        if state.starts_with('Z') {
+                            continue; // Skip zombie processes
                         }
-                        let comm = parts[2];
-                        let full_cmd = if parts.len() >= 4 {
-                            parts[3..].join(" ")
+                        let comm = parts[3];
+                        let full_cmd = if parts.len() >= 5 {
+                            parts[4..].join(" ")
                         } else {
                             comm.to_string()
                         };
-
-                        let is_subout = comm == "subout"
-                            || comm.contains("subout")
-                            || full_cmd.contains("subout web")
-                            || full_cmd.contains("target/debug/subout")
-                            || full_cmd.contains("target/release/subout")
-                            || full_cmd.contains("cargo")
-                            || full_cmd.contains(&config_path_str);
-
-                        if is_subout {
+                        if full_cmd.contains("<defunct>") {
                             continue;
                         }
 
-                        let is_singbox = comm == "sing-box"
-                            || comm.ends_with("/sing-box")
-                            || comm.contains("sing-box")
-                            || full_cmd.starts_with("/usr/bin/sing-box")
-                            || full_cmd.starts_with("/usr/local/bin/sing-box")
-                            || full_cmd.starts_with("/opt/homebrew/bin/sing-box")
-                            || full_cmd.starts_with("sing-box ")
-                            || full_cmd.contains("/sing-box run")
-                            || full_cmd.contains("sing-box run")
-                            || full_cmd.contains("sing-box -D")
-                            || full_cmd.contains("sing-box -C");
+                        children_map.entry(ppid).or_default().push(pid);
+                        procs.push(RawProc {
+                            pid,
+                            comm: comm.to_string(),
+                            full_cmd,
+                        });
+                    }
+                }
 
-                        if is_singbox && seen_pids.insert(pid) {
-                            results.push(ConflictingProcessInfo {
-                                pid,
-                                name: comm.to_string(),
-                                cmdline: Some(full_cmd),
-                                exe_path: None,
-                            });
+                // Recursively gather all descendant PIDs of current_pid and managed_pid
+                let mut excluded_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+                let mut queue = Vec::new();
+                queue.push(current_pid);
+                if let Some(mpid) = managed_pid {
+                    queue.push(mpid);
+                }
+
+                while let Some(parent) = queue.pop() {
+                    excluded_pids.insert(parent);
+                    if let Some(children) = children_map.get(&parent) {
+                        for &child in children {
+                            if excluded_pids.insert(child) {
+                                queue.push(child);
+                            }
                         }
+                    }
+                }
+
+                for proc in procs {
+                    if excluded_pids.contains(&proc.pid) {
+                        continue;
+                    }
+
+                    let is_subout = proc.comm == "subout"
+                        || proc.comm.contains("subout")
+                        || proc.full_cmd.contains("subout web")
+                        || proc.full_cmd.contains("target/debug/subout")
+                        || proc.full_cmd.contains("target/release/subout")
+                        || proc.full_cmd.contains("cargo")
+                        || (managed_pid.is_some() && config_variants.iter().any(|v| proc.full_cmd.contains(v)));
+
+                    if is_subout {
+                        continue;
+                    }
+
+                    let is_singbox = proc.comm == "sing-box"
+                        || proc.comm.ends_with("/sing-box")
+                        || proc.comm.contains("sing-box")
+                        || proc.full_cmd.starts_with("/usr/bin/sing-box")
+                        || proc.full_cmd.starts_with("/usr/local/bin/sing-box")
+                        || proc.full_cmd.starts_with("/opt/homebrew/bin/sing-box")
+                        || proc.full_cmd.starts_with("sing-box ")
+                        || proc.full_cmd.contains("/sing-box run")
+                        || proc.full_cmd.contains("sing-box run")
+                        || proc.full_cmd.contains("sing-box -D")
+                        || proc.full_cmd.contains("sing-box -C");
+
+                    if is_singbox && seen_pids.insert(proc.pid) {
+                        results.push(ConflictingProcessInfo {
+                            pid: proc.pid,
+                            name: proc.comm,
+                            cmdline: Some(proc.full_cmd),
+                            exe_path: None,
+                        });
                     }
                 }
             }
@@ -247,11 +309,12 @@ impl PlatformStrategy for MacOsPlatform {
                 if let Some(pass) = sudo_pass {
                     let sig_arg = format!("-{sig}");
                     let pgid_arg = format!("-{pid}");
+                    let pid_str = pid.to_string();
                     let _ = self
-                        .run_sudo_command("kill", &[&sig_arg, "--", &pgid_arg], Some(pass))
+                        .run_sudo_command("/bin/kill", &[&sig_arg, &pid_str], Some(pass))
                         .await;
                     let _ = self
-                        .run_sudo_command("kill", &[&sig_arg, "--", &pid.to_string()], Some(pass))
+                        .run_sudo_command("/bin/kill", &[&sig_arg, &pgid_arg], Some(pass))
                         .await;
                 }
             }
@@ -272,7 +335,7 @@ impl PlatformStrategy for MacOsPlatform {
             #[cfg(unix)]
             {
                 let current_pid = std::process::id();
-                let config_path_str = running_config_path.to_string_lossy().to_string();
+                let config_variants = get_config_path_variants(running_config_path);
                 let mut pids_to_kill: Vec<u32> = Vec::new();
 
                 if let Ok(output) = std::process::Command::new("ps")
@@ -291,7 +354,7 @@ impl PlatformStrategy for MacOsPlatform {
                                 continue;
                             }
                             let full_cmd = parts[2..].join(" ");
-                            let is_subout_instance = full_cmd.contains(&config_path_str)
+                            let is_subout_instance = config_variants.iter().any(|v| full_cmd.contains(v))
                                 || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
                             if is_subout_instance {
                                 pids_to_kill.push(pid);
@@ -340,33 +403,55 @@ impl PlatformStrategy for MacOsPlatform {
         Box::pin(async move {
             let as_root = self.is_running_as_root();
 
-            // 1. Try brew services stop sing-box
-            let _ = tokio::process::Command::new("brew")
-                .args(["services", "stop", "sing-box"])
-                .output()
-                .await;
-            let _ = tokio::process::Command::new("brew")
-                .args(["services", "stop", "singbox"])
-                .output()
-                .await;
-            if !as_root {
-                let _ = self
-                    .run_sudo_command("brew", &["services", "stop", "sing-box"], sudo_pass)
-                    .await;
+            // If a sudo password was explicitly supplied, validate it first
+            if !as_root && let Some(pass) = sudo_pass {
+                self.run_sudo_command("true", &[], Some(pass)).await?;
             }
 
-            // Also check launchctl unload for system launchdaemons
-            for plist in &[
-                "/Library/LaunchDaemons/sing-box.plist",
-                "/Library/LaunchDaemons/homebrew.mxcl.sing-box.plist",
-                "/Library/LaunchDaemons/com.sagernet.sing-box.plist",
-            ] {
+            // 1. Direct SIGTERM signal to PID and process group
+            self.kill_process(pid, sudo_pass, 15).await;
+
+            // Wait briefly (up to 400ms) for graceful termination
+            for _ in 0..4 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                if !self.is_pid_alive(pid) {
+                    break;
+                }
+            }
+
+            // 2. Escalate immediately to SIGKILL if still alive
+            if self.is_pid_alive(pid) {
+                self.kill_process(pid, sudo_pass, 9).await;
+            }
+
+            // 3. Check and unload any matching launchd plists if detected/existing
+            let mut candidate_plists = vec![
+                "/Library/LaunchDaemons/io.github.geekdex.subout.plist".to_string(),
+                "/Library/LaunchDaemons/com.geekdex.subout.plist".to_string(),
+                "/Library/LaunchDaemons/com.subout.server.plist".to_string(),
+                "/Library/LaunchDaemons/sing-box.plist".to_string(),
+                "/Library/LaunchDaemons/homebrew.mxcl.sing-box.plist".to_string(),
+                "/Library/LaunchDaemons/com.sagernet.sing-box.plist".to_string(),
+                "/Library/LaunchAgents/io.github.geekdex.subout.plist".to_string(),
+                "/Library/LaunchAgents/sing-box.plist".to_string(),
+                "/Library/LaunchAgents/homebrew.mxcl.sing-box.plist".to_string(),
+                "/Library/LaunchAgents/com.sagernet.sing-box.plist".to_string(),
+            ];
+            if let Some(home) = dirs::home_dir() {
+                let home_agents = home.join("Library/LaunchAgents");
+                candidate_plists.push(home_agents.join("io.github.geekdex.subout.plist").to_string_lossy().to_string());
+                candidate_plists.push(home_agents.join("sing-box.plist").to_string_lossy().to_string());
+                candidate_plists.push(home_agents.join("homebrew.mxcl.sing-box.plist").to_string_lossy().to_string());
+                candidate_plists.push(home_agents.join("com.sagernet.sing-box.plist").to_string_lossy().to_string());
+            }
+
+            for plist in &candidate_plists {
                 if std::path::Path::new(plist).exists() {
                     let _ = tokio::process::Command::new("launchctl")
                         .args(["unload", "-w", plist])
                         .output()
                         .await;
-                    if !as_root {
+                    if !as_root && sudo_pass.is_some() {
                         let _ = self
                             .run_sudo_command("launchctl", &["unload", "-w", plist], sudo_pass)
                             .await;
@@ -374,13 +459,12 @@ impl PlatformStrategy for MacOsPlatform {
                 }
             }
 
-            // 2. Direct SIGTERM signal
-            self.kill_process(pid, sudo_pass, 15).await;
-
-            // 3. If still alive after 400ms, escalate to SIGKILL
-            tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
-            if self.is_pid_alive(pid) {
-                self.kill_process(pid, sudo_pass, 9).await;
+            // 4. Try brew services stop in user mode if brew exists
+            if !as_root {
+                let _ = tokio::process::Command::new("brew")
+                    .args(["services", "stop", "sing-box"])
+                    .output()
+                    .await;
             }
 
             Ok(())
@@ -401,96 +485,124 @@ impl PlatformStrategy for MacOsPlatform {
 
     fn diagnose_takeover_conflict(
         &self,
+        managed_pid: Option<u32>,
     ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
         Box::pin(async move {
             let running_config_path =
                 crate::service::SingBoxServiceManager::get_running_config_path();
-            let conflicts = self.detect_conflicting_processes(None, &running_config_path);
+            let conflicts = self.detect_conflicting_processes(managed_pid, &running_config_path);
+            if conflicts.is_empty() {
+                return Ok(crate::platform::TakeoverDiagnoseResult::no_conflict());
+            }
+
             let pids: Vec<u32> = conflicts.iter().map(|c| c.pid).collect();
 
             // 1. Check launchd
             let mut launchd_detected = false;
             let mut plist_path = None;
+            let mut service_display_name = "macOS launchd 系统守护服务".to_string();
+
             if let Ok(output) = tokio::process::Command::new("launchctl")
                 .arg("list")
                 .output()
                 .await
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                if stdout.contains("sing-box") || stdout.contains("singbox") {
-                    launchd_detected = true;
+                for line in stdout.lines() {
+                    if line.contains("io.github.geekdex.subout")
+                        || line.contains("com.geekdex.subout")
+                        || line.contains("com.subout.server")
+                    {
+                        launchd_detected = true;
+                        service_display_name = "macOS launchd (Subout 守护服务)".to_string();
+                        break;
+                    } else if line.contains("sing-box") || line.contains("singbox") {
+                        launchd_detected = true;
+                        service_display_name = "macOS launchd (sing-box 守护服务)".to_string();
+                        break;
+                    }
                 }
             }
 
             if !launchd_detected {
-                let candidate_dirs = [
-                    PathBuf::from("/Library/LaunchDaemons"),
-                    PathBuf::from("/Library/LaunchAgents"),
-                    dirs::home_dir()
-                        .map(|h| h.join("Library/LaunchAgents"))
-                        .unwrap_or_default(),
+                let mut candidate_plists = vec![
+                    (PathBuf::from("/Library/LaunchDaemons/io.github.geekdex.subout.plist"), "Subout 系统守护服务"),
+                    (PathBuf::from("/Library/LaunchDaemons/com.geekdex.subout.plist"), "Subout 系统守护服务"),
+                    (PathBuf::from("/Library/LaunchDaemons/com.subout.server.plist"), "Subout 系统守护服务"),
+                    (PathBuf::from("/Library/LaunchDaemons/sing-box.plist"), "sing-box 系统守护服务"),
+                    (PathBuf::from("/Library/LaunchDaemons/homebrew.mxcl.sing-box.plist"), "Homebrew sing-box 服务"),
+                    (PathBuf::from("/Library/LaunchDaemons/com.sagernet.sing-box.plist"), "sing-box 系统守护服务"),
+                    (PathBuf::from("/Library/LaunchAgents/io.github.geekdex.subout.plist"), "Subout 用户守护服务"),
+                    (PathBuf::from("/Library/LaunchAgents/sing-box.plist"), "sing-box 用户守护服务"),
+                    (PathBuf::from("/Library/LaunchAgents/homebrew.mxcl.sing-box.plist"), "Homebrew sing-box 服务"),
+                    (PathBuf::from("/Library/LaunchAgents/com.sagernet.sing-box.plist"), "sing-box 用户守护服务"),
                 ];
-                for dir in &candidate_dirs {
-                    if let Ok(entries) = std::fs::read_dir(dir) {
-                        for entry in entries.flatten() {
-                            let name = entry.file_name().to_string_lossy().to_string();
-                            if name.contains("sing-box") || name.contains("singbox") {
-                                launchd_detected = true;
-                                plist_path = Some(entry.path().to_string_lossy().to_string());
-                                break;
-                            }
-                        }
-                    }
-                    if launchd_detected {
+                if let Some(home) = dirs::home_dir() {
+                    candidate_plists.push((home.join("Library/LaunchAgents/io.github.geekdex.subout.plist"), "Subout 用户服务"));
+                    candidate_plists.push((home.join("Library/LaunchAgents/sing-box.plist"), "sing-box 用户服务"));
+                    candidate_plists.push((home.join("Library/LaunchAgents/homebrew.mxcl.sing-box.plist"), "Homebrew sing-box 服务"));
+                    candidate_plists.push((home.join("Library/LaunchAgents/com.sagernet.sing-box.plist"), "sing-box 用户服务"));
+                }
+                for (path, label) in candidate_plists {
+                    if path.is_file() {
+                        launchd_detected = true;
+                        plist_path = Some(path.to_string_lossy().to_string());
+                        service_display_name = format!("macOS launchd ({label})");
                         break;
                     }
                 }
             }
 
             if launchd_detected {
-                let unload_cmd = plist_path.map_or_else(
-                    || "brew services stop sing-box 或 launchctl unload".to_string(),
+                let unload_cmd = plist_path.as_deref().map_or_else(
+                    || "brew services stop sing-box".to_string(),
                     |p| format!("sudo launchctl unload -w \"{p}\""),
+                );
+                let msg = format!(
+                    "检测到外部 macOS launchd 守护服务正在管理 sing-box 或 Subout{}。外部守护进程具备 KeepAlive 自动拉起机制，直接强制结束会被系统再次重启。Subout 支持通过 Sudo 授权一键卸载外部守护服务并释放端口，也可复制右侧命令在终端手动解除。",
+                    plist_path.as_ref().map(|p| format!(" ({p})")).unwrap_or_default()
                 );
                 return Ok(crate::platform::TakeoverDiagnoseResult {
                     has_conflict: true,
                     conflict_type: Some("launchd".to_string()),
-                    suggestion_command: Some(unload_cmd),
-                    message: "检测到外部 launchd 守护服务正在管理 sing-box，外部守护进程会自动保持运行。请先卸载外部服务守护。".to_string(),
+                    conflict_name: Some(service_display_name),
+                    suggestion_command: Some(unload_cmd.clone()),
+                    suggestion: Some(format!("外部进程受 launchd 托管守护。建议点击「一键接管并终止冲突进程」授权接管，或在终端执行解除命令：{unload_cmd}")),
+                    message: msg.clone(),
+                    details: msg,
                     pids,
+                    can_auto_takeover: true,
                 });
             }
 
             if !pids.is_empty() {
+                let kill_cmd = format!(
+                    "sudo kill -9 {}",
+                    pids.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+                let pid_str = pids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+                let msg = format!(
+                    "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。这些进程可能正在占用代理端口 (如 7890/2080) 或 TUN 虚拟网卡，导致 Subout 无法正常启动或网络冲突。",
+                    pids.len(),
+                    pid_str
+                );
                 return Ok(crate::platform::TakeoverDiagnoseResult {
                     has_conflict: true,
                     conflict_type: Some("running_processes".to_string()),
-                    suggestion_command: Some(format!(
-                        "sudo kill -9 {}",
-                        pids.iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )),
-                    message: format!(
-                        "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。",
-                        pids.len(),
-                        pids.iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                    conflict_name: Some("外部独立 sing-box 进程".to_string()),
+                    suggestion_command: Some(kill_cmd),
+                    suggestion: Some("建议点击「一键接管并终止冲突进程」，由 Subout 自动清理冲突进程并释放端口；也可复制下方命令在终端手动终止。".to_string()),
+                    message: msg.clone(),
+                    details: msg,
                     pids,
+                    can_auto_takeover: true,
                 });
             }
 
-            Ok(crate::platform::TakeoverDiagnoseResult {
-                has_conflict: false,
-                conflict_type: None,
-                suggestion_command: None,
-                message: "未检测到外部守护服务或冲突进程。".to_string(),
-                pids: vec![],
-            })
+            Ok(crate::platform::TakeoverDiagnoseResult::no_conflict())
         })
     }
 

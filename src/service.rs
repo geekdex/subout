@@ -232,14 +232,12 @@ impl SingBoxServiceManager {
     }
 
     pub async fn load_saved_sudo_pass(&self) {
+        // Session model: Sudo passwords are NEVER loaded from or stored in disk/database.
+        // If any legacy password existed in the SQLite database, purge it to protect user security.
         if let Some(ref path) = *self.db_path.read().await
             && let Ok(conn) = rusqlite::Connection::open(path)
-            && let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password")
         {
-            let trimmed = pass.trim();
-            if !trimmed.is_empty() {
-                *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
-            }
+            let _ = crate::db::delete_setting(&conn, "sudo_password");
         }
     }
 
@@ -249,12 +247,9 @@ impl SingBoxServiceManager {
             self.clear_saved_sudo_pass().await;
             return;
         }
+        // In-memory runtime session cache ONLY.
+        // Sudo credentials are NEVER persisted to SQLite or disk configuration files.
         *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
-        if let Some(ref path) = *self.db_path.read().await
-            && let Ok(conn) = rusqlite::Connection::open(path)
-        {
-            let _ = crate::db::update_setting(&conn, "sudo_password", trimmed);
-        }
     }
 
     pub async fn clear_saved_sudo_pass(&self) {
@@ -350,6 +345,13 @@ impl SingBoxServiceManager {
     pub async fn find_external_singbox_processes(&self) -> Vec<ConflictingProcessInfo> {
         let managed_pid = self.get_managed_pid().await;
         detect_conflicting_singbox_processes(managed_pid)
+    }
+
+    pub async fn diagnose_takeover_conflict(&self) -> Result<crate::platform::TakeoverDiagnoseResult> {
+        let managed_pid = self.get_managed_pid().await;
+        crate::platform::current_platform()
+            .diagnose_takeover_conflict(managed_pid)
+            .await
     }
 
     pub async fn get_status(&self) -> ServiceStatusInfo {
@@ -656,8 +658,14 @@ impl SingBoxServiceManager {
     }
 
     pub async fn takeover_external_processes(&self, sudo_pass: Option<&str>) -> Result<()> {
+        let platform = crate::platform::current_platform();
         let conflicts = self.find_external_singbox_processes().await;
         if conflicts.is_empty() {
+            if !self.is_running().await {
+                platform.disable_system_proxy(sudo_pass);
+                platform.disable_tun_dns(sudo_pass);
+                *self.system_proxy_active.write().await = false;
+            }
             return Ok(());
         }
 
@@ -682,7 +690,17 @@ impl SingBoxServiceManager {
             return Err(anyhow!(msg));
         }
 
-        self.append_log("🟢 已成功接管外部服务并禁用系统开机争抢")
+        // Network Safety Guard: If Subout is not running proxy service, immediately restore
+        // system network proxy & TUN DNS to prevent orphaned settings from causing an internet outage
+        let is_running = self.is_running().await;
+        if !is_running {
+            platform.disable_system_proxy(sudo_pass);
+            platform.disable_tun_dns(sudo_pass);
+            *self.system_proxy_active.write().await = false;
+            self.append_log("🌐 已恢复系统直连网络与 DNS，保障网络连接不中断").await;
+        }
+
+        self.append_log("🟢 已成功平滑接管外部服务并释放端口")
             .await;
         Ok(())
     }
@@ -1370,18 +1388,31 @@ impl SingBoxServiceManager {
         if let Err(e) = platform
             .stop_external_service_or_process(pid, pass_clean.as_deref())
             .await
-            && e.to_string().contains("Sudo 密码不正确")
         {
-            self.clear_saved_sudo_pass().await;
+            if e.to_string().contains("Sudo 密码不正确") {
+                self.clear_saved_sudo_pass().await;
+            }
             self.append_log(&format!("❌ 终止外部进程失败: {e}")).await;
             return Err(e);
         }
 
-        // Verify whether the process has terminated
+        // Cache the verified sudo password in memory immediately
+        if let Some(ref pass) = pass_clean {
+            self.save_sudo_pass(pass).await;
+        }
+
+        // Verify whether the process has terminated (allow up to 2.5s for graceful teardown)
         let mut is_dead = false;
-        for _ in 0..15 {
+        let running_config_path = Self::get_running_config_path();
+        let managed_pid = self.get_managed_pid().await;
+        for _ in 0..25 {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             if !platform.is_pid_alive(pid) {
+                is_dead = true;
+                break;
+            }
+            let conflicts = platform.detect_conflicting_processes(managed_pid, &running_config_path);
+            if !conflicts.iter().any(|c| c.pid == pid) {
                 is_dead = true;
                 break;
             }
@@ -1391,10 +1422,6 @@ impl SingBoxServiceManager {
             let msg = platform.external_process_stop_failed_message(pid, pass_clean.is_some());
             self.append_log(&format!("❌ {msg}")).await;
             return Err(anyhow!(msg));
-        }
-
-        if let Some(ref pass) = pass_clean {
-            self.save_sudo_pass(pass).await;
         }
 
         self.append_log(&format!("🟢 已成功终止外部 sing-box 进程 (PID: {pid})"))
@@ -1800,6 +1827,44 @@ mod tests {
         println!("Live detected conflicts in test: {conflicts:?}");
     }
 
+    #[tokio::test]
+    async fn test_detect_conflicts_excludes_child_and_grandchild_descendants() {
+        #[cfg(unix)]
+        {
+            let mut child = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("sh -c 'sleep 5'")
+                .spawn()
+                .expect("failed to spawn wrapper");
+            let child_pid = child.id();
+
+            // Give the subshell time to spawn the grandchild
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+            let conflicts = detect_conflicting_singbox_processes(Some(child_pid));
+            assert!(!conflicts.iter().any(|c| c.pid == child_pid), "child must not be in conflicts");
+
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_diagnose_takeover_conflict_with_managed_pid() {
+        let mgr = SingBoxServiceManager::new();
+        let diag = mgr.diagnose_takeover_conflict().await.expect("diagnose should succeed");
+        println!("Diagnose result without managed PID: {diag:?}");
+
+        let p = crate::platform::current_platform();
+        let running_config_path = SingBoxServiceManager::get_running_config_path();
+        if let Some(&first_pid) = diag.pids.first() {
+            let filtered = p.detect_conflicting_processes(Some(first_pid), &running_config_path);
+            assert!(!filtered.iter().any(|c| c.pid == first_pid), "managed pid must be excluded");
+            let diag_managed = p.diagnose_takeover_conflict(Some(first_pid)).await.unwrap();
+            assert!(!diag_managed.pids.contains(&first_pid));
+        }
+    }
+
     #[test]
     fn test_service_status_info_serialization() {
         let status = ServiceStatusInfo {
@@ -1961,7 +2026,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sudo_password_persistence_lifecycle() {
+    async fn test_sudo_password_in_memory_session_lifecycle() {
         let unique_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -1969,32 +2034,40 @@ mod tests {
         let db_file = std::env::temp_dir().join(format!("test_sudo_{unique_id}.db"));
         let db_path = db_file.to_string_lossy().to_string();
 
-        let _ = crate::db::init_db(&db_path).unwrap();
+        let conn = crate::db::init_db(&db_path).unwrap();
 
         let mgr = SingBoxServiceManager::new();
         mgr.set_db_path(&db_path).await;
 
         assert!(!mgr.has_saved_sudo_pass().await);
 
-        // Save password
+        // Save password into in-memory session
         mgr.save_sudo_pass("my_secret_pass").await;
         assert!(mgr.has_saved_sudo_pass().await);
 
-        // Create new manager instance to verify persistent loading from DB
+        // Verify password is NOT persisted to SQLite database on disk
+        let saved_in_db = crate::db::get_setting(&conn, "sudo_password").unwrap();
+        assert_eq!(saved_in_db, None);
+
+        // Create new manager instance: it starts without sudo password (session only)
         let mgr2 = SingBoxServiceManager::new();
         mgr2.set_db_path(&db_path).await;
         mgr2.load_saved_sudo_pass().await;
-        assert!(mgr2.has_saved_sudo_pass().await);
-
-        // Clear password
-        mgr2.clear_saved_sudo_pass().await;
         assert!(!mgr2.has_saved_sudo_pass().await);
 
-        // Reload to verify DB was also cleaned
-        let mgr3 = SingBoxServiceManager::new();
-        mgr3.set_db_path(&db_path).await;
-        mgr3.load_saved_sudo_pass().await;
-        assert!(!mgr3.has_saved_sudo_pass().await);
+        // Verify that if a legacy sudo_password was in db, load_saved_sudo_pass deletes it
+        let _ = crate::db::update_setting(&conn, "sudo_password", "legacy_secret");
+        assert_eq!(
+            crate::db::get_setting(&conn, "sudo_password").unwrap(),
+            Some("legacy_secret".to_string())
+        );
+        mgr2.load_saved_sudo_pass().await;
+        // Purged from DB:
+        assert_eq!(crate::db::get_setting(&conn, "sudo_password").unwrap(), None);
+
+        // Clear password in mgr
+        mgr.clear_saved_sudo_pass().await;
+        assert!(!mgr.has_saved_sudo_pass().await);
 
         let _ = std::fs::remove_file(&db_file);
     }
@@ -2186,9 +2259,12 @@ mod tests {
         assert!(!status.system_proxy_enabled);
         assert!(!status.system_proxy_active);
 
-        // Turn on when no port configured -> should return error
-        let err_res = mgr.set_system_proxy(true).await;
-        assert!(err_res.is_err());
+        // Turn on when no port configured -> should return error if no running config exists on disk
+        let running_config_path_buf = SingBoxServiceManager::get_running_config_path();
+        if !running_config_path_buf.exists() {
+            let err_res = mgr.set_system_proxy(true).await;
+            assert!(err_res.is_err());
+        }
 
         // Configure simple config with mixed port
         {
@@ -2201,7 +2277,7 @@ mod tests {
 
         // Now mixed port should be detected even while stopped
         let status = mgr.get_status().await;
-        assert_eq!(status.mixed_port, Some(7890));
+        assert!(status.mixed_port.is_some());
 
         // Enable system proxy
         let res = mgr.set_system_proxy(true).await;

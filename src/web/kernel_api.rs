@@ -117,7 +117,8 @@ pub async fn takeover_diagnose(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    let res = crate::platform::current_platform()
+    let res = state
+        .service_manager
         .diagnose_takeover_conflict()
         .await
         .map_err(|e| {

@@ -30,7 +30,7 @@ interface SidebarProps {
   onSelectTab: (tab: NavTab) => void;
   isKernelReady: boolean;
   appMode: "simple" | "logical";
-  versionCode?: string;
+  versionCode?: string | number;
   nodeCount?: number;
 }
 
@@ -85,7 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: "节点组合",
       icon: <FolderKanban className="w-4 h-4" />,
       requiresKernel: true,
-      badge: versionCode ? `v${versionCode.slice(-4)}` : undefined,
+      badge: versionCode ? `v${String(versionCode).slice(-4)}` : undefined,
     },
     {
       id: "auto-update",

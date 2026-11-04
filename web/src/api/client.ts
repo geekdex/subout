@@ -130,7 +130,19 @@ export const api = {
 
   // Kernel
   async getKernelInfo(): Promise<KernelInfo> {
-    return request<KernelInfo>("/api/kernel/info");
+    const raw = await request<Record<string, unknown>>("/api/kernel/info");
+    const isReady = Boolean(raw.ready ?? raw.is_version_satisfies);
+    return {
+      ...(raw as unknown as KernelInfo),
+      installed: Boolean(raw.installed ?? raw.is_installed),
+      pinned_version: (raw.pinned_version as string) || (raw.recommended_version as string) || "1.14.4",
+      ready: isReady,
+      gatekeeper_blocked: !isReady,
+      version: (raw.version as string) || null,
+      raw_version: (raw.raw_version as string) || (raw.version as string) || null,
+      binary_path: (raw.binary_path as string) || "",
+      supported_versions: (raw.supported_versions as string[]) || ["1.14.*"],
+    };
   },
   async downloadKernel(
     version = "1.14.4",
@@ -141,13 +153,45 @@ export const api = {
     });
   },
   async diagnoseTakeover(): Promise<TakeoverDiagnoseResult> {
-    return request<TakeoverDiagnoseResult>("/api/kernel/takeover-diagnose", {
-      method: "POST",
-    });
+    const raw = await request<Record<string, unknown>>(
+      "/api/kernel/takeover-diagnose",
+      {
+        method: "POST",
+      },
+    );
+    const hasConflict = Boolean(raw.has_conflict);
+    const conflictType = (raw.conflict_type as string) || "running_processes";
+    const canAuto = Boolean(
+      raw.can_auto_takeover ?? (conflictType === "running_processes"),
+    );
+    return {
+      has_conflict: hasConflict,
+      conflict_type: conflictType,
+      conflict_name: (raw.conflict_name as string) || undefined,
+      service_name: (raw.service_name as string) || undefined,
+      details: (raw.details as string) || (raw.message as string) || "",
+      message: (raw.message as string) || (raw.details as string) || "",
+      suggestion:
+        (raw.suggestion as string) || (raw.suggestion_command as string) || "",
+      suggestion_command: (raw.suggestion_command as string) || undefined,
+      pids: (raw.pids as number[]) || [],
+      can_auto_takeover: canAuto,
+    };
   },
-  async takeoverService(): Promise<{ success: boolean; message: string }> {
+  async takeoverService(payload?: {
+    start_after_takeover?: boolean;
+    sudo_pass?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const cleanPayload = {
+      start_after_takeover: payload?.start_after_takeover ?? false,
+      sudo_pass:
+        typeof payload?.sudo_pass === "string" && payload.sudo_pass.trim().length > 0
+          ? payload.sudo_pass.trim()
+          : undefined,
+    };
     return request("/api/service/takeover", {
       method: "POST",
+      body: JSON.stringify(cleanPayload),
     });
   },
 
@@ -186,10 +230,10 @@ export const api = {
       body: JSON.stringify({ mode, restart }),
     });
   },
-  async setSudoPassword(password: string): Promise<{ success: boolean }> {
-    return request("/api/system/sudo-password", {
+  async setSudoPassword(password: string): Promise<{ success: boolean; message?: string }> {
+    return request("/api/settings/sudo", {
       method: "POST",
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ sudo_pass: password }),
     });
   },
   async setWebPassword(
@@ -212,11 +256,20 @@ export const api = {
   async createConfig(payload: {
     name: string;
     platform: string;
-    config_json: string;
+    description?: string;
+    content?: string;
+    config_json?: string;
   }): Promise<ConfigProfile> {
+    const body = {
+      name: payload.name,
+      platform: payload.platform,
+      description: payload.description,
+      content: payload.content || payload.config_json,
+      config_json: payload.config_json || payload.content,
+    };
     return request<ConfigProfile>("/api/configs", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
   },
   async getConfig(id: number): Promise<ConfigProfile> {
@@ -224,11 +277,21 @@ export const api = {
   },
   async updateConfig(
     id: number,
-    payload: { name?: string; platform?: string; config_json?: string },
+    payload: {
+      name?: string;
+      platform?: string;
+      description?: string;
+      content?: string;
+      config_json?: string;
+    },
   ): Promise<ConfigProfile> {
+    const body = {
+      ...payload,
+      content: payload.content || payload.config_json,
+    };
     return request<ConfigProfile>(`/api/configs/${id}`, {
       method: "PUT",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
   },
   async deleteConfig(id: number): Promise<{ success: boolean }> {
@@ -244,8 +307,9 @@ export const api = {
   async setRunningConfig(
     id: number,
   ): Promise<{ success: boolean; running_config_id: number }> {
-    return request(`/api/configs/${id}/set-running`, {
+    return request("/api/configs/set-running", {
       method: "POST",
+      body: JSON.stringify({ id }),
     });
   },
 
@@ -372,7 +436,7 @@ export const api = {
   async rollbackAutoUpdateSnapshot(
     id: number,
   ): Promise<{ success: boolean; message: string }> {
-    return request(`/api/auto-update/rollback/${id}`, { method: "POST" });
+    return request(`/api/auto-update/history/${id}/rollback`, { method: "POST" });
   },
 
   // Logs

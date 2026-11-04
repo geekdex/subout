@@ -43,11 +43,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSavingSudo(true);
     try {
       await api.setSudoPassword(sudoPassword);
-      success("sudo 密码已更新缓存");
+      success("Sudo 会话授权成功");
       setSudoPassword("");
       onRefreshSystemInfo();
     } catch (err: unknown) {
-      error("保存 sudo 密码失败", getErrorMessage(err));
+      error("Sudo 授权验证失败", getErrorMessage(err));
+    } finally {
+      setSavingSudo(false);
+    }
+  };
+
+  const handleClearSudo = async () => {
+    setSavingSudo(true);
+    try {
+      await api.setSudoPassword("");
+      success("已清除会话 Sudo 授权缓存");
+      setSudoPassword("");
+      onRefreshSystemInfo();
+    } catch (err: unknown) {
+      error("清除 Sudo 授权失败", getErrorMessage(err));
     } finally {
       setSavingSudo(false);
     }
@@ -171,30 +185,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               dot
               size="sm"
             >
-              {systemInfo?.sudo_configured ? "已配置" : "未配置"}
+              {systemInfo?.sudo_configured ? "会话已授权" : "未授权"}
             </Badge>
           </div>
 
           <div className="space-y-3">
-            <p className="text-xs text-slate-400">
-              Linux / macOS 平台配置 TUN 虚拟网卡与系统代理需要 root 权限。
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Linux / macOS 平台配置 TUN 虚拟网卡与清理系统外部冲突需要 root 权限。Subout 采用安全的会话提权机制，密码仅在内存中缓存（重启或退出后自动失效），绝不写入磁盘数据库。
             </p>
 
             <Input
               type="password"
-              placeholder="输入主机 sudo 密码..."
+              placeholder="输入当前主机 sudo 密码..."
               value={sudoPassword}
               onChange={(e) => setSudoPassword(e.target.value)}
             />
 
-            <Button
-              variant="secondary"
-              size="sm"
-              loading={savingSudo}
-              onClick={handleSaveSudo}
-            >
-              更新 sudo 密码
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={savingSudo}
+                onClick={handleSaveSudo}
+              >
+                验证并设置会话授权
+              </Button>
+              {systemInfo?.sudo_configured && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={savingSudo}
+                  onClick={handleClearSudo}
+                  className="text-slate-400 hover:text-rose-400"
+                >
+                  清除当前授权
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>

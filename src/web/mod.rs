@@ -120,6 +120,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         // Settings APIs
         .route("/api/settings", get(settings::get_settings))
         .route("/api/settings/sudo", post(settings::save_sudo_password))
+        .route("/api/system/sudo-password", post(settings::save_sudo_password))
         .route(
             "/api/settings/auto-update",
             get(settings::get_auto_update_settings).post(settings::save_auto_update_settings),
@@ -143,6 +144,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         )
         .route(
             "/api/auto-update/history/:id/rollback",
+            post(auto_update_api::rollback_snapshot),
+        )
+        .route(
+            "/api/auto-update/rollback/:id",
             post(auto_update_api::rollback_snapshot),
         )
         // Subscriptions
@@ -222,6 +227,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route(
             "/api/configs/set-running",
             post(configs_api::set_running_config),
+        )
+        .route(
+            "/api/configs/:id/set-running",
+            post(configs_api::set_running_config_by_id),
         )
         // Configuration Base / Running / Generated (backward compatibility)
         .route(

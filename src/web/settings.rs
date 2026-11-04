@@ -45,7 +45,8 @@ pub async fn get_settings(
 
 #[derive(Deserialize)]
 pub struct SudoPasswordRequest {
-    pub sudo_pass: String,
+    pub sudo_pass: Option<String>,
+    pub password: Option<String>,
 }
 
 pub async fn save_sudo_password(
@@ -57,12 +58,16 @@ pub async fn save_sudo_password(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    let trimmed = payload.sudo_pass.trim();
+    let effective_pass = payload
+        .sudo_pass
+        .or(payload.password)
+        .unwrap_or_default();
+    let trimmed = effective_pass.trim();
     if trimmed.is_empty() {
         state.service_manager.clear_saved_sudo_pass().await;
         return Ok(Json(serde_json::json!({
             "status": "success",
-            "message": "已清除已保存的 Sudo 密码"
+            "message": "已清除会话中的 Sudo 授权缓存"
         })));
     }
 
@@ -74,7 +79,7 @@ pub async fn save_sudo_password(
 
     Ok(Json(serde_json::json!({
         "status": "success",
-        "message": "Sudo 密码已验证并永久保存"
+        "message": "Sudo 密码已验证并在当前运行会话中生效"
     })))
 }
 

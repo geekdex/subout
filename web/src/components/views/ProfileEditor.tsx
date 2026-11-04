@@ -22,11 +22,12 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
 }) => {
   const [name, setName] = useState(profile.name);
   const [jsonText, setJsonText] = useState(() => {
+    const raw = profile.content || profile.config_json || "{}";
     try {
-      const parsed = JSON.parse(profile.config_json);
+      const parsed = JSON.parse(raw);
       return JSON.stringify(parsed, null, 2);
     } catch {
-      return profile.config_json;
+      return raw;
     }
   });
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -75,6 +76,8 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
     try {
       await api.updateConfig(profile.id, {
         name,
+        platform: profile.platform,
+        content: formatted,
         config_json: formatted,
       });
       success("配置已保存更新");

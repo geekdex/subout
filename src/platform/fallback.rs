@@ -75,15 +75,10 @@ impl PlatformStrategy for FallbackPlatform {
 
     fn diagnose_takeover_conflict(
         &self,
+        _managed_pid: Option<u32>,
     ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
         Box::pin(async move {
-            Ok(crate::platform::TakeoverDiagnoseResult {
-                has_conflict: false,
-                conflict_type: None,
-                suggestion_command: None,
-                message: "Fallback 平台无外部服务冲突。".to_string(),
-                pids: vec![],
-            })
+            Ok(crate::platform::TakeoverDiagnoseResult::no_conflict())
         })
     }
 

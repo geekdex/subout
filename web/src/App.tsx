@@ -43,11 +43,18 @@ const AppContent: React.FC = () => {
 
   const {
     kernelInfo,
+    loading: kernelLoading,
     downloading,
+    takingOver,
     takeoverDiagnose,
     isReady: isKernelReady,
     downloadKernel,
     takeoverService,
+    isSudoModalOpen,
+    sudoError,
+    sudoActionLoading,
+    closeSudoModal,
+    handleTakeoverWithSudo,
   } = useKernelGuard();
 
   const {
@@ -81,7 +88,7 @@ const AppContent: React.FC = () => {
       if (nds.status === "fulfilled") setNodes(nds.value);
       if (grps.status === "fulfilled") {
         setNodeGroups(grps.value.groups);
-        setVersionCode(grps.value.version_code);
+        setVersionCode(String(grps.value.version_code ?? ""));
       }
     } catch (err: unknown) {
       console.warn("Failed to load application data:", getErrorMessage(err));
@@ -111,10 +118,10 @@ const AppContent: React.FC = () => {
       "groups",
       "auto-update",
     ];
-    if (!isKernelReady && lockedTabs.includes(currentTab)) {
+    if (!kernelLoading && !isKernelReady && lockedTabs.includes(currentTab)) {
       setCurrentTab("dashboard");
     }
-  }, [isKernelReady, currentTab]);
+  }, [kernelLoading, isKernelReady, currentTab]);
 
   const handleSwitchMode = async (mode: "simple" | "logical") => {
     try {
@@ -182,9 +189,16 @@ const AppContent: React.FC = () => {
           <GatekeeperModal
             kernelInfo={kernelInfo}
             takeoverDiagnose={takeoverDiagnose}
+            loading={kernelLoading}
             downloading={downloading}
+            takingOver={takingOver}
             onDownloadKernel={downloadKernel}
             onTakeover={takeoverService}
+            isSudoModalOpen={isSudoModalOpen}
+            sudoError={sudoError}
+            sudoActionLoading={sudoActionLoading}
+            onCloseSudoModal={closeSudoModal}
+            onSubmitSudo={handleTakeoverWithSudo}
           />
 
           {/* Active View Routing */}

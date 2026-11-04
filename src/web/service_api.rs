@@ -99,27 +99,45 @@ pub async fn takeover_service(
     };
 
     if start_after {
-        let config_val = if let Some(c) = custom_config {
-            c
-        } else {
-            get_active_config_for_mode(&conn)?
+        let config_val = match custom_config {
+            Some(c) => Some(c),
+            None => get_active_config_for_mode(&conn).ok(),
         };
 
-        state
-            .service_manager
-            .start_with_options(&config_val, sudo_pass.as_deref(), true, enable_proxy)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("一键接管并启动服务失败: {e}"),
-                )
-            })?;
+        if let Some(config) = config_val {
+            state
+                .service_manager
+                .start_with_options(&config, sudo_pass.as_deref(), true, enable_proxy)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("一键接管并平滑启动服务失败: {e}"),
+                    )
+                })?;
 
-        Ok(Json(serde_json::json!({
-            "status": "success",
-            "message": "已成功接管外部服务并启动 Subout 代理"
-        })))
+            Ok(Json(serde_json::json!({
+                "status": "success",
+                "message": "已成功平滑接管外部服务并启动 Subout 代理"
+            })))
+        } else {
+            // No profile configured yet, take over conflicts and safely restore direct internet
+            state
+                .service_manager
+                .takeover_external_processes(sudo_pass.as_deref())
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("接管外部进程失败: {e}"),
+                    )
+                })?;
+
+            Ok(Json(serde_json::json!({
+                "status": "success",
+                "message": "已成功终止冲突进程并恢复系统直连网络（当前尚未配置激活配置文件）"
+            })))
+        }
     } else {
         state
             .service_manager
@@ -134,7 +152,7 @@ pub async fn takeover_service(
 
         Ok(Json(serde_json::json!({
             "status": "success",
-            "message": "已成功接管并终止全部外部 sing-box 服务"
+            "message": "已成功接管并终止全部外部 sing-box 服务，已恢复系统直连网络"
         })))
     }
 }

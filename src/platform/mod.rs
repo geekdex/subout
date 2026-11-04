@@ -18,9 +18,59 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub struct TakeoverDiagnoseResult {
     pub has_conflict: bool,
     pub conflict_type: Option<String>, // "systemd" | "launchd" | "respawn_script" | "running_processes"
+    pub conflict_name: Option<String>,
     pub suggestion_command: Option<String>,
+    pub suggestion: Option<String>,
     pub message: String,
+    pub details: String,
     pub pids: Vec<u32>,
+    pub can_auto_takeover: bool,
+}
+
+impl TakeoverDiagnoseResult {
+    pub fn no_conflict() -> Self {
+        Self {
+            has_conflict: false,
+            conflict_type: None,
+            conflict_name: None,
+            suggestion_command: None,
+            suggestion: None,
+            message: "未检测到外部服务或进程冲突。".to_string(),
+            details: "系统环境正常，未发现外部 sing-box 进程或服务争抢端口。".to_string(),
+            pids: Vec::new(),
+            can_auto_takeover: false,
+        }
+    }
+}
+
+pub fn get_config_path_variants(running_config_path: &Path) -> Vec<String> {
+    let mut vars = Vec::new();
+    let s = running_config_path.to_string_lossy().to_string();
+    if !s.is_empty() {
+        vars.push(s);
+    }
+    if let Ok(canon) = std::fs::canonicalize(running_config_path) {
+        let c_str = canon.to_string_lossy().to_string();
+        if !vars.contains(&c_str) {
+            vars.push(c_str);
+        }
+    }
+    if running_config_path.is_relative() {
+        if let Ok(cwd) = std::env::current_dir() {
+            let abs = cwd.join(running_config_path);
+            let abs_str = abs.to_string_lossy().to_string();
+            if !vars.contains(&abs_str) {
+                vars.push(abs_str);
+            }
+            if let Ok(abs_canon) = std::fs::canonicalize(&abs) {
+                let abs_canon_str = abs_canon.to_string_lossy().to_string();
+                if !vars.contains(&abs_canon_str) {
+                    vars.push(abs_canon_str);
+                }
+            }
+        }
+    }
+    vars
 }
 
 /// Strategy pattern interface for platform-specific capabilities.
@@ -83,7 +133,10 @@ pub trait PlatformStrategy: Send + Sync {
         sudo_pass: Option<&'a str>,
     ) -> BoxFuture<'a, Result<()>>;
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String;
-    fn diagnose_takeover_conflict(&self) -> BoxFuture<'_, Result<TakeoverDiagnoseResult>>;
+    fn diagnose_takeover_conflict(
+        &self,
+        managed_pid: Option<u32>,
+    ) -> BoxFuture<'_, Result<TakeoverDiagnoseResult>>;
 
     // ------------------------------------------------------------------------
     // 4. System Proxy & DNS Integration

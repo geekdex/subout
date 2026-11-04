@@ -4,7 +4,7 @@ import React from 'react';
 import { GatekeeperModal } from './GatekeeperModal';
 
 describe('GatekeeperModal', () => {
-  it('does not render anything when kernel is ready', () => {
+  it('does not render anything when kernel is ready and no conflict', () => {
     const { container } = render(
       <GatekeeperModal
         kernelInfo={{
@@ -17,13 +17,45 @@ describe('GatekeeperModal', () => {
           gatekeeper_blocked: false,
           message: null,
         }}
-        takeoverDiagnose={null}
+        takeoverDiagnose={{
+          has_conflict: false,
+          conflict_type: '',
+          details: '',
+          suggestion: '',
+          can_auto_takeover: false,
+        }}
         downloading={false}
         onDownloadKernel={vi.fn()}
         onTakeover={vi.fn()}
       />
     );
     expect(container.firstChild).toBeNull();
+  });
+
+  it('does not render anything when loading is true or kernelInfo is null to prevent flashing', () => {
+    const { container: c1 } = render(
+      <GatekeeperModal
+        kernelInfo={null}
+        takeoverDiagnose={null}
+        loading={true}
+        downloading={false}
+        onDownloadKernel={vi.fn()}
+        onTakeover={vi.fn()}
+      />
+    );
+    expect(c1.firstChild).toBeNull();
+
+    const { container: c2 } = render(
+      <GatekeeperModal
+        kernelInfo={null}
+        takeoverDiagnose={null}
+        loading={false}
+        downloading={false}
+        onDownloadKernel={vi.fn()}
+        onTakeover={vi.fn()}
+      />
+    );
+    expect(c2.firstChild).toBeNull();
   });
 
   it('renders gatekeeper warning and download button when kernel is not ready', () => {
@@ -53,5 +85,98 @@ describe('GatekeeperModal', () => {
     const btn = screen.getByText('一键下载 1.14.4 内核');
     fireEvent.click(btn);
     expect(handleDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders process conflict banner and takeover button when kernel is ready but conflict exists', () => {
+    const handleTakeover = vi.fn();
+    render(
+      <GatekeeperModal
+        kernelInfo={{
+          binary_path: '/Library/Application Support/Subout/bin/sing-box',
+          installed: true,
+          version: '1.14.4',
+          supported_versions: ['1.14.*'],
+          pinned_version: '1.14.4',
+          ready: true,
+          gatekeeper_blocked: false,
+          message: null,
+        }}
+        takeoverDiagnose={{
+          has_conflict: true,
+          conflict_type: 'running_processes',
+          conflict_name: '外部独立 sing-box 进程',
+          details: '检测到 1 个正在运行的外部 sing-box 进程 (PID: 12345)。',
+          suggestion: '建议点击一键接管。',
+          suggestion_command: 'sudo kill -9 12345',
+          pids: [12345],
+          can_auto_takeover: true,
+        }}
+        downloading={false}
+        onDownloadKernel={vi.fn()}
+        onTakeover={handleTakeover}
+      />
+    );
+
+    // Should NOT show download kernel button
+    expect(screen.queryByText(/内核门禁警告/)).toBeNull();
+
+    // Should show conflict header & details
+    expect(screen.getByText(/检测到系统外部进程\/服务冲突/)).toBeDefined();
+    expect(screen.getByText(/外部独立 sing-box 进程/)).toBeDefined();
+    expect(screen.getAllByText(/PID: 12345/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/sudo kill -9 12345/)).toBeDefined();
+
+    // Click takeover button
+    const takeoverBtn = screen.getByText('一键接管并终止冲突进程');
+    fireEvent.click(takeoverBtn);
+    expect(handleTakeover).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders SudoModal when isSudoModalOpen is true', () => {
+    const handleCloseSudo = vi.fn();
+    const handleSubmitSudo = vi.fn();
+
+    render(
+      <GatekeeperModal
+        kernelInfo={{
+          binary_path: '/usr/bin/sing-box',
+          installed: true,
+          version: '1.14.4',
+          supported_versions: ['1.14.*'],
+          pinned_version: '1.14.4',
+          ready: true,
+          gatekeeper_blocked: false,
+          message: null,
+        }}
+        takeoverDiagnose={{
+          has_conflict: true,
+          conflict_type: 'running_processes',
+          conflict_name: '外部独立 sing-box 进程',
+          details: '外部进程 (PID: 73023) 属于系统守护进程或 Root 用户',
+          suggestion: '请授权接管',
+          suggestion_command: 'sudo kill -9 73023',
+          pids: [73023],
+          can_auto_takeover: true,
+        }}
+        downloading={false}
+        onDownloadKernel={vi.fn()}
+        onTakeover={vi.fn()}
+        isSudoModalOpen={true}
+        sudoError="Sudo 密码不正确，请重新输入"
+        onCloseSudoModal={handleCloseSudo}
+        onSubmitSudo={handleSubmitSudo}
+      />
+    );
+
+    expect(screen.getByText('需要系统管理员 (Sudo) 授权')).toBeDefined();
+    expect(screen.getByText('Sudo 密码不正确，请重新输入')).toBeDefined();
+
+    const input = screen.getByPlaceholderText('输入 Sudo 密码...');
+    fireEvent.change(input, { target: { value: 'testpass' } });
+
+    const submitBtn = screen.getByText('授权并接管');
+    fireEvent.click(submitBtn);
+
+    expect(handleSubmitSudo).toHaveBeenCalledWith('testpass');
   });
 });

@@ -60,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
               {runningProfile.name}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
-              ({runningProfile.version_code.slice(-6)})
+              ({String(runningProfile.version_code ?? "").slice(-6)})
             </span>
           </div>
         ) : (

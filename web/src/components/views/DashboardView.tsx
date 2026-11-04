@@ -249,7 +249,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     当前运行: {runningProfile.name}
                   </Badge>
                   <span className="text-[11px] text-slate-500 font-mono">
-                    Token: {runningProfile.token.slice(0, 8)}...
+                    Token: {String(runningProfile.token || "").slice(0, 8)}...
                   </span>
                 </div>
               )}

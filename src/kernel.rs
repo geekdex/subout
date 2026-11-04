@@ -162,7 +162,20 @@ pub fn get_singbox_executable() -> Option<PathBuf> {
     crate::paths::AppPaths::get().find_singbox_executable()
 }
 
+static KERNEL_VERSION_CACHE: std::sync::RwLock<Option<(PathBuf, std::time::SystemTime, String)>> =
+    std::sync::RwLock::new(None);
+
 pub fn get_installed_kernel_version(path: &Path) -> Option<String> {
+    let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    if let Some(mod_time) = mtime
+        && let Ok(guard) = KERNEL_VERSION_CACHE.read()
+        && let Some((ref cached_path, cached_mtime, ref ver)) = *guard
+        && cached_path == path
+        && cached_mtime == mod_time
+    {
+        return Some(ver.clone());
+    }
+
     let output = std::process::Command::new(path)
         .arg("version")
         .output()
@@ -170,7 +183,13 @@ pub fn get_installed_kernel_version(path: &Path) -> Option<String> {
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Some(line) = stdout.lines().next() {
-            return Some(line.trim().to_string());
+            let ver_str = line.trim().to_string();
+            if let Some(mod_time) = mtime
+                && let Ok(mut guard) = KERNEL_VERSION_CACHE.write()
+            {
+                *guard = Some((path.to_path_buf(), mod_time, ver_str.clone()));
+            }
+            return Some(ver_str);
         }
     }
     None
@@ -199,6 +218,10 @@ impl Default for KernelDownloadStatus {
     }
 }
 
+pub fn extract_semver_string(s: &str) -> Option<String> {
+    crate::paths::parse_semver(s).map(|(maj, min, pat)| format!("{maj}.{min}.{pat}"))
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct KernelInfoResponse {
     pub os: String,
@@ -207,19 +230,24 @@ pub struct KernelInfoResponse {
     pub download_url: Option<String>,
     pub filename: Option<String>,
     pub is_installed: bool,
+    pub installed: bool,
     pub binary_path: String,
     pub version: Option<String>,
+    pub raw_version: Option<String>,
     pub min_version: String,
     pub recommended_version: String,
+    pub pinned_version: String,
     pub supported_versions: Vec<String>,
     pub is_version_satisfies: bool,
+    pub ready: bool,
+    pub gatekeeper_blocked: bool,
     pub download_status: KernelDownloadStatus,
 }
 
 pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
     let target = detect_current_target();
     let maybe_exec = get_singbox_executable();
-    let (is_installed, binary_path, version) = if let Some(ref p) = maybe_exec {
+    let (is_installed, binary_path, raw_version) = if let Some(ref p) = maybe_exec {
         let ver = get_installed_kernel_version(p);
         (true, p.to_string_lossy().to_string(), ver)
     } else {
@@ -227,7 +255,11 @@ pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
         (false, default_path.to_string_lossy().to_string(), None)
     };
 
-    let is_version_satisfies = version.as_deref().is_some_and(is_supported_kernel_version);
+    let is_version_satisfies = raw_version.as_deref().is_some_and(is_supported_kernel_version);
+    let ready = is_installed && is_version_satisfies;
+    let gatekeeper_blocked = !ready;
+    let clean_version = raw_version.as_deref().and_then(extract_semver_string);
+    let version = clean_version.or_else(|| raw_version.clone());
 
     let os = std::env::consts::OS.to_string();
     let arch = std::env::consts::ARCH.to_string();
@@ -250,15 +282,20 @@ pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
         download_url,
         filename,
         is_installed,
+        installed: is_installed,
         binary_path,
         version,
+        raw_version,
         min_version: "1.14.0".to_string(),
         recommended_version: PINNED_KERNEL_VERSION.to_string(),
+        pinned_version: PINNED_KERNEL_VERSION.to_string(),
         supported_versions: SUPPORTED_KERNEL_VERSIONS
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
         is_version_satisfies,
+        ready,
+        gatekeeper_blocked,
         download_status: status.clone(),
     }
 }

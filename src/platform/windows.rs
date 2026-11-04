@@ -212,8 +212,7 @@ impl PlatformStrategy for WindowsPlatform {
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             let current_pid = std::process::id();
-            let config_path_str = running_config_path.to_string_lossy().to_string();
-            let config_path_norm = config_path_str.replace('/', "\\");
+            let config_variants = crate::platform::get_config_path_variants(running_config_path);
             let mut pids_to_kill: Vec<u32> = Vec::new();
 
             if let Ok(output) = std::process::Command::new("powershell")
@@ -231,7 +230,7 @@ impl PlatformStrategy for WindowsPlatform {
                     for item in items {
                         let pid = item.process_id.unwrap_or(0);
                         let ppid = item.parent_process_id.unwrap_or(0);
-                        if pid == 0 || pid <= 4 || pid == current_pid || Some(pid) == exclude_pid {
+                        if pid <= 4 || pid == current_pid || Some(pid) == exclude_pid {
                             continue;
                         }
                         let name = item.name.unwrap_or_default().to_lowercase();
@@ -240,8 +239,7 @@ impl PlatformStrategy for WindowsPlatform {
                         }
                         let cmdline = item.command_line.unwrap_or_default();
                         let cmdline_lower = cmdline.to_lowercase();
-                        let is_subout_instance = cmdline.contains(&config_path_str)
-                            || cmdline.contains(&config_path_norm)
+                        let is_subout_instance = config_variants.iter().any(|v| cmdline.contains(v) || cmdline.contains(&v.replace('/', "\\")))
                             || cmdline_lower.contains("subout")
                             || ppid == current_pid
                             || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
@@ -292,43 +290,42 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn diagnose_takeover_conflict(
         &self,
+        managed_pid: Option<u32>,
     ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
         Box::pin(async move {
             let running_config_path =
                 crate::service::SingBoxServiceManager::get_running_config_path();
-            let conflicts = self.detect_conflicting_processes(None, &running_config_path);
+            let conflicts = self.detect_conflicting_processes(managed_pid, &running_config_path);
             let pids: Vec<u32> = conflicts.iter().map(|c| c.pid).collect();
 
             if !pids.is_empty() {
+                let kill_cmd = format!(
+                    "taskkill /F /PID {}",
+                    pids.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" /PID ")
+                );
+                let pid_str = pids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+                let msg = format!(
+                    "检测到 {} 个正在运行的外部 sing-box.exe 进程 (PID: {})。这些进程可能正在占用代理端口或虚拟网卡接口。",
+                    pids.len(),
+                    pid_str
+                );
                 return Ok(crate::platform::TakeoverDiagnoseResult {
                     has_conflict: true,
                     conflict_type: Some("running_processes".to_string()),
-                    suggestion_command: Some(format!(
-                        "taskkill /F /PID {}",
-                        pids.iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(" /PID ")
-                    )),
-                    message: format!(
-                        "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。",
-                        pids.len(),
-                        pids.iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                    conflict_name: Some("外部独立 sing-box 进程".to_string()),
+                    suggestion_command: Some(kill_cmd),
+                    suggestion: Some("建议点击「一键接管并终止冲突进程」自动释放端口，或在 PowerShell / CMD 执行 taskkill 命令。".to_string()),
+                    message: msg.clone(),
+                    details: msg,
                     pids,
+                    can_auto_takeover: true,
                 });
             }
 
-            Ok(crate::platform::TakeoverDiagnoseResult {
-                has_conflict: false,
-                conflict_type: None,
-                suggestion_command: None,
-                message: "未检测到外部冲突进程。".to_string(),
-                pids: vec![],
-            })
+            Ok(crate::platform::TakeoverDiagnoseResult::no_conflict())
         })
     }
 
@@ -552,20 +549,38 @@ pub fn filter_conflicting_processes(
     managed_pid: Option<u32>,
     running_config_path: &Path,
 ) -> Vec<ConflictingProcessInfo> {
-    let config_path_str = running_config_path.to_string_lossy().to_string();
-    let config_path_norm = config_path_str.replace('/', "\\");
+    let config_variants = crate::platform::get_config_path_variants(running_config_path);
     let mut results = Vec::new();
     let mut seen_pids = std::collections::HashSet::new();
+    let mut children_map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+
+    for item in &items {
+        if let (Some(pid), Some(ppid)) = (item.process_id, item.parent_process_id) {
+            children_map.entry(ppid).or_default().push(pid);
+        }
+    }
+
+    let mut excluded_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut queue = Vec::new();
+    queue.push(current_pid);
+    if let Some(mpid) = managed_pid {
+        queue.push(mpid);
+    }
+
+    while let Some(parent) = queue.pop() {
+        excluded_pids.insert(parent);
+        if let Some(children) = children_map.get(&parent) {
+            for &child in children {
+                if excluded_pids.insert(child) {
+                    queue.push(child);
+                }
+            }
+        }
+    }
 
     for item in items {
         let pid = item.process_id.unwrap_or(0);
-        if pid == 0 || pid <= 4 || pid == current_pid || Some(pid) == managed_pid {
-            continue;
-        }
-
-        if let Some(ppid) = item.parent_process_id
-            && (ppid == current_pid || (managed_pid.is_some() && Some(ppid) == managed_pid))
-        {
+        if pid <= 4 || excluded_pids.contains(&pid) {
             continue;
         }
 
@@ -590,8 +605,8 @@ pub fn filter_conflicting_processes(
             let c_lower = c.to_lowercase();
             c_lower.contains("subout.exe")
                 || c_lower.contains("subout web")
-                || c.contains(&config_path_str)
-                || c.contains(&config_path_norm)
+                || (managed_pid.is_some()
+                    && config_variants.iter().any(|v| c.contains(v) || c.contains(&v.replace('/', "\\"))))
         });
 
         if is_subout_instance {

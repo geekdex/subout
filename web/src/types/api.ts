@@ -4,11 +4,14 @@ export interface ConfigProfile {
   id: number;
   name: string;
   platform: PlatformType;
+  description?: string | null;
   token: string;
-  version_code: string;
-  config_json: string;
-  created_at: string;
-  updated_at: string;
+  version_code: string | number;
+  content: string;
+  config_json?: string;
+  is_running_config?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ServiceStatus {
@@ -31,19 +34,24 @@ export interface KernelInfo {
   binary_path: string;
   installed: boolean;
   version: string | null;
+  raw_version?: string | null;
   supported_versions: string[];
   pinned_version: string;
   ready: boolean;
   gatekeeper_blocked: boolean;
-  message: string | null;
+  message?: string | null;
 }
 
 export interface TakeoverDiagnoseResult {
   has_conflict: boolean;
   conflict_type: string;
+  conflict_name?: string;
   service_name?: string;
   details: string;
   suggestion: string;
+  suggestion_command?: string;
+  message?: string;
+  pids?: number[];
   can_auto_takeover: boolean;
 }
 
@@ -75,7 +83,7 @@ export interface NodeGroup {
 
 export interface NodeGroupsListResponse {
   groups: NodeGroup[];
-  version_code: string;
+  version_code: string | number;
 }
 
 export interface Subscription {
@@ -138,8 +146,12 @@ export interface AutoUpdateSettings {
 export interface AutoUpdateSnapshot {
   id: number;
   config_id: number | null;
-  description: string;
+  change_type?: string;
+  action?: string;
+  detail?: string;
+  description?: string;
   created_at: string;
+  updated_at?: string;
   config_json?: string;
 }
 
