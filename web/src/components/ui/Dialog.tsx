@@ -64,7 +64,7 @@ export const Dialog: React.FC<DialogProps> = ({
       <div
         className={twMerge(
           clsx(
-            "relative w-full bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-6 z-10 animate-in fade-in zoom-in-95 duration-150",
+            "relative w-full bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-4 sm:p-6 z-10 animate-in fade-in zoom-in-95 duration-150",
             sizeClasses[size],
             className,
           ),

@@ -210,10 +210,14 @@ export const api = {
   },
   async setSystemProxy(
     enabled: boolean,
+    sudoPass?: string,
   ): Promise<{ success: boolean; message: string }> {
     return request("/api/service/system-proxy", {
       method: "POST",
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify({
+        enabled,
+        sudo_pass: sudoPass ? sudoPass.trim() : undefined,
+      }),
     });
   },
 

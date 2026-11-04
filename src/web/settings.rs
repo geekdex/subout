@@ -16,6 +16,9 @@ pub struct SettingsResponse {
     pub is_macos: bool,
     pub binary_path: Option<String>,
     pub has_saved_sudo_pass: bool,
+    pub sudo_configured: bool,
+    pub has_temp_sudo: bool,
+    pub permission_level: String,
 }
 
 pub async fn get_settings(
@@ -32,6 +35,14 @@ pub async fn get_settings(
     let binary_path =
         crate::kernel::get_singbox_executable().map(|p| p.to_string_lossy().to_string());
     let has_saved_sudo_pass = state.service_manager.has_saved_sudo_pass().await;
+    let has_temp_sudo = state.service_manager.has_temp_sudo_pass().await;
+    let permission_level = if is_root {
+        "root".to_string()
+    } else if has_saved_sudo_pass {
+        "admin".to_string()
+    } else {
+        "limited".to_string()
+    };
     Ok(Json(SettingsResponse {
         is_password_env_set,
         is_root,
@@ -40,6 +51,9 @@ pub async fn get_settings(
         is_macos,
         binary_path,
         has_saved_sudo_pass,
+        sudo_configured: has_saved_sudo_pass,
+        has_temp_sudo,
+        permission_level,
     }))
 }
 

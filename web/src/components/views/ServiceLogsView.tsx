@@ -66,9 +66,9 @@ export const ServiceLogsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 flex flex-col h-[calc(100vh-8.5rem)]">
+    <div className="w-full max-w-7xl mx-auto space-y-4 flex flex-col h-[calc(100vh-7.5rem)] sm:h-[calc(100vh-8.5rem)]">
       {/* Header bar */}
-      <div className="glass-panel p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shrink-0">
+      <div className="glass-panel p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-sky-400" />
           <h2 className="text-base font-bold text-white">内核进程实时日志</h2>
@@ -77,8 +77,8 @@ export const ServiceLogsView: React.FC = () => {
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="w-36">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+          <div className="w-32 sm:w-36">
             <Select
               value={filterLevel}
               onChange={setFilterLevel}
@@ -97,7 +97,12 @@ export const ServiceLogsView: React.FC = () => {
             onClick={() => setAutoScroll(!autoScroll)}
             icon={<ArrowDownCircle className="w-3.5 h-3.5" />}
           >
-            {autoScroll ? "滚动锁定: 开" : "滚动锁定: 关"}
+            <span className="hidden sm:inline">
+              {autoScroll ? "滚动锁定: 开" : "滚动锁定: 关"}
+            </span>
+            <span className="sm:hidden">
+              {autoScroll ? "锁定:开" : "锁定:关"}
+            </span>
           </Button>
 
           <Button

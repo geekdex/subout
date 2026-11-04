@@ -196,6 +196,8 @@ pub struct SingBoxServiceManager {
     ready: Arc<RwLock<bool>>,
     last_error: Arc<RwLock<Option<String>>>,
     logs: Arc<RwLock<VecDeque<String>>>,
+    saved_sudo_pass: Arc<RwLock<Option<String>>>,
+    temp_sudo_pass: Arc<RwLock<Option<String>>>,
     cached_sudo_pass: Arc<RwLock<Option<String>>>,
     db_path: Arc<RwLock<Option<String>>>,
     current_log_level: Arc<RwLock<String>>,
@@ -218,6 +220,8 @@ impl SingBoxServiceManager {
             ready: Arc::new(RwLock::new(false)),
             last_error: Arc::new(RwLock::new(None)),
             logs: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOG_LINES))),
+            saved_sudo_pass: Arc::new(RwLock::new(None)),
+            temp_sudo_pass: Arc::new(RwLock::new(None)),
             cached_sudo_pass: Arc::new(RwLock::new(None)),
             db_path: Arc::new(RwLock::new(None)),
             current_log_level: Arc::new(RwLock::new("info".to_string())),
@@ -232,12 +236,17 @@ impl SingBoxServiceManager {
     }
 
     pub async fn load_saved_sudo_pass(&self) {
-        // Session model: Sudo passwords are NEVER loaded from or stored in disk/database.
-        // If any legacy password existed in the SQLite database, purge it to protect user security.
+        // Load permanent sudo password from database if configured
         if let Some(ref path) = *self.db_path.read().await
             && let Ok(conn) = rusqlite::Connection::open(path)
         {
-            let _ = crate::db::delete_setting(&conn, "sudo_password");
+            if let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password") {
+                let trimmed = pass.trim();
+                if !trimmed.is_empty() {
+                    *self.saved_sudo_pass.write().await = Some(trimmed.to_string());
+                    *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
+                }
+            }
         }
     }
 
@@ -247,12 +256,18 @@ impl SingBoxServiceManager {
             self.clear_saved_sudo_pass().await;
             return;
         }
-        // In-memory runtime session cache ONLY.
-        // Sudo credentials are NEVER persisted to SQLite or disk configuration files.
+        *self.saved_sudo_pass.write().await = Some(trimmed.to_string());
         *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
+        if let Some(ref path) = *self.db_path.read().await
+            && let Ok(conn) = rusqlite::Connection::open(path)
+        {
+            let _ = crate::db::update_setting(&conn, "sudo_password", trimmed);
+        }
     }
 
     pub async fn clear_saved_sudo_pass(&self) {
+        *self.saved_sudo_pass.write().await = None;
+        *self.temp_sudo_pass.write().await = None;
         *self.cached_sudo_pass.write().await = None;
         if let Some(ref path) = *self.db_path.read().await
             && let Ok(conn) = rusqlite::Connection::open(path)
@@ -262,7 +277,33 @@ impl SingBoxServiceManager {
     }
 
     pub async fn has_saved_sudo_pass(&self) -> bool {
-        self.cached_sudo_pass.read().await.is_some()
+        self.saved_sudo_pass.read().await.is_some()
+    }
+
+    pub async fn has_temp_sudo_pass(&self) -> bool {
+        self.temp_sudo_pass.read().await.is_some()
+    }
+
+    pub async fn set_temp_sudo_pass(&self, pass: &str) {
+        let trimmed = pass.trim();
+        if trimmed.is_empty() {
+            *self.temp_sudo_pass.write().await = None;
+        } else {
+            *self.temp_sudo_pass.write().await = Some(trimmed.to_string());
+            if self.saved_sudo_pass.read().await.is_none() {
+                *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
+            }
+        }
+    }
+
+    pub async fn get_effective_sudo_pass(&self) -> Option<String> {
+        if let Some(ref p) = *self.saved_sudo_pass.read().await {
+            return Some(p.clone());
+        }
+        if let Some(ref p) = *self.temp_sudo_pass.read().await {
+            return Some(p.clone());
+        }
+        self.cached_sudo_pass.read().await.clone()
     }
 
     pub async fn validate_and_save_sudo_pass(&self, pass: &str) -> Result<()> {
@@ -761,7 +802,7 @@ impl SingBoxServiceManager {
         });
 
         if let Some(ref p) = explicit_pass {
-            *self.cached_sudo_pass.write().await = Some(p.clone());
+            self.set_temp_sudo_pass(p).await;
         }
 
         // 1. Stop any existing Subout-managed processes and lingering instances first
@@ -2060,7 +2101,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sudo_password_in_memory_session_lifecycle() {
+    async fn test_sudo_password_permanent_and_temporary_lifecycle() {
         let unique_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2074,34 +2115,33 @@ mod tests {
         mgr.set_db_path(&db_path).await;
 
         assert!(!mgr.has_saved_sudo_pass().await);
+        assert!(!mgr.has_temp_sudo_pass().await);
 
-        // Save password into in-memory session
-        mgr.save_sudo_pass("my_secret_pass").await;
+        // 1. Temporary authorization does NOT persist to DB
+        mgr.set_temp_sudo_pass("temp_pass").await;
+        assert!(mgr.has_temp_sudo_pass().await);
+        assert!(!mgr.has_saved_sudo_pass().await);
+        assert_eq!(mgr.get_effective_sudo_pass().await, Some("temp_pass".to_string()));
+        assert_eq!(crate::db::get_setting(&conn, "sudo_password").unwrap(), None);
+
+        // 2. Permanent authorization DOES persist to DB
+        mgr.save_sudo_pass("permanent_secret").await;
         assert!(mgr.has_saved_sudo_pass().await);
-
-        // Verify password is NOT persisted to SQLite database on disk
         let saved_in_db = crate::db::get_setting(&conn, "sudo_password").unwrap();
-        assert_eq!(saved_in_db, None);
+        assert_eq!(saved_in_db, Some("permanent_secret".to_string()));
+        assert_eq!(mgr.get_effective_sudo_pass().await, Some("permanent_secret".to_string()));
 
-        // Create new manager instance: it starts without sudo password (session only)
+        // 3. New manager instance loads permanent sudo password from DB on startup
         let mgr2 = SingBoxServiceManager::new();
         mgr2.set_db_path(&db_path).await;
         mgr2.load_saved_sudo_pass().await;
+        assert!(mgr2.has_saved_sudo_pass().await);
+        assert_eq!(mgr2.get_effective_sudo_pass().await, Some("permanent_secret".to_string()));
+
+        // 4. Clear permanent password purges from memory and DB
+        mgr2.clear_saved_sudo_pass().await;
         assert!(!mgr2.has_saved_sudo_pass().await);
-
-        // Verify that if a legacy sudo_password was in db, load_saved_sudo_pass deletes it
-        let _ = crate::db::update_setting(&conn, "sudo_password", "legacy_secret");
-        assert_eq!(
-            crate::db::get_setting(&conn, "sudo_password").unwrap(),
-            Some("legacy_secret".to_string())
-        );
-        mgr2.load_saved_sudo_pass().await;
-        // Purged from DB:
         assert_eq!(crate::db::get_setting(&conn, "sudo_password").unwrap(), None);
-
-        // Clear password in mgr
-        mgr.clear_saved_sudo_pass().await;
-        assert!(!mgr.has_saved_sudo_pass().await);
 
         let _ = std::fs::remove_file(&db_file);
     }

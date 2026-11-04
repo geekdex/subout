@@ -10,6 +10,9 @@ import {
   FileText,
   Settings,
   Lock,
+  X,
+  SlidersHorizontal,
+  LogOut,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { Tooltip } from "../ui/Tooltip";
@@ -32,6 +35,10 @@ interface SidebarProps {
   appMode: "simple" | "expert";
   versionCode?: string | number;
   nodeCount?: number;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
+  onSwitchMode?: (mode: "simple" | "expert") => void;
+  onLogout?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -40,6 +47,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isKernelReady,
   appMode,
   versionCode,
+  mobileOpen = false,
+  onCloseMobile,
+  onSwitchMode,
+  onLogout,
 }) => {
   const navItems: Array<{
     id: NavTab;
@@ -119,8 +130,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     (item) => item.showInMode === "all" || item.showInMode === appMode,
   );
 
-  return (
-    <aside className="w-64 bg-slate-900/90 border-r border-slate-800 flex flex-col shrink-0 select-none">
+  const handleTabClick = (tabId: NavTab) => {
+    onSelectTab(tabId);
+    if (onCloseMobile) {
+      onCloseMobile();
+    }
+  };
+
+  const renderNavContent = (isMobileView: boolean) => (
+    <div className="flex flex-col h-full">
       {/* Brand */}
       <div className="p-5 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -139,10 +157,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </p>
           </div>
         </div>
+        {isMobileView && onCloseMobile && (
+          <button
+            type="button"
+            onClick={onCloseMobile}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+            aria-label="关闭导航菜单"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        {/* Mobile-only Mode Switcher */}
+        {isMobileView && onSwitchMode && (
+          <div className="mb-3 p-1 bg-slate-950/80 rounded-xl border border-slate-800 grid grid-cols-2 gap-1 text-xs">
+            <button
+              type="button"
+              onClick={() => onSwitchMode("simple")}
+              className={clsx(
+                "flex items-center justify-center gap-1.5 py-1.5 rounded-lg transition-all font-medium",
+                appMode === "simple"
+                  ? "bg-sky-500 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200",
+              )}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>小白模式</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onSwitchMode("expert")}
+              className={clsx(
+                "flex items-center justify-center gap-1.5 py-1.5 rounded-lg transition-all font-medium",
+                appMode === "expert"
+                  ? "bg-sky-500 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200",
+              )}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>专业模式</span>
+            </button>
+          </div>
+        )}
+
         <div className="px-3 py-1.5 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
           导航菜单
         </div>
@@ -154,7 +214,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               disabled={isLocked}
-              onClick={() => !isLocked && onSelectTab(item.id)}
+              onClick={() => !isLocked && handleTabClick(item.id)}
               className={clsx(
                 "w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all group relative",
                 isActive
@@ -202,7 +262,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Tooltip
                 key={item.id}
                 content="内核未就绪，该功能已被门禁锁定"
-                position="right"
+                position={isMobileView ? "top" : "right"}
                 className="w-full"
               >
                 {buttonContent}
@@ -215,18 +275,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Footer Info */}
-      <div className="p-4 border-t border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
-        <span>模式: {appMode === "simple" ? "小白模式" : "专业模式"}</span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className={clsx(
-              "w-2 h-2 rounded-full",
-              isKernelReady ? "bg-emerald-400" : "bg-amber-400 animate-pulse",
-            )}
-          />
-          <span>{isKernelReady ? "内核已就绪" : "内核未就绪"}</span>
-        </span>
+      <div className="p-3.5 border-t border-slate-800 text-[11px] text-slate-500 flex flex-col gap-2 shrink-0 bg-slate-900/60">
+        <div className="flex items-center justify-between">
+          <span>模式: {appMode === "simple" ? "小白模式" : "专业模式"}</span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className={clsx(
+                "w-2 h-2 rounded-full",
+                isKernelReady ? "bg-emerald-400" : "bg-amber-400 animate-pulse",
+              )}
+            />
+            <span>{isKernelReady ? "内核就绪" : "内核未就绪"}</span>
+          </span>
+        </div>
+
+        {isMobileView && onLogout && (
+          <button
+            type="button"
+            onClick={onLogout}
+            className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors border border-slate-800"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>退出当前管理会话</span>
+          </button>
+        )}
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden lg:flex w-64 bg-slate-900/90 border-r border-slate-800 flex-col shrink-0 select-none">
+        {renderNavContent(false)}
+      </aside>
+
+      {/* Mobile Off-canvas Slide-over Drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
+            onClick={onCloseMobile}
+          />
+
+          {/* Drawer content */}
+          <div className="relative w-72 max-w-[85vw] h-full bg-slate-900 border-r border-slate-800 shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-250 select-none">
+            {renderNavContent(true)}
+          </div>
+        </div>
+      )}
+    </>
   );
 };

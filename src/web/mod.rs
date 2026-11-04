@@ -322,6 +322,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/simple-config/preview",
             post(simple_api::preview_simple_config),
         )
+        .fallback(serve_spa_fallback)
         .layer(axum::middleware::from_fn(gatekeeper_middleware))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -499,6 +500,14 @@ async fn gatekeeper_middleware(
 // UI Handler
 async fn serve_ui() -> Html<&'static str> {
     Html(include_str!("../../web/dist/index.html"))
+}
+
+async fn serve_spa_fallback(uri: axum::http::Uri) -> Result<Html<&'static str>, StatusCode> {
+    let path = uri.path();
+    if path.starts_with("/api/") || path.starts_with("/sub/") {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Html(include_str!("../../web/dist/index.html")))
 }
 
 // Dashboard Handlers

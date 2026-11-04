@@ -122,9 +122,9 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Top action header */}
-      <div className="glass-panel p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Rss className="w-5 h-5 text-indigo-400" />
@@ -139,6 +139,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
           size="md"
           onClick={handleOpenCreate}
           icon={<Plus className="w-4 h-4" />}
+          className="w-full sm:w-auto"
         >
           添加订阅
         </Button>

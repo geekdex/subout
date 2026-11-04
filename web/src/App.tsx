@@ -2,10 +2,13 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Sidebar, NavTab } from "./components/layout/Sidebar";
 import { Header } from "./components/layout/Header";
 import { GatekeeperModal } from "./components/layout/GatekeeperModal";
+import { SudoModal } from "./components/layout/SudoModal";
+import { SudoSettingsModal } from "./components/layout/SudoSettingsModal";
 import { ToastProvider } from "./components/ui/Toast";
 import { useToast } from "./hooks/useToast";
 import { useKernelGuard } from "./hooks/useKernelGuard";
 import { useServiceStatus } from "./hooks/useServiceStatus";
+import { useRouter } from "./hooks/useRouter";
 import { api, setUnauthorizedHandler } from "./api/client";
 import { getErrorMessage } from "./utils/format";
 import {
@@ -30,7 +33,7 @@ import { LoginView } from "./components/views/LoginView";
 
 const AppContent: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [currentTab, setCurrentTab] = useState<NavTab>("dashboard");
+  const { currentTab, navigate } = useRouter();
 
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [configs, setConfigs] = useState<ConfigProfile[]>([]);
@@ -38,6 +41,17 @@ const AppContent: React.FC = () => {
   const [nodes, setNodes] = useState<NodeItem[]>([]);
   const [nodeGroups, setNodeGroups] = useState<NodeGroup[]>([]);
   const [versionCode, setVersionCode] = useState<string>("");
+
+  // Proxy Temporary Sudo Modal State
+  const [proxySudoModalOpen, setProxySudoModalOpen] = useState(false);
+  const [proxySudoError, setProxySudoError] = useState<string | null>(null);
+  const [proxySudoLoading, setProxySudoLoading] = useState(false);
+
+  // Top Bar Cockpit-style Sudo Settings Modal State
+  const [sudoSettingsModalOpen, setSudoSettingsModalOpen] = useState(false);
+
+  // Mobile Menu Drawer State
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const { success, error } = useToast();
 
@@ -122,9 +136,9 @@ const AppContent: React.FC = () => {
       "auto-update",
     ];
     if (!kernelLoading && !isKernelReady && lockedTabs.includes(currentTab)) {
-      setCurrentTab("dashboard");
+      navigate("dashboard", undefined, true);
     }
-  }, [kernelLoading, isKernelReady, currentTab]);
+  }, [kernelLoading, isKernelReady, currentTab, navigate]);
 
   const handleSwitchMode = async (mode: "simple" | "expert") => {
     try {
@@ -134,14 +148,51 @@ const AppContent: React.FC = () => {
         `已切换至 ${mode === "simple" ? "小白模式" : "专业模式"}`,
       );
       if (mode === "simple" && ["profiles", "groups", "auto-update"].includes(currentTab)) {
-        setCurrentTab("dashboard");
+        navigate("dashboard", undefined, true);
       } else if (mode === "expert" && currentTab === "simple") {
-        setCurrentTab("dashboard");
+        navigate("dashboard", undefined, true);
       }
       await loadAllData();
       await refreshStatus();
     } catch (err: unknown) {
       error("切换模式失败", getErrorMessage(err));
+    }
+  };
+
+  const handleToggleSystemProxy = async (enabled: boolean) => {
+    // If turning on proxy, not root, and sudo not permanently configured,
+    // on macOS / Linux we may prompt for temporary sudo authorization
+    try {
+      await toggleSystemProxy(enabled);
+    } catch (err: unknown) {
+      const errMsg = getErrorMessage(err);
+      if (
+        enabled &&
+        (errMsg.includes("Sudo") ||
+          errMsg.includes("Root") ||
+          errMsg.includes("权限") ||
+          errMsg.includes("permission") ||
+          errMsg.includes("EPERM"))
+      ) {
+        setProxySudoError(null);
+        setProxySudoModalOpen(true);
+      }
+    }
+  };
+
+  const handleProxySudoSubmit = async (password: string) => {
+    setProxySudoLoading(true);
+    setProxySudoError(null);
+    try {
+      await toggleSystemProxy(true, password);
+      setProxySudoModalOpen(false);
+      setProxySudoError(null);
+      await loadAllData();
+    } catch (err: unknown) {
+      const errMsg = getErrorMessage(err);
+      setProxySudoError(errMsg);
+    } finally {
+      setProxySudoLoading(false);
     }
   };
 
@@ -162,14 +213,24 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
-      {/* Sidebar */}
+      {/* Sidebar (Desktop persistent + Mobile slide-over drawer) */}
       <Sidebar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={(tab) => {
+          navigate(tab);
+          setMobileMenuOpen(false);
+        }}
         isKernelReady={isKernelReady}
         appMode={systemInfo?.app_mode ?? "simple"}
         versionCode={versionCode}
         nodeCount={nodes.length}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
+        onSwitchMode={handleSwitchMode}
+        onLogout={() => {
+          api.logout();
+          setIsAuthenticated(false);
+        }}
       />
 
       {/* Main Layout Area */}
@@ -183,16 +244,18 @@ const AppContent: React.FC = () => {
           onStartService={startService}
           onStopService={stopService}
           onRestartService={restartService}
-          onToggleSystemProxy={toggleSystemProxy}
+          onToggleSystemProxy={handleToggleSystemProxy}
           onSwitchMode={handleSwitchMode}
           onLogout={() => {
             api.logout();
             setIsAuthenticated(false);
           }}
+          onOpenSudoSettings={() => setSudoSettingsModalOpen(true)}
+          onToggleMobileMenu={() => setMobileMenuOpen((prev) => !prev)}
         />
 
         {/* Scrollable Main Content */}
-        <main className="flex-1 overflow-y-auto p-6 md:p-8">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-5 lg:p-8">
           {/* Gatekeeper Warning Card when kernel is invalid or has conflicts */}
           <GatekeeperModal
             kernelInfo={kernelInfo}
@@ -209,6 +272,29 @@ const AppContent: React.FC = () => {
             onSubmitSudo={handleTakeoverWithSudo}
           />
 
+          {/* Temporary Sudo Modal for System Proxy */}
+          <SudoModal
+            open={proxySudoModalOpen}
+            onClose={() => {
+              setProxySudoModalOpen(false);
+              setProxySudoError(null);
+            }}
+            onSubmit={handleProxySudoSubmit}
+            loading={proxySudoLoading}
+            error={proxySudoError}
+            title="开启系统网络代理 - 临时提权授权"
+            description="开启系统级网络代理需要系统特权以配置系统网络参数。请输入当前主机的 Sudo 密码进行临时授权（仅供本次开启生效，不会持久保存到数据库）："
+            submitText="临时授权并开启"
+          />
+
+          {/* Top Bar Cockpit-style Sudo Settings Modal */}
+          <SudoSettingsModal
+            open={sudoSettingsModalOpen}
+            onClose={() => setSudoSettingsModalOpen(false)}
+            systemInfo={systemInfo}
+            onRefresh={loadAllData}
+          />
+
           {/* Active View Routing */}
           {currentTab === "dashboard" && (
             <DashboardView
@@ -217,7 +303,7 @@ const AppContent: React.FC = () => {
               configs={configs}
               runningProfile={runningProfile}
               onRefreshConfigs={loadAllData}
-              onNavigateTab={setCurrentTab}
+              onNavigateTab={(tab) => navigate(tab)}
             />
           )}
 

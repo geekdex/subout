@@ -31,6 +31,7 @@ pub struct TakeoverServiceRequest {
 #[derive(Deserialize)]
 pub struct SetSystemProxyRequest {
     pub enabled: bool,
+    pub sudo_pass: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -282,6 +283,11 @@ pub async fn set_system_proxy(
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
+
+    let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
+    if let Some(ref pass) = sudo_pass {
+        state.service_manager.set_temp_sudo_pass(pass).await;
+    }
 
     state
         .service_manager

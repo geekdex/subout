@@ -19,6 +19,11 @@ pub struct SystemInfoResponse {
     pub host_os: String,
     pub host_arch: String,
     pub is_linux: bool,
+    pub is_root: bool,
+    pub sudo_configured: bool,
+    pub has_temp_sudo: bool,
+    pub permission_level: String,
+    pub default_tun_stack: String,
     pub app_mode: String,
     pub running_config_id: Option<i64>,
     pub primary_lan_ip: Option<String>,
@@ -95,6 +100,18 @@ pub async fn get_system_info(
     let lan_ips = discover_host_lan_ips();
     let primary_lan_ip = lan_ips.first().cloned();
 
+    let is_root = platform.is_running_as_root();
+    let sudo_configured = state.service_manager.has_saved_sudo_pass().await;
+    let has_temp_sudo = state.service_manager.has_temp_sudo_pass().await;
+    let permission_level = if is_root {
+        "root".to_string()
+    } else if sudo_configured {
+        "admin".to_string()
+    } else {
+        "limited".to_string()
+    };
+    let default_tun_stack = "system".to_string();
+
     let (app_mode, running_config_id) = if let Ok(conn) = get_db_conn(&state.db_path) {
         let mode = crate::db::get_setting(&conn, "app_mode")
             .unwrap_or(None)
@@ -112,6 +129,11 @@ pub async fn get_system_info(
         host_os,
         host_arch,
         is_linux,
+        is_root,
+        sudo_configured,
+        has_temp_sudo,
+        permission_level,
+        default_tun_stack,
         app_mode,
         running_config_id,
         primary_lan_ip,

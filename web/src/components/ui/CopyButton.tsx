@@ -64,7 +64,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
       onClick={handleCopy}
       className={twMerge(
         clsx(
-          "inline-flex items-center justify-center font-medium rounded-md transition-all select-none active:scale-95",
+          "inline-flex items-center justify-center font-medium rounded-md transition-all select-none active:scale-95 shrink-0 whitespace-nowrap",
           sizeClasses[size],
           variantClasses[variant],
           copied && "text-emerald-400 border-emerald-500/40 bg-emerald-500/10",
@@ -76,12 +76,12 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
       {copied ? (
         <>
           <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span>{copiedLabel}</span>
+          <span className="whitespace-nowrap">{copiedLabel}</span>
         </>
       ) : (
         <>
           <Copy className="w-3.5 h-3.5 shrink-0" />
-          {label && <span>{label}</span>}
+          {label && <span className="whitespace-nowrap">{label}</span>}
         </>
       )}
     </button>

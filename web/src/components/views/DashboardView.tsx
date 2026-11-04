@@ -96,7 +96,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Safe conflict reminder */}
       <div className="bg-sky-500/10 border border-sky-500/20 rounded-xl p-4 flex items-center justify-between text-xs text-sky-300">
         <div className="flex items-center gap-2.5">
@@ -278,7 +278,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <span className="text-xs font-medium text-slate-400">
                       选择本机生效配置文件
                     </span>
-                    <div className="w-72">
+                    <div className="w-full sm:w-72">
                       <Select
                         value={runningProfile ? runningProfile.id.toString() : ""}
                         disabled={switchingConfig}

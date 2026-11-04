@@ -107,9 +107,9 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Top action & VersionCode banner */}
-      <div className="glass-panel p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -131,6 +131,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
           size="md"
           onClick={handleOpenCreate}
           icon={<Plus className="w-4 h-4" />}
+          className="w-full sm:w-auto"
         >
           新建组合
         </Button>

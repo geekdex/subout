@@ -69,4 +69,126 @@ describe('Sidebar & Header with numeric version_code', () => {
     expect(screen.getByText('默认配置')).toBeDefined();
     expect(screen.getByText('(212000)')).toBeDefined();
   });
+
+  it('Header renders Cockpit-style sudo administrative access button and triggers onOpenSudoSettings', () => {
+    const onOpenSudo = vi.fn();
+    const { rerender } = render(
+      <Header
+        systemInfo={{
+          host_os: 'linux',
+          host_arch: 'x86_64',
+          default_tun_stack: 'system',
+          sudo_configured: false,
+          is_root: false,
+          app_mode: 'simple',
+          running_config_id: null,
+        }}
+        serviceStatus={null}
+        runningProfile={null}
+        actionLoading={false}
+        onStartService={vi.fn()}
+        onStopService={vi.fn()}
+        onRestartService={vi.fn()}
+        onToggleSystemProxy={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onLogout={vi.fn()}
+        onOpenSudoSettings={onOpenSudo}
+      />
+    );
+
+    // When not root and not configured -> Limited access
+    const limitedBtn = screen.getByText('功能受限');
+    expect(limitedBtn).toBeDefined();
+    expect(screen.getByText('点击提权')).toBeDefined();
+
+    limitedBtn.click();
+    expect(onOpenSudo).toHaveBeenCalledTimes(1);
+
+    // When configured -> Admin access (Permanent)
+    rerender(
+      <Header
+        systemInfo={{
+          host_os: 'linux',
+          host_arch: 'x86_64',
+          default_tun_stack: 'system',
+          sudo_configured: true,
+          is_root: false,
+          app_mode: 'simple',
+          running_config_id: null,
+        }}
+        serviceStatus={null}
+        runningProfile={null}
+        actionLoading={false}
+        onStartService={vi.fn()}
+        onStopService={vi.fn()}
+        onRestartService={vi.fn()}
+        onToggleSystemProxy={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onLogout={vi.fn()}
+        onOpenSudoSettings={onOpenSudo}
+      />
+    );
+    expect(screen.getByText('管理员权限')).toBeDefined();
+    expect(screen.getByText('永久有效')).toBeDefined();
+  });
+
+  it('Sidebar renders mobile drawer when mobileOpen is true and handles onCloseMobile', () => {
+    const onCloseMobile = vi.fn();
+    const onSelectTab = vi.fn();
+
+    const { rerender } = render(
+      <Sidebar
+        currentTab="dashboard"
+        onSelectTab={onSelectTab}
+        isKernelReady={true}
+        appMode="simple"
+        mobileOpen={false}
+        onCloseMobile={onCloseMobile}
+      />
+    );
+
+    // When false, close button is not in DOM
+    expect(screen.queryByLabelText('关闭导航菜单')).toBeNull();
+
+    // When true, close button is in DOM
+    rerender(
+      <Sidebar
+        currentTab="dashboard"
+        onSelectTab={onSelectTab}
+        isKernelReady={true}
+        appMode="simple"
+        mobileOpen={true}
+        onCloseMobile={onCloseMobile}
+      />
+    );
+
+    const closeBtn = screen.getByLabelText('关闭导航菜单');
+    expect(closeBtn).toBeDefined();
+    closeBtn.click();
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
+  });
+
+  it('Header triggers onToggleMobileMenu when mobile menu button is clicked', () => {
+    const onToggle = vi.fn();
+    render(
+      <Header
+        systemInfo={null}
+        serviceStatus={null}
+        runningProfile={null}
+        actionLoading={false}
+        onStartService={vi.fn()}
+        onStopService={vi.fn()}
+        onRestartService={vi.fn()}
+        onToggleSystemProxy={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onLogout={vi.fn()}
+        onToggleMobileMenu={onToggle}
+      />
+    );
+
+    const menuBtn = screen.getByLabelText('打开菜单');
+    expect(menuBtn).toBeDefined();
+    menuBtn.click();
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
 });

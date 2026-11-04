@@ -11,6 +11,9 @@ export interface SudoModalProps {
   error?: string | null;
   conflictPids?: number[];
   conflictName?: string;
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  submitText?: string;
 }
 
 export const SudoModal: React.FC<SudoModalProps> = ({
@@ -21,6 +24,9 @@ export const SudoModal: React.FC<SudoModalProps> = ({
   error = null,
   conflictPids = [],
   conflictName,
+  title,
+  description,
+  submitText = "授权并接管",
 }) => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -51,14 +57,16 @@ export const SudoModal: React.FC<SudoModalProps> = ({
       onClose={onClose}
       size="md"
       title={
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400">
-            <ShieldAlert className="w-5 h-5" />
+        title || (
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <span className="text-base font-bold text-slate-100">
+              需要系统管理员 (Sudo) 授权
+            </span>
           </div>
-          <span className="text-base font-bold text-slate-100">
-            需要系统管理员 (Sudo) 授权
-          </span>
-        </div>
+        )
       }
       footer={
         <div className="flex items-center justify-end gap-3 w-full">
@@ -77,22 +85,26 @@ export const SudoModal: React.FC<SudoModalProps> = ({
             disabled={!password.trim() || loading}
             onClick={() => handleSubmit()}
           >
-            授权并接管
+            {submitText}
           </Button>
         </div>
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        <p className="text-xs text-slate-300 leading-relaxed">
-          检测到外部冲突服务{" "}
-          {pidStr && (
-            <span className="font-mono text-rose-300 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20">
-              {pidStr}
-            </span>
-          )}{" "}
-          {conflictName ? `(${conflictName})` : ""}
-          属于系统守护进程或以 Root 权限运行，普通用户无权终止。请输入您的系统 Sudo 密码以授权强行终止并清理代理端口。
-        </p>
+        {description ? (
+          <div className="text-xs text-slate-300 leading-relaxed">{description}</div>
+        ) : (
+          <p className="text-xs text-slate-300 leading-relaxed">
+            检测到外部冲突服务{" "}
+            {pidStr && (
+              <span className="font-mono text-rose-300 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20">
+                {pidStr}
+              </span>
+            )}{" "}
+            {conflictName ? `(${conflictName})` : ""}
+            属于系统守护进程或以 Root 权限运行，普通用户无权终止。请输入您的系统 Sudo 密码以执行临时授权接管并释放网络端口。
+          </p>
+        )}
 
         {error && (
           <div className="flex items-start gap-2.5 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs animate-in fade-in">

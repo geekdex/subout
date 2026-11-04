@@ -217,9 +217,9 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Top action header */}
-      <div className="glass-panel p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Server className="w-5 h-5 text-sky-400" />
@@ -232,7 +232,7 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
             订阅拉取的所有出站节点统一汇集在此，可单点测速、批量筛选、或供节点组合动态聚合。
           </p>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
           {selectedIds.length > 0 && (
             <Button
               variant="danger"
@@ -256,8 +256,8 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
       </div>
 
       {/* Filter / Search Bar */}
-      <div className="flex items-center gap-4">
-        <div className="w-72">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="w-full sm:w-80">
           <Input
             placeholder="搜索节点名称、IP 或协议..."
             value={search}
@@ -267,6 +267,11 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
             onClear={() => setSearch("")}
           />
         </div>
+        {selectedIds.length > 0 && (
+          <div className="text-xs text-slate-400">
+            已选中 <span className="font-semibold text-sky-400">{selectedIds.length}</span> 个节点
+          </div>
+        )}
       </div>
 
       {/* Nodes Table */}

@@ -83,18 +83,20 @@ export function useServiceStatus(pollInterval = 3000) {
     }
   };
 
-  const toggleSystemProxy = async (enabled: boolean) => {
+  const toggleSystemProxy = async (enabled: boolean, sudoPass?: string) => {
     setActionLoading(true);
     try {
-      const res = await api.setSystemProxy(enabled);
+      const res = await api.setSystemProxy(enabled, sudoPass);
       if (res.success) {
         success(enabled ? "系统代理已开启" : "系统代理已关闭", res.message);
       } else {
         error("切换系统代理失败", res.message);
       }
       await fetchStatus();
+      return res;
     } catch (err: unknown) {
       error("设置系统代理失败", getErrorMessage(err));
+      throw err;
     } finally {
       setActionLoading(false);
     }

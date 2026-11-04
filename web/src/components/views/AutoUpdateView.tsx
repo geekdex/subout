@@ -134,9 +134,9 @@ export const AutoUpdateView: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Top Banner */}
-      <div className="glass-panel p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <RefreshCw className="w-5 h-5 text-sky-400" />
@@ -153,6 +153,7 @@ export const AutoUpdateView: React.FC = () => {
           loading={triggering}
           onClick={handleTrigger}
           icon={<Play className="w-4 h-4" />}
+          className="w-full sm:w-auto"
         >
           立即触发全流程更新
         </Button>

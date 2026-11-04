@@ -179,8 +179,11 @@ export interface SystemInfo {
   host_arch: string;
   os?: string;
   is_linux?: boolean;
+  is_root?: boolean;
   default_tun_stack?: string;
   sudo_configured?: boolean;
+  has_temp_sudo?: boolean;
+  permission_level?: "root" | "admin" | "limited";
   portable_mode?: boolean;
   app_mode: "simple" | "expert";
   running_config_id: number | null;

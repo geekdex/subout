@@ -2,10 +2,17 @@ import React, { useState } from "react";
 import {
   Settings,
   Key,
-  Shield,
   HardDrive,
-  Sparkles,
+  Shield,
+  ShieldCheck,
+  ShieldAlert,
   Sliders,
+  Database,
+  Info,
+  CheckCircle2,
+  RefreshCw,
+  Lock,
+  Download,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -24,52 +31,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   systemInfo,
   onRefreshSystemInfo,
 }) => {
-  const [sudoPassword, setSudoPassword] = useState("");
-  const [savingSudo, setSavingSudo] = useState(false);
-
   const [oldWebPassword, setOldWebPassword] = useState("");
   const [newWebPassword, setNewWebPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [savingWebPassword, setSavingWebPassword] = useState(false);
 
-  const [switchingMode, setSwitchingMode] = useState(false);
+  // Preference states
+  const [logInterval, setLogInterval] = useState("3000");
+  const [testTimeout, setTestTimeout] = useState("3000");
 
   const { success, error } = useToast();
 
-  const handleSaveSudo = async () => {
-    if (!sudoPassword) {
-      error("请输入 sudo 密码");
-      return;
-    }
-    setSavingSudo(true);
-    try {
-      await api.setSudoPassword(sudoPassword);
-      success("Sudo 会话授权成功");
-      setSudoPassword("");
-      onRefreshSystemInfo();
-    } catch (err: unknown) {
-      error("Sudo 授权验证失败", getErrorMessage(err));
-    } finally {
-      setSavingSudo(false);
-    }
-  };
-
-  const handleClearSudo = async () => {
-    setSavingSudo(true);
-    try {
-      await api.setSudoPassword("");
-      success("已清除会话 Sudo 授权缓存");
-      setSudoPassword("");
-      onRefreshSystemInfo();
-    } catch (err: unknown) {
-      error("清除 Sudo 授权失败", getErrorMessage(err));
-    } finally {
-      setSavingSudo(false);
-    }
-  };
+  const isRoot = systemInfo?.is_root ?? false;
+  const sudoConfigured = systemInfo?.sudo_configured ?? false;
 
   const handleSaveWebPassword = async () => {
     if (!oldWebPassword || !newWebPassword) {
       error("请完整输入当前密码和新密码");
+      return;
+    }
+    if (confirmPassword && newWebPassword !== confirmPassword) {
+      error("两次输入的新密码不一致，请重新检查");
       return;
     }
     setSavingWebPassword(true);
@@ -78,6 +60,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       success("管理员密码修改成功，请妥善保存");
       setOldWebPassword("");
       setNewWebPassword("");
+      setConfirmPassword("");
     } catch (err: unknown) {
       error("修改密码失败", getErrorMessage(err));
     } finally {
@@ -85,218 +68,365 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleSwitchMode = async (targetMode: "simple" | "expert") => {
-    if (systemInfo?.app_mode === targetMode) return;
-    setSwitchingMode(true);
-    try {
-      await api.setAppMode(targetMode, false);
-      success(
-        "运行模式已切换",
-        `已切换至 ${targetMode === "simple" ? "小白模式" : "专业模式"}`,
-      );
-      onRefreshSystemInfo();
-    } catch (err: unknown) {
-      error("切换模式失败", getErrorMessage(err));
-    } finally {
-      setSwitchingMode(false);
-    }
+  const getPasswordStrength = (pass: string) => {
+    if (!pass) return { score: 0, label: "未输入", color: "bg-slate-700" };
+    let score = 0;
+    if (pass.length >= 6) score += 1;
+    if (pass.length >= 10) score += 1;
+    if (/[A-Z]/.test(pass) && /[a-z]/.test(pass)) score += 1;
+    if (/[0-9]/.test(pass)) score += 1;
+    if (/[^A-Za-z0-9]/.test(pass)) score += 1;
+
+    if (score <= 2) return { score: 1, label: "较弱", color: "bg-rose-500" };
+    if (score <= 3) return { score: 2, label: "中等", color: "bg-amber-500" };
+    return { score: 3, label: "极佳", color: "bg-emerald-500" };
+  };
+
+  const strength = getPasswordStrength(newWebPassword);
+
+  const handleExportDiagnostics = () => {
+    const diag = {
+      timestamp: new Date().toISOString(),
+      systemInfo,
+      userAgent: navigator.userAgent,
+    };
+    const blob = new Blob([JSON.stringify(diag, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `subout-diagnostics-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    success("已导出系统诊断数据");
   };
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Top Banner */}
-      <div className="glass-panel p-6">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Settings className="w-5 h-5 text-sky-400" />
-          <span>系统与安全设置</span>
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">
-          管理客户端工作模式、Linux/macOS 权限凭证、数据目录与管理员口令。
-        </p>
+      <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <Settings className="w-5 h-5 text-sky-400" />
+            <span>系统与安全设置</span>
+          </h2>
+          <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+            管理面板访问口令与查看宿主环境运行状态。系统提权权限 (Sudo) 可直接在顶部导航栏随时点击管理。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge
+            variant={isRoot || sudoConfigured ? "success" : "warning"}
+            size="md"
+          >
+            {isRoot
+              ? "Root 权限已就绪"
+              : sudoConfigured
+                ? "Sudo 提权已配置"
+                : "权限受限状态"}
+          </Badge>
+        </div>
       </div>
 
-      {/* Grid: App Mode & Sudo */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Mode Switch Card */}
-        <div className="glass-panel p-5 space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-            <Sliders className="w-4 h-4 text-sky-400" />
-            <h3 className="text-sm font-semibold text-white">客户端运作模式</h3>
-          </div>
+      {/* Main Two-Column Layout for Desktop & Fluid Stacking for Mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Security & Preferences (7 cols on LG+) */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Admin Web Password Change */}
+          <div className="glass-panel p-5 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Key className="w-4 h-4 text-purple-400" />
+                <h3 className="text-sm font-semibold text-white">
+                  修改面板管理员密码
+                </h3>
+              </div>
+              <Badge variant="neutral" size="sm">
+                Web 访问认证
+              </Badge>
+            </div>
 
-          <div className="space-y-3">
-            <p className="text-xs text-slate-400 leading-relaxed">
-              切换模式将停止正在运行的 sing-box 内核并释放 TUN 网卡资源。
-            </p>
+            <div className="space-y-4">
+              <Input
+                type="password"
+                label="当前旧密码"
+                placeholder="输入旧密码..."
+                value={oldWebPassword}
+                onChange={(e) => setOldWebPassword(e.target.value)}
+                icon={<Lock className="w-4 h-4" />}
+              />
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              <button
-                type="button"
-                disabled={switchingMode}
-                onClick={() => handleSwitchMode("simple")}
-                className={`p-4 rounded-xl border text-left transition-all ${
-                  systemInfo?.app_mode === "simple"
-                    ? "border-sky-500 bg-sky-500/10 shadow-md shadow-sky-500/10"
-                    : "border-slate-800 bg-slate-900/40 hover:border-slate-700"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm font-bold text-white">小白模式</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Input
+                    type="password"
+                    label="设置新密码"
+                    placeholder="输入新密码..."
+                    value={newWebPassword}
+                    onChange={(e) => setNewWebPassword(e.target.value)}
+                    icon={<Key className="w-4 h-4" />}
+                  />
+                  {newWebPassword && (
+                    <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-400">
+                      <span>安全强度:</span>
+                      <div className="flex-1 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-full ${strength.color} transition-all duration-300`}
+                          style={{
+                            width: `${(strength.score / 3) * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="font-medium text-slate-300">
+                        {strength.label}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  4 种傻瓜策略，一键切换
-                </p>
-              </button>
 
-              <button
-                type="button"
-                disabled={switchingMode}
-                onClick={() => handleSwitchMode("expert")}
-                className={`p-4 rounded-xl border text-left transition-all ${
-                  systemInfo?.app_mode === "expert"
-                    ? "border-sky-500 bg-sky-500/10 shadow-md shadow-sky-500/10"
-                    : "border-slate-800 bg-slate-900/40 hover:border-slate-700"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-sky-400" />
-                  <span className="text-sm font-bold text-white">专业模式</span>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  完整平台配置文件与订阅中心
+                <Input
+                  type="password"
+                  label="确认新密码"
+                  placeholder="再次输入新密码..."
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  icon={<Key className="w-4 h-4" />}
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-between">
+                <p className="text-[11px] text-slate-500">
+                  修改后将立即在当前服务会话生效，请牢记您的新管理密码。
                 </p>
-              </button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  loading={savingWebPassword}
+                  onClick={handleSaveWebPassword}
+                  icon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                >
+                  确认修改密码
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Sudo Password Settings */}
-        <div className="glass-panel p-5 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-amber-400" />
-              <h3 className="text-sm font-semibold text-white">
-                系统提权密码 (Sudo)
-              </h3>
+          {/* Web Console Preferences */}
+          <div className="glass-panel p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-sky-400" />
+                <h3 className="text-sm font-semibold text-white">
+                  控制台偏好设置
+                </h3>
+              </div>
+              <Badge variant="neutral" size="sm">
+                本地偏好
+              </Badge>
             </div>
-            <Badge
-              variant={systemInfo?.sudo_configured ? "success" : "neutral"}
-              dot
-              size="sm"
-            >
-              {systemInfo?.sudo_configured ? "会话已授权" : "未授权"}
-            </Badge>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/40 border border-slate-800">
+                <div>
+                  <span className="text-xs font-medium text-slate-200 block">
+                    内核实时日志刷新频率
+                  </span>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    控制后台日志轮询时间间隔，平衡性能与实时性
+                  </p>
+                </div>
+                <select
+                  value={logInterval}
+                  onChange={(e) => setLogInterval(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="1000">1 秒 (高频实时)</option>
+                  <option value="3000">3 秒 (默认平衡)</option>
+                  <option value="5000">5 秒 (省资源)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/40 border border-slate-800">
+                <div>
+                  <span className="text-xs font-medium text-slate-200 block">
+                    节点测速请求超时 (Timeout)
+                  </span>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    测速探测时的最大等待上限
+                  </p>
+                </div>
+                <select
+                  value={testTimeout}
+                  onChange={(e) => setTestTimeout(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="2000">2000 ms (激进)</option>
+                  <option value="3000">3000 ms (默认)</option>
+                  <option value="5000">5000 ms (宽松)</option>
+                </select>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Linux / macOS 平台配置 TUN 虚拟网卡与清理系统外部冲突需要 root 权限。Subout 采用安全的会话提权机制，密码仅在内存中缓存（重启或退出后自动失效），绝不写入磁盘数据库。
-            </p>
+          {/* Maintenance & Diagnostics */}
+          <div className="glass-panel p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-semibold text-white">
+                  维护与诊断工具
+                </h3>
+              </div>
+              <Badge variant="neutral" size="sm">
+                系统排障
+              </Badge>
+            </div>
 
-            <Input
-              type="password"
-              placeholder="输入当前主机 sudo 密码..."
-              value={sudoPassword}
-              onChange={(e) => setSudoPassword(e.target.value)}
-            />
-
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-lg bg-slate-800/30 border border-slate-800">
+              <div className="text-xs text-slate-400">
+                <span className="text-slate-200 font-medium block">
+                  导出系统诊断与环境摘要
+                </span>
+                <span>包含宿主环境、网络拓扑参数与系统日志快照</span>
+              </div>
               <Button
                 variant="secondary"
                 size="sm"
-                loading={savingSudo}
-                onClick={handleSaveSudo}
+                onClick={handleExportDiagnostics}
+                icon={<Download className="w-3.5 h-3.5" />}
               >
-                验证并设置会话授权
+                导出诊断报告
               </Button>
-              {systemInfo?.sudo_configured && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  loading={savingSudo}
-                  onClick={handleClearSudo}
-                  className="text-slate-400 hover:text-rose-400"
-                >
-                  清除当前授权
-                </Button>
-              )}
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Admin Web Password Change */}
-      <div className="glass-panel p-5 space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-          <Key className="w-4 h-4 text-purple-400" />
-          <h3 className="text-sm font-semibold text-white">
-            修改面板管理员密码
-          </h3>
-        </div>
+        {/* Right Column: Host Status & Environmental Intelligence (5 cols on LG+) */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Host Environment Info Card */}
+          <div className="glass-panel p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <HardDrive className="w-4 h-4 text-slate-400" />
+                <h3 className="text-sm font-semibold text-white">
+                  主机环境状态
+                </h3>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onRefreshSystemInfo}
+                icon={<RefreshCw className="w-3.5 h-3.5" />}
+                title="刷新系统信息"
+              >
+                刷新
+              </Button>
+            </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            type="password"
-            label="当前旧密码"
-            placeholder="输入旧密码..."
-            value={oldWebPassword}
-            onChange={(e) => setOldWebPassword(e.target.value)}
-          />
-          <Input
-            type="password"
-            label="设置新密码"
-            placeholder="输入新密码..."
-            value={newWebPassword}
-            onChange={(e) => setNewWebPassword(e.target.value)}
-          />
-        </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">宿主系统</span>
+                <span className="font-semibold text-slate-200 uppercase mt-1 block">
+                  {systemInfo?.host_os} ({systemInfo?.host_arch})
+                </span>
+              </div>
 
-        <Button
-          variant="primary"
-          size="sm"
-          loading={savingWebPassword}
-          onClick={handleSaveWebPassword}
-        >
-          确认修改密码
-        </Button>
-      </div>
+              <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">权限运行状态</span>
+                <span
+                  className={`font-semibold mt-1 block ${
+                    isRoot || sudoConfigured
+                      ? "text-emerald-400"
+                      : "text-amber-400"
+                  }`}
+                >
+                  {isRoot
+                    ? "Root 超级管理员"
+                    : sudoConfigured
+                      ? "管理员 (永久有效)"
+                      : "普通用户 (受限)"}
+                </span>
+              </div>
 
-      {/* Host Environment Info Card */}
-      <div className="glass-panel p-5 space-y-3">
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-          <HardDrive className="w-4 h-4 text-slate-400" />
-          <h3 className="text-sm font-semibold text-white">主机环境状态</h3>
-        </div>
+              <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">
+                  默认 TUN 协议栈
+                </span>
+                <span className="font-mono text-slate-200 mt-1 block">
+                  {systemInfo?.default_tun_stack || "system"}
+                </span>
+              </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-          <div>
-            <span className="text-slate-500 block">宿主系统</span>
-            <span className="font-semibold text-slate-200 uppercase">
-              {systemInfo?.host_os} ({systemInfo?.host_arch})
-            </span>
+              <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
+                <span className="text-slate-500 block text-[11px]">
+                  当前运行配置 ID
+                </span>
+                <span className="font-mono text-sky-400 mt-1 block">
+                  {systemInfo?.running_config_id
+                    ? `#${systemInfo.running_config_id}`
+                    : "无"}
+                </span>
+              </div>
+            </div>
           </div>
-          <div>
-            <span className="text-slate-500 block">默认 TUN 协议栈</span>
-            <span className="font-mono text-slate-200">
-              {systemInfo?.default_tun_stack || "system"}
-            </span>
+
+          {/* Sudo Privilege Management Card */}
+          <div className="glass-panel p-5 space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+              <Shield className="w-4 h-4 text-sky-400" />
+              <h3 className="text-sm font-semibold text-white">
+                系统特权与 Sudo 策略
+              </h3>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-3.5 rounded-lg bg-slate-800/40 border border-slate-800 space-y-2">
+                <div className="flex items-center gap-2">
+                  {isRoot ? (
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  ) : sudoConfigured ? (
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <ShieldAlert className="w-4 h-4 text-amber-400" />
+                  )}
+                  <span className="font-medium text-slate-200">
+                    {isRoot
+                      ? "当前程序拥有全局 Root 特权"
+                      : sudoConfigured
+                        ? "已持久化配置 Sudo 提权密码"
+                        : "尚未配置永久提权密码"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  在 Linux 与 macOS 宿主中，启动 TUN 虚拟网卡设备或配置全局系统代理均需系统管理员权限。
+                  您可随时在顶部控制栏点击特权按钮进行配置或临时授权。
+                </p>
+              </div>
+            </div>
           </div>
-          <div>
-            <span className="text-slate-500 block">运行形态</span>
-            <span className="text-slate-200">
-              {systemInfo?.portable_mode
-                ? "便携模式 (Portable)"
-                : "系统服务安装模式"}
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-500 block">当前运行配置 ID</span>
-            <span className="font-mono text-sky-400">
-              {systemInfo?.running_config_id
-                ? `#${systemInfo.running_config_id}`
-                : "无"}
-            </span>
+
+          {/* About Subout Core */}
+          <div className="glass-panel p-5 space-y-3">
+            <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+              <Info className="w-4 h-4 text-slate-400" />
+              <h3 className="text-sm font-semibold text-white">关于 Subout</h3>
+            </div>
+
+            <div className="space-y-2 text-xs text-slate-400">
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span>控制台版本</span>
+                <span className="font-mono text-slate-200">v0.3.0</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span>内核引擎</span>
+                <span className="font-mono text-slate-200">sing-box 1.14+</span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span>分流机制</span>
+                <span className="text-slate-200">Rule-Set 内存级路由</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

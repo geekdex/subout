@@ -172,9 +172,9 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Top action header */}
-      <div className="glass-panel p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Layers className="w-5 h-5 text-sky-400" />
@@ -191,6 +191,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
           size="md"
           onClick={() => setCreateModalOpen(true)}
           icon={<Plus className="w-4 h-4" />}
+          className="w-full sm:w-auto"
         >
           新建配置
         </Button>
