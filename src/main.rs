@@ -47,18 +47,18 @@ fn parse_args() -> Result<CliArgs, String> {
             "-v" | "--verbose" => {
                 verbose = true;
             }
-            "-s" => {
+            "-s" | "--source" => {
                 if let Some(s) = args_iter.next() {
                     source = Some(s);
                 } else {
-                    return Err("Error: Parameter '-s' requires a value.".to_string());
+                    return Err("Error: Parameter '-s' / '--source' requires a value.".to_string());
                 }
             }
-            "-o" => {
+            "-o" | "--output" => {
                 if let Some(o) = args_iter.next() {
                     output = Some(o);
                 } else {
-                    return Err("Error: Parameter '-o' requires a value.".to_string());
+                    return Err("Error: Parameter '-o' / '--output' requires a value.".to_string());
                 }
             }
             "-p" | "--port" => {
@@ -156,12 +156,12 @@ fn print_help() {
 
 Usage:
   subout -s <source> -o <output> [options]   Run CLI to export outbounds configuration.
-  subout web [options]                       Start the web configuration management panel.
+  subout [web] [options]                     Start the web configuration management panel (default).
   subout -h | --help                         Show this help menu.
 
 Required Parameters (CLI mode):
-  -s <source>           Original subscription link (HTTP/HTTPS URL), file path, or raw base64/plaintext content.
-  -o <output>           Output file path where the generated sing-box configuration will be saved.
+  -s, --source <source> Original subscription link (HTTP/HTTPS URL), file path, or raw base64/plaintext content.
+  -o, --output <output> Output file path where the generated sing-box configuration will be saved.
 
 Options:
   -v, --verbose         Show verbose execution logs and optimization recommendations.
@@ -171,7 +171,7 @@ Options:
   --log-dir <dir>       Set custom log directory.
   --runtime-dir <dir>   Set custom runtime temporary data directory.
   --portable            Run in portable mode (uses ./data, ./config, ./logs, ./run).
-  --kernel-path <path>  Set custom sing-box binary path.
+  --kernel-path <path>  Set custom sing-box binary path (alias: --singbox-path).
   -h, --help            Show this help menu."
     );
 }
