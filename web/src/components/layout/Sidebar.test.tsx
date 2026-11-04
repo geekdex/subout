@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
@@ -188,7 +188,89 @@ describe('Sidebar & Header with numeric version_code', () => {
 
     const menuBtn = screen.getByLabelText('打开菜单');
     expect(menuBtn).toBeDefined();
+    expect(menuBtn.getAttribute('aria-expanded')).toBe('false');
     menuBtn.click();
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('Header reflects isMobileMenuOpen with aria-expanded and active styling', () => {
+    render(
+      <Header
+        systemInfo={null}
+        serviceStatus={null}
+        runningProfile={null}
+        actionLoading={false}
+        onStartService={vi.fn()}
+        onStopService={vi.fn()}
+        onRestartService={vi.fn()}
+        onToggleSystemProxy={vi.fn()}
+        onSwitchMode={vi.fn()}
+        onLogout={vi.fn()}
+        onToggleMobileMenu={vi.fn()}
+        isMobileMenuOpen={true}
+      />
+    );
+
+    const menuBtn = screen.getByLabelText('打开菜单');
+    expect(menuBtn.getAttribute('aria-expanded')).toBe('true');
+    expect(menuBtn.getAttribute('title')).toBe('关闭菜单');
+  });
+
+  it('Sidebar locks body scroll when open and handles Escape key to close', () => {
+    const onCloseMobile = vi.fn();
+    const { unmount } = render(
+      <Sidebar
+        currentTab="dashboard"
+        onSelectTab={vi.fn()}
+        isKernelReady={true}
+        appMode="simple"
+        mobileOpen={true}
+        onCloseMobile={onCloseMobile}
+      />
+    );
+
+    expect(document.body.style.overflow).toBe('hidden');
+
+    // Trigger Escape
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
+
+    // Body overflow restored on unmount
+    unmount();
+    expect(document.body.style.overflow).toBe('');
+  });
+
+  it('Sidebar triggers onCloseMobile on swipe-left touch gesture', () => {
+    const onCloseMobile = vi.fn();
+    render(
+      <Sidebar
+        currentTab="dashboard"
+        onSelectTab={vi.fn()}
+        isKernelReady={true}
+        appMode="simple"
+        mobileOpen={true}
+        onCloseMobile={onCloseMobile}
+      />
+    );
+
+    const drawerDialog = screen.getByRole('dialog', { name: '导航菜单' });
+    expect(drawerDialog).toBeDefined();
+
+    // The drawer panel is the second child inside the dialog
+    const panel = drawerDialog.children[1];
+    expect(panel).toBeDefined();
+
+    // Simulate swipe left (startX: 200, endX: 100 -> deltaX = -100)
+    fireEvent.touchStart(panel, {
+      touches: [{ clientX: 200, clientY: 100 }],
+    });
+    fireEvent.touchMove(panel, {
+      touches: [{ clientX: 100, clientY: 100 }],
+    });
+    fireEvent.touchEnd(panel, {
+      changedTouches: [{ clientX: 100, clientY: 100 }],
+    });
+
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
   });
 });

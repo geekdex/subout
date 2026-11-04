@@ -1,4 +1,5 @@
 import React from "react";
+import { clsx } from "clsx";
 import {
   Play,
   Square,
@@ -29,6 +30,7 @@ interface HeaderProps {
   onLogout: () => void;
   onOpenSudoSettings?: () => void;
   onToggleMobileMenu?: () => void;
+  isMobileMenuOpen?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenSudoSettings,
   onToggleMobileMenu,
+  isMobileMenuOpen,
 }) => {
   const isRunning = serviceStatus?.running ?? false;
   const isReady = serviceStatus?.ready ?? false;
@@ -62,11 +65,17 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onToggleMobileMenu}
-            className="lg:hidden p-2 -ml-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+            className={clsx(
+              "lg:hidden w-9 h-9 -ml-1 flex items-center justify-center rounded-xl border transition-all active:scale-90 shrink-0",
+              isMobileMenuOpen
+                ? "bg-sky-500/20 text-sky-400 border-sky-500/40 shadow-sm shadow-sky-500/10"
+                : "bg-slate-800/60 text-slate-300 hover:text-white hover:bg-slate-800 border-slate-700/60",
+            )}
             aria-label="打开菜单"
-            title="打开菜单"
+            aria-expanded={isMobileMenuOpen ?? false}
+            title={isMobileMenuOpen ? "关闭菜单" : "打开菜单"}
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-5 h-5 transition-transform duration-200" />
           </button>
         )}
 

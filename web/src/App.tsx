@@ -252,6 +252,7 @@ const AppContent: React.FC = () => {
           }}
           onOpenSudoSettings={() => setSudoSettingsModalOpen(true)}
           onToggleMobileMenu={() => setMobileMenuOpen((prev) => !prev)}
+          isMobileMenuOpen={mobileMenuOpen}
         />
 
         {/* Scrollable Main Content */}

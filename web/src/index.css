@@ -41,3 +41,12 @@
 .animate-pulse-subtle {
   animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Safe area padding utilities for mobile notches & home indicator */
+.pt-safe {
+  padding-top: max(1.25rem, env(safe-area-inset-top, 1.25rem));
+}
+
+.pb-safe {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 1.25rem));
+}
