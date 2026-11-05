@@ -477,11 +477,16 @@ pub fn delete_setting(conn: &Connection, key: &str) -> Result<()> {
 }
 
 pub fn get_subscriptions(conn: &Connection) -> Result<Vec<Subscription>> {
-    let mut stmt = conn.prepare("SELECT id, url, label, enabled, last_fetched, last_error, filter_keywords, delete_on_update, upload, download, total, expire FROM subscriptions")?;
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.url, s.label, s.enabled, s.last_fetched, s.last_error, s.filter_keywords, s.delete_on_update, s.upload, s.download, s.total, s.expire,
+                (SELECT COUNT(*) FROM nodes n WHERE n.subscription_id = s.id) AS node_count
+         FROM subscriptions s",
+    )?;
     let subs = stmt
         .query_map([], |row| {
             let enabled_int: i32 = row.get(3)?;
             let delete_on_update_int: Option<i32> = row.get(7)?;
+            let node_count: Option<i64> = row.get(12)?;
             Ok(Subscription {
                 id: row.get(0)?,
                 url: row.get(1)?,
@@ -495,10 +500,114 @@ pub fn get_subscriptions(conn: &Connection) -> Result<Vec<Subscription>> {
                 download: row.get(9)?,
                 total: row.get(10)?,
                 expire: row.get(11)?,
+                node_count,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(subs)
+}
+
+pub fn get_subscription_by_id(conn: &Connection, id: i64) -> Result<Option<Subscription>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.url, s.label, s.enabled, s.last_fetched, s.last_error, s.filter_keywords, s.delete_on_update, s.upload, s.download, s.total, s.expire,
+                (SELECT COUNT(*) FROM nodes n WHERE n.subscription_id = s.id) AS node_count
+         FROM subscriptions s
+         WHERE s.id = ?",
+    )?;
+    let sub = stmt
+        .query_row([id], |row| {
+            let enabled_int: i32 = row.get(3)?;
+            let delete_on_update_int: Option<i32> = row.get(7)?;
+            let node_count: Option<i64> = row.get(12)?;
+            Ok(Subscription {
+                id: row.get(0)?,
+                url: row.get(1)?,
+                label: row.get(2)?,
+                enabled: enabled_int != 0,
+                last_fetched: row.get(4)?,
+                last_error: row.get(5)?,
+                filter_keywords: row.get(6)?,
+                delete_on_update: Some(delete_on_update_int.unwrap_or(1) != 0),
+                upload: row.get(8)?,
+                download: row.get(9)?,
+                total: row.get(10)?,
+                expire: row.get(11)?,
+                node_count,
+            })
+        })
+        .optional()?;
+    Ok(sub)
+}
+
+pub fn set_subscription_enabled(conn: &Connection, id: i64, enabled: bool) -> Result<()> {
+    let enabled_int = i32::from(enabled);
+    conn.execute(
+        "UPDATE subscriptions SET enabled = ? WHERE id = ?",
+        params![enabled_int, id],
+    )?;
+    Ok(())
+}
+
+pub fn clear_subscription_nodes_and_groups(
+    conn: &Connection,
+    sub_id: i64,
+) -> Result<(usize, usize)> {
+    // 1. Collect all node tags belonging to this subscription
+    let mut stmt = conn.prepare("SELECT tag FROM nodes WHERE subscription_id = ?")?;
+    let node_tags: Vec<String> = stmt
+        .query_map([sub_id], |r| r.get(0))?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    let deleted_nodes_count = node_tags.len();
+
+    // 2. Delete nodes belonging to this subscription
+    conn.execute("DELETE FROM nodes WHERE subscription_id = ?", [sub_id])?;
+
+    // 3. Clean up outbound_groups (Node Groups)
+    let groups = get_outbound_groups(conn)?;
+    let mut updated_groups_count = 0;
+
+    for group in groups {
+        let is_dynamic = {
+            let nt = group.node_types.as_deref().unwrap_or("all");
+            let sub = group.subscriptions.as_deref().unwrap_or("all");
+            let inc = group.include_keywords.as_deref().unwrap_or("");
+            let exc = group.exclude_keywords.as_deref().unwrap_or("");
+            nt != "all" || sub != "all" || !inc.trim().is_empty() || !exc.trim().is_empty()
+        };
+
+        if is_dynamic {
+            let resolved = resolve_group_nodes(conn, &group)?;
+            let resolved_json = serde_json::to_string(&resolved)?;
+            if group.static_nodes.as_deref() != Some(&resolved_json) {
+                conn.execute(
+                    "UPDATE outbound_groups SET static_nodes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                    params![resolved_json, group.id],
+                )?;
+                updated_groups_count += 1;
+            }
+        } else if let Some(static_nodes_str) = group.static_nodes.as_deref()
+            && let Ok(mut static_list) = serde_json::from_str::<Vec<String>>(static_nodes_str)
+        {
+            let initial_len = static_list.len();
+            static_list.retain(|t| !node_tags.contains(t));
+            if static_list.len() != initial_len {
+                let updated_json = serde_json::to_string(&static_list)?;
+                conn.execute(
+                    "UPDATE outbound_groups SET static_nodes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                    params![updated_json, group.id],
+                )?;
+                updated_groups_count += 1;
+            }
+        }
+    }
+
+    // 4. Update versionCode if any nodes were deleted or groups updated
+    if deleted_nodes_count > 0 || updated_groups_count > 0 {
+        let _ = refresh_node_group_version_code(conn)?;
+    }
+
+    Ok((deleted_nodes_count, updated_groups_count))
 }
 
 pub fn add_subscription(
@@ -535,8 +644,8 @@ pub fn update_subscription(
 }
 
 pub fn delete_subscription(conn: &Connection, id: i64) -> Result<()> {
+    let _ = clear_subscription_nodes_and_groups(conn, id)?;
     conn.execute("DELETE FROM subscriptions WHERE id = ?", [id])?;
-    conn.execute("DELETE FROM nodes WHERE subscription_id = ?", [id])?;
     Ok(())
 }
 
@@ -1672,5 +1781,141 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_subscription_toggle_and_clear_nodes_and_groups() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        // 1. Add subscription
+        let sub_id =
+            add_subscription(&conn, "https://example.com/sub", "测试机场", "[]", true).unwrap();
+
+        // 2. Add nodes belonging to this subscription
+        save_node(
+            &conn,
+            Some(sub_id),
+            "hk-01",
+            "vless",
+            "1.1.1.1",
+            443,
+            "{}",
+            true,
+            false,
+        )
+        .unwrap();
+        save_node(
+            &conn,
+            Some(sub_id),
+            "jp-01",
+            "vless",
+            "1.1.1.2",
+            443,
+            "{}",
+            true,
+            false,
+        )
+        .unwrap();
+
+        // 3. Add custom node not belonging to any subscription
+        save_node(
+            &conn, None, "my-vps", "ss", "2.2.2.2", 8388, "{}", true, true,
+        )
+        .unwrap();
+
+        // 4. Create static outbound group containing sub nodes and custom node
+        save_outbound_group(
+            &conn,
+            "manual-group",
+            "selector",
+            None,
+            None,
+            None,
+            Some(r#"["hk-01", "my-vps"]"#),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // 5. Create dynamic outbound group bound to this subscription
+        save_outbound_group(
+            &conn,
+            "dynamic-sub-group",
+            "urltest",
+            Some("http://cp.cloudflare.com/generate_204"),
+            Some("3m"),
+            Some(50),
+            Some(r#"["hk-01", "jp-01"]"#),
+            Some("node"),
+            Some(&sub_id.to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Check subscription initial state
+        let subs = get_subscriptions(&conn).unwrap();
+        let target_sub = subs.iter().find(|s| s.id == sub_id).unwrap();
+        assert!(target_sub.enabled);
+        assert_eq!(target_sub.node_count, Some(2));
+
+        let initial_vcode = get_node_group_version_code(&conn).unwrap();
+
+        // Record initial config content to ensure configs are untouched
+        let running_cfg = get_running_config_profile(&conn).unwrap().unwrap();
+        let initial_cfg_content = running_cfg.content.clone();
+
+        // 6. Disable subscription and clear nodes and groups
+        set_subscription_enabled(&conn, sub_id, false).unwrap();
+        let (nodes_deleted, groups_updated) =
+            clear_subscription_nodes_and_groups(&conn, sub_id).unwrap();
+
+        assert_eq!(nodes_deleted, 2);
+        assert!(groups_updated >= 1);
+
+        // Verify sub state
+        let sub_after = get_subscription_by_id(&conn, sub_id).unwrap().unwrap();
+        assert!(!sub_after.enabled);
+        assert_eq!(sub_after.node_count, Some(0));
+
+        // Verify nodes table
+        let remaining_nodes = get_nodes(&conn).unwrap();
+        assert_eq!(remaining_nodes.len(), 1);
+        assert_eq!(remaining_nodes[0].tag, "my-vps");
+
+        // Verify manual group static_nodes has hk-01 removed
+        let groups_after = get_outbound_groups(&conn).unwrap();
+        let manual_g = groups_after
+            .iter()
+            .find(|g| g.tag == "manual-group")
+            .unwrap();
+        let manual_tags: Vec<String> =
+            serde_json::from_str(manual_g.static_nodes.as_deref().unwrap()).unwrap();
+        assert_eq!(manual_tags, vec!["my-vps"]);
+
+        // Verify dynamic group static_nodes resolved to empty
+        let dynamic_g = groups_after
+            .iter()
+            .find(|g| g.tag == "dynamic-sub-group")
+            .unwrap();
+        let dynamic_tags: Vec<String> =
+            serde_json::from_str(dynamic_g.static_nodes.as_deref().unwrap()).unwrap();
+        assert!(dynamic_tags.is_empty());
+
+        // Verify versionCode refreshed
+        let new_vcode = get_node_group_version_code(&conn).unwrap();
+        assert!(new_vcode >= initial_vcode);
+
+        // Verify config content is completely unaffected
+        let running_cfg_after = get_running_config_profile(&conn).unwrap().unwrap();
+        assert_eq!(running_cfg_after.content, initial_cfg_content);
+
+        // 7. Re-enable subscription
+        set_subscription_enabled(&conn, sub_id, true).unwrap();
+        let sub_re_enabled = get_subscription_by_id(&conn, sub_id).unwrap().unwrap();
+        assert!(sub_re_enabled.enabled);
     }
 }

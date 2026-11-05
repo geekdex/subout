@@ -14,6 +14,8 @@ pub struct Subscription {
     pub download: Option<i64>,
     pub total: Option<i64>,
     pub expire: Option<i64>,
+    #[serde(default)]
+    pub node_count: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -17,6 +17,23 @@ pub struct SubRequest {
     pub filter_keywords: Option<String>,
     pub enabled: Option<bool>,
     pub delete_on_update: Option<bool>,
+    pub clear_nodes_and_groups: Option<bool>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ToggleSubscriptionRequest {
+    pub enabled: bool,
+    #[serde(default)]
+    pub clear_nodes_and_groups: bool,
+}
+
+#[derive(Serialize)]
+pub struct ToggleSubscriptionResponse {
+    pub success: bool,
+    pub enabled: bool,
+    pub nodes_cleared: usize,
+    pub groups_updated: usize,
+    pub message: String,
 }
 
 pub async fn get_subscriptions(
@@ -63,6 +80,7 @@ pub async fn add_subscription(
         download: None,
         total: None,
         expire: None,
+        node_count: Some(0),
     };
     Ok(Json(sub))
 }
@@ -78,13 +96,19 @@ pub async fn update_subscription(
 
     let kws = payload.filter_keywords.unwrap_or_else(|| "[]".to_string());
     let delete_on_update = payload.delete_on_update.unwrap_or(true);
+    let enabled_val = payload.enabled.unwrap_or(true);
+
+    if !enabled_val && payload.clear_nodes_and_groups == Some(true) {
+        let _ = db::clear_subscription_nodes_and_groups(&conn, id);
+    }
+
     db::update_subscription(
         &conn,
         id,
         &payload.url,
         &payload.label,
         &kws,
-        payload.enabled.unwrap_or(true),
+        enabled_val,
         delete_on_update,
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -98,6 +122,95 @@ pub async fn update_subscription(
     );
 
     Ok(StatusCode::OK)
+}
+
+pub async fn toggle_subscription(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(payload): Json<ToggleSubscriptionRequest>,
+) -> Result<Json<ToggleSubscriptionResponse>, (StatusCode, Json<serde_json::Value>)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, Json(serde_json::json!({ "error": "未授权" }))))?;
+    let conn = get_db_conn(&state.db_path).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "数据库连接失败" })),
+        )
+    })?;
+
+    let sub = db::get_subscription_by_id(&conn, id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("查询订阅失败: {e}") })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "订阅不存在" })),
+            )
+        })?;
+
+    let (nodes_cleared, groups_updated) = if !payload.enabled && payload.clear_nodes_and_groups {
+        db::clear_subscription_nodes_and_groups(&conn, id).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("清空节点与节点组合失败: {e}") })),
+            )
+        })?
+    } else {
+        (0, 0)
+    };
+
+    db::set_subscription_enabled(&conn, id, payload.enabled).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("更新订阅状态失败: {e}") })),
+        )
+    })?;
+
+    let action_str = if payload.enabled {
+        "开启订阅"
+    } else if payload.clear_nodes_and_groups {
+        "关闭订阅(同步清空节点和组合)"
+    } else {
+        "关闭订阅"
+    };
+
+    let detail = if payload.enabled {
+        format!("开启订阅源: {}", sub.label)
+    } else if payload.clear_nodes_and_groups {
+        format!(
+            "关闭订阅源: {}，已清空 {} 个节点，更新 {} 个节点组合",
+            sub.label, nodes_cleared, groups_updated
+        )
+    } else {
+        format!("关闭订阅源: {}", sub.label)
+    };
+
+    let _ = db::log_history(&conn, "订阅管理", action_str, &detail, None);
+
+    let message = if payload.enabled {
+        format!("订阅源 '{}' 已成功开启", sub.label)
+    } else if payload.clear_nodes_and_groups {
+        format!(
+            "订阅源 '{}' 已关闭，已清空 {} 个关联节点并更新 {} 个节点组合",
+            sub.label, nodes_cleared, groups_updated
+        )
+    } else {
+        format!("订阅源 '{}' 已关闭", sub.label)
+    };
+
+    Ok(Json(ToggleSubscriptionResponse {
+        success: true,
+        enabled: payload.enabled,
+        nodes_cleared,
+        groups_updated,
+        message,
+    }))
 }
 
 pub async fn delete_subscription(
@@ -145,8 +258,8 @@ pub async fn batch_delete_subscriptions(
         }) {
             labels.push(l);
         }
+        let _ = db::clear_subscription_nodes_and_groups(&tx, *id);
         let _ = tx.execute("DELETE FROM subscriptions WHERE id = ?", [id]);
-        let _ = tx.execute("DELETE FROM nodes WHERE subscription_id = ?", [id]);
     }
     tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -200,6 +313,27 @@ pub async fn fetch_single_subscription(
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
+
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+    let sub = db::get_subscription_by_id(&conn, id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("查询订阅失败: {e}"),
+            )
+        })?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "订阅不存在".to_string()))?;
+
+    if !sub.enabled {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "订阅源 '{}' 当前处于已禁用状态，请先开启订阅后再进行同步拉取",
+                sub.label
+            ),
+        ));
+    }
+    drop(conn);
 
     fetcher::fetch_and_update_subscription(&state.db_path, id)
         .await
@@ -257,5 +391,18 @@ mod tests {
         assert!(req.is_err());
         let err_msg = req.unwrap_err().to_string();
         assert!(err_msg.contains("duplicate field `label`"));
+    }
+
+    #[test]
+    fn test_toggle_subscription_request_deserialization() {
+        let json_enable = r#"{"enabled":true}"#;
+        let req1: ToggleSubscriptionRequest = serde_json::from_str(json_enable).unwrap();
+        assert!(req1.enabled);
+        assert!(!req1.clear_nodes_and_groups);
+
+        let json_disable = r#"{"enabled":false,"clear_nodes_and_groups":true}"#;
+        let req2: ToggleSubscriptionRequest = serde_json::from_str(json_disable).unwrap();
+        assert!(!req2.enabled);
+        assert!(req2.clear_nodes_and_groups);
     }
 }

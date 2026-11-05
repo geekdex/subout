@@ -163,6 +163,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             put(subscriptions::update_subscription).delete(subscriptions::delete_subscription),
         )
         .route(
+            "/api/subscriptions/:id/toggle",
+            post(subscriptions::toggle_subscription),
+        )
+        .route(
             "/api/subscriptions/batch-delete",
             post(subscriptions::batch_delete_subscriptions),
         )

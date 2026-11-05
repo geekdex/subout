@@ -30,6 +30,7 @@ pub async fn fetch_and_update_subscription(db_path: &str, sub_id: i64) -> Result
                     download: row.get(9)?,
                     total: row.get(10)?,
                     expire: row.get(11)?,
+                    node_count: None,
                 })
             },
         )?;

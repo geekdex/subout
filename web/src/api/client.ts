@@ -184,7 +184,7 @@ export const api = {
     const hasConflict = Boolean(raw.has_conflict);
     const conflictType = (raw.conflict_type as string) || "running_processes";
     const canAuto = Boolean(
-      raw.can_auto_takeover ?? (conflictType === "running_processes"),
+      raw.can_auto_takeover ?? conflictType === "running_processes",
     );
     return {
       has_conflict: hasConflict,
@@ -207,7 +207,8 @@ export const api = {
     const cleanPayload = {
       start_after_takeover: payload?.start_after_takeover ?? false,
       sudo_pass:
-        typeof payload?.sudo_pass === "string" && payload.sudo_pass.trim().length > 0
+        typeof payload?.sudo_pass === "string" &&
+        payload.sudo_pass.trim().length > 0
           ? payload.sudo_pass.trim()
           : undefined,
     };
@@ -259,7 +260,9 @@ export const api = {
       }),
     });
   },
-  async setSudoPassword(password: string): Promise<{ success: boolean; message?: string }> {
+  async setSudoPassword(
+    password: string,
+  ): Promise<{ success: boolean; message?: string }> {
     return request("/api/settings/sudo", {
       method: "POST",
       body: JSON.stringify({ sudo_pass: password }),
@@ -386,9 +389,16 @@ export const api = {
 
   // Nodes
   async listNodes(): Promise<NodeItem[]> {
-    const res = await request<Record<string, unknown> | NodeItem[]>("/api/nodes?limit=10000");
+    const res = await request<Record<string, unknown> | NodeItem[]>(
+      "/api/nodes?limit=10000",
+    );
     if (Array.isArray(res)) return res;
-    if (res && typeof res === "object" && "nodes" in res && Array.isArray(res.nodes)) {
+    if (
+      res &&
+      typeof res === "object" &&
+      "nodes" in res &&
+      Array.isArray(res.nodes)
+    ) {
       return res.nodes as NodeItem[];
     }
     return [];
@@ -416,13 +426,16 @@ export const api = {
     try {
       return await request(`/api/nodes/${nodeId}/test`, { method: "POST" });
     } catch {
-      const res = await request<Array<{ id: number; tcp_latency?: number | null; latency?: number | null }>>(
-        "/api/nodes/ping",
-        {
-          method: "POST",
-          body: JSON.stringify({ ids: [nodeId], test_type: "tcp" }),
-        },
-      );
+      const res = await request<
+        Array<{
+          id: number;
+          tcp_latency?: number | null;
+          latency?: number | null;
+        }>
+      >("/api/nodes/ping", {
+        method: "POST",
+        body: JSON.stringify({ ids: [nodeId], test_type: "tcp" }),
+      });
       const first = res?.[0];
       return { latency_ms: first?.tcp_latency ?? first?.latency ?? null };
     }
@@ -461,7 +474,7 @@ export const api = {
   },
   async updateSubscription(
     id: number,
-    payload: Partial<Subscription>,
+    payload: Partial<Subscription> & { clear_nodes_and_groups?: boolean },
   ): Promise<Subscription> {
     const label = payload.label || payload.name;
     const body: Record<string, unknown> = {
@@ -469,11 +482,31 @@ export const api = {
       url: payload.url,
     };
     if (payload.enabled !== undefined) body.enabled = payload.enabled;
-    if (payload.filter_keywords !== undefined) body.filter_keywords = payload.filter_keywords;
-    if (payload.delete_on_update !== undefined) body.delete_on_update = payload.delete_on_update;
+    if (payload.filter_keywords !== undefined)
+      body.filter_keywords = payload.filter_keywords;
+    if (payload.delete_on_update !== undefined)
+      body.delete_on_update = payload.delete_on_update;
+    if (payload.clear_nodes_and_groups !== undefined) {
+      body.clear_nodes_and_groups = payload.clear_nodes_and_groups;
+    }
     return request<Subscription>(`/api/subscriptions/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
+    });
+  },
+  async toggleSubscription(
+    id: number,
+    payload: { enabled: boolean; clear_nodes_and_groups?: boolean },
+  ): Promise<{
+    success: boolean;
+    enabled: boolean;
+    nodes_cleared: number;
+    groups_updated: number;
+    message: string;
+  }> {
+    return request(`/api/subscriptions/${id}/toggle`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
   async deleteSubscription(id: number): Promise<{ success: boolean }> {
@@ -483,7 +516,9 @@ export const api = {
     id: number,
   ): Promise<{ success: boolean; node_count: number }> {
     try {
-      return await request(`/api/subscriptions/${id}/fetch`, { method: "POST" });
+      return await request(`/api/subscriptions/${id}/fetch`, {
+        method: "POST",
+      });
     } catch {
       await request("/api/subscriptions/fetch", {
         method: "POST",
@@ -526,7 +561,9 @@ export const api = {
   async rollbackAutoUpdateSnapshot(
     id: number,
   ): Promise<{ success: boolean; message: string }> {
-    return request(`/api/auto-update/history/${id}/rollback`, { method: "POST" });
+    return request(`/api/auto-update/history/${id}/rollback`, {
+      method: "POST",
+    });
   },
 
   // Logs
@@ -535,7 +572,12 @@ export const api = {
       `/api/service/logs?lines=${lines}`,
     );
     if (Array.isArray(res)) return { logs: res };
-    if (res && typeof res === "object" && "logs" in res && Array.isArray(res.logs)) {
+    if (
+      res &&
+      typeof res === "object" &&
+      "logs" in res &&
+      Array.isArray(res.logs)
+    ) {
       return { logs: res.logs as string[] };
     }
     return { logs: [] };

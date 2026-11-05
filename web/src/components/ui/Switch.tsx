@@ -9,6 +9,9 @@ export interface SwitchProps {
   label?: string;
   description?: string;
   className?: string;
+  "aria-label"?: string;
+  title?: string;
+  id?: string;
 }
 
 export const Switch: React.FC<SwitchProps> = ({
@@ -18,6 +21,9 @@ export const Switch: React.FC<SwitchProps> = ({
   label,
   description,
   className,
+  "aria-label": ariaLabel,
+  title,
+  id,
 }) => {
   return (
     <label
@@ -28,11 +34,15 @@ export const Switch: React.FC<SwitchProps> = ({
           className,
         ),
       )}
+      title={title}
     >
       <button
+        id={id}
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={ariaLabel || label}
+        title={title}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
         className={clsx(
