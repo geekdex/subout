@@ -178,6 +178,9 @@ pub async fn fetch_and_update_subscription(db_path: &str, sub_id: i64) -> Result
             )?;
 
             tx.commit()?;
+
+            // Automatically refresh all node groups (dynamic re-matching and static dead node pruning)
+            let _ = db::refresh_all_groups(&conn);
         }
         Err(e) => {
             let err_str = e.to_string();

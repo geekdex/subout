@@ -12,7 +12,7 @@ export interface DialogProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
-  size?: "sm" | "md" | "lg" | "xl" | "2xl" | "full";
+  size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "4xl" | "full";
 }
 
 export const Dialog: React.FC<DialogProps> = ({
@@ -49,7 +49,9 @@ export const Dialog: React.FC<DialogProps> = ({
     lg: "max-w-lg",
     xl: "max-w-xl",
     "2xl": "max-w-3xl",
-    full: "max-w-5xl",
+    "3xl": "max-w-4xl",
+    "4xl": "max-w-5xl",
+    full: "max-w-6xl",
   };
 
   return createPortal(

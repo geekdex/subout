@@ -41,6 +41,8 @@ pub struct OutboundGroup {
     pub id: i64,
     pub tag: String,
     pub group_type: String, // "selector" or "urltest" or "fallback"
+    #[serde(default)]
+    pub match_type: Option<String>, // "auto" or "static"
     pub url: Option<String>,
     pub interval: Option<String>,
     pub tolerance: Option<i64>,

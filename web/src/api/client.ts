@@ -388,6 +388,11 @@ export const api = {
       method: "DELETE",
     });
   },
+  async syncNodeGroup(id: number): Promise<NodeGroup> {
+    return request<NodeGroup>(`/api/node-groups/${id}/sync`, {
+      method: "POST",
+    });
+  },
 
   // Nodes
   async listNodes(): Promise<NodeItem[]> {

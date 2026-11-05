@@ -12,6 +12,7 @@ use crate::web::{AppState, check_auth, get_db_conn, subscriptions::BatchDeleteRe
 pub struct OutboundGroupRequest {
     pub tag: String,
     pub group_type: String,
+    pub match_type: Option<String>,
     pub url: Option<String>,
     pub interval: Option<String>,
     pub tolerance: Option<i64>,
@@ -26,29 +27,30 @@ fn resolve_static_nodes_if_dynamic(
     conn: &rusqlite::Connection,
     payload: &OutboundGroupRequest,
 ) -> Option<String> {
-    let is_dynamic = payload.node_types.is_some()
-        || payload.subscriptions.is_some()
-        || payload.include_keywords.is_some()
-        || payload.exclude_keywords.is_some();
+    if payload.match_type.as_deref() == Some("static") {
+        return payload.static_nodes.clone();
+    }
 
-    if is_dynamic {
-        let dummy_group = db::OutboundGroup {
-            id: 0,
-            tag: payload.tag.clone(),
-            group_type: payload.group_type.clone(),
-            url: payload.url.clone(),
-            interval: payload.interval.clone(),
-            tolerance: payload.tolerance,
-            static_nodes: payload.static_nodes.clone(),
-            node_types: payload.node_types.clone(),
-            subscriptions: payload.subscriptions.clone(),
-            include_keywords: payload.include_keywords.clone(),
-            exclude_keywords: payload.exclude_keywords.clone(),
-            updated_at: None,
-        };
-        if let Ok(resolved) = db::resolve_group_nodes(conn, &dummy_group) {
-            return Some(serde_json::to_string(&resolved).unwrap_or_else(|_| "[]".to_string()));
-        }
+    let dummy_group = db::OutboundGroup {
+        id: 0,
+        tag: payload.tag.clone(),
+        group_type: payload.group_type.clone(),
+        match_type: payload
+            .match_type
+            .clone()
+            .or_else(|| Some("auto".to_string())),
+        url: payload.url.clone(),
+        interval: payload.interval.clone(),
+        tolerance: payload.tolerance,
+        static_nodes: payload.static_nodes.clone(),
+        node_types: payload.node_types.clone(),
+        subscriptions: payload.subscriptions.clone(),
+        include_keywords: payload.include_keywords.clone(),
+        exclude_keywords: payload.exclude_keywords.clone(),
+        updated_at: None,
+    };
+    if let Ok(resolved) = db::resolve_group_nodes(conn, &dummy_group) {
+        return Some(serde_json::to_string(&resolved).unwrap_or_else(|_| "[]".to_string()));
     }
     payload.static_nodes.clone()
 }
@@ -186,6 +188,7 @@ pub async fn add_group(
         &conn,
         tag,
         &payload.group_type,
+        payload.match_type.as_deref(),
         payload.url.as_deref(),
         payload.interval.as_deref(),
         payload.tolerance,
@@ -286,10 +289,11 @@ pub async fn update_group(
     let final_static_nodes = resolve_static_nodes_if_dynamic(&conn, &payload);
 
     conn.execute(
-        "UPDATE outbound_groups SET tag = ?, group_type = ?, url = ?, interval = ?, tolerance = ?, static_nodes = ?, node_types = ?, subscriptions = ?, include_keywords = ?, exclude_keywords = ? WHERE id = ?",
+        "UPDATE outbound_groups SET tag = ?, group_type = ?, match_type = ?, url = ?, interval = ?, tolerance = ?, static_nodes = ?, node_types = ?, subscriptions = ?, include_keywords = ?, exclude_keywords = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
         rusqlite::params![
             tag,
             payload.group_type,
+            payload.match_type.as_deref().unwrap_or("auto"),
             payload.url,
             payload.interval,
             payload.tolerance,
@@ -301,6 +305,8 @@ pub async fn update_group(
             id
         ],
     ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "更新出站组失败" }))))?;
+
+    let _ = db::refresh_node_group_version_code(&conn);
 
     let _ = db::log_history(
         &conn,
@@ -445,6 +451,7 @@ mod tests {
         let req = OutboundGroupRequest {
             tag: "hk_group".to_string(),
             group_type: "selector".to_string(),
+            match_type: Some("auto".to_string()),
             url: None,
             interval: None,
             tolerance: None,
@@ -458,5 +465,42 @@ mod tests {
         let static_nodes_json = resolve_static_nodes_if_dynamic(&conn, &req).unwrap();
         let parsed: Vec<String> = serde_json::from_str(&static_nodes_json).unwrap();
         assert_eq!(parsed, vec!["HK-Node-01"]);
+
+        // Test multi-keyword matching with comma
+        let multi_kw_req = OutboundGroupRequest {
+            tag: "asia_group".to_string(),
+            group_type: "urltest".to_string(),
+            match_type: Some("auto".to_string()),
+            url: None,
+            interval: None,
+            tolerance: None,
+            static_nodes: Some("[]".to_string()),
+            node_types: Some("all".to_string()),
+            subscriptions: Some("all".to_string()),
+            include_keywords: Some("hk, jp".to_string()),
+            exclude_keywords: None,
+        };
+        let multi_kw_json = resolve_static_nodes_if_dynamic(&conn, &multi_kw_req).unwrap();
+        let multi_kw_nodes: Vec<String> = serde_json::from_str(&multi_kw_json).unwrap();
+        assert_eq!(multi_kw_nodes.len(), 2);
+        assert!(multi_kw_nodes.contains(&"HK-Node-01".to_string()));
+        assert!(multi_kw_nodes.contains(&"JP-Node-01".to_string()));
+
+        // Test static node group returning specified static_nodes
+        let static_req = OutboundGroupRequest {
+            tag: "static_group".to_string(),
+            group_type: "selector".to_string(),
+            match_type: Some("static".to_string()),
+            url: None,
+            interval: None,
+            tolerance: None,
+            static_nodes: Some(r#"["JP-Node-01"]"#.to_string()),
+            node_types: None,
+            subscriptions: None,
+            include_keywords: None,
+            exclude_keywords: None,
+        };
+        let static_json = resolve_static_nodes_if_dynamic(&conn, &static_req).unwrap();
+        assert_eq!(static_json, r#"["JP-Node-01"]"#);
     }
 }

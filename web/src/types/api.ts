@@ -143,10 +143,18 @@ export interface NodeGroup {
   id: number;
   tag: string;
   group_type: string;
-  filter_rules: string;
-  static_nodes: string;
-  default_selected: string | null;
-  created_at: string;
+  match_type?: "auto" | "static" | string;
+  url?: string | null;
+  interval?: string | null;
+  tolerance?: number | null;
+  static_nodes?: string | null;
+  node_types?: string | null;
+  subscriptions?: string | null;
+  include_keywords?: string | null;
+  exclude_keywords?: string | null;
+  filter_rules?: string;
+  default_selected?: string | null;
+  created_at?: string;
   updated_at?: string;
 }
 

@@ -90,6 +90,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tag TEXT NOT NULL UNIQUE,
             group_type TEXT NOT NULL,
+            match_type TEXT DEFAULT 'auto',
             url TEXT,
             interval TEXT,
             tolerance INTEGER,
@@ -266,6 +267,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
 
     // Migration: check if outbound_groups has dynamic filter columns
     for col in &[
+        "match_type",
         "node_types",
         "subscriptions",
         "include_keywords",
@@ -281,8 +283,13 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
             )
             .unwrap_or(0);
         if has_col == 0 {
+            let default_clause = if *col == "match_type" {
+                " DEFAULT 'auto'"
+            } else {
+                ""
+            };
             let _ = conn.execute(
-                &format!("ALTER TABLE outbound_groups ADD COLUMN {col} TEXT"),
+                &format!("ALTER TABLE outbound_groups ADD COLUMN {col} TEXT{default_clause}"),
                 [],
             );
         }
@@ -928,7 +935,7 @@ pub fn update_node_status(conn: &Connection, id: i64, enabled: bool) -> Result<(
 
 pub fn get_outbound_groups(conn: &Connection) -> Result<Vec<OutboundGroup>> {
     let mut stmt = conn.prepare(
-        "SELECT id, tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords, updated_at FROM outbound_groups",
+        "SELECT id, tag, group_type, match_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords, updated_at FROM outbound_groups",
     )?;
     let groups = stmt
         .query_map([], |row| {
@@ -939,19 +946,21 @@ pub fn get_outbound_groups(conn: &Connection) -> Result<Vec<OutboundGroup>> {
             let group_type: String = row
                 .get::<_, Option<String>>(2)?
                 .unwrap_or_else(|| "selector".to_string());
+            let match_type: Option<String> = row.get(3)?;
             Ok(OutboundGroup {
                 id,
                 tag,
                 group_type,
-                url: row.get(3)?,
-                interval: row.get(4)?,
-                tolerance: row.get(5)?,
-                static_nodes: row.get(6)?,
-                node_types: row.get(7)?,
-                subscriptions: row.get(8)?,
-                include_keywords: row.get(9)?,
-                exclude_keywords: row.get(10)?,
-                updated_at: row.get(11)?,
+                match_type: match_type.or_else(|| Some("auto".to_string())),
+                url: row.get(4)?,
+                interval: row.get(5)?,
+                tolerance: row.get(6)?,
+                static_nodes: row.get(7)?,
+                node_types: row.get(8)?,
+                subscriptions: row.get(9)?,
+                include_keywords: row.get(10)?,
+                exclude_keywords: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -963,6 +972,7 @@ pub fn save_outbound_group(
     conn: &Connection,
     tag: &str,
     group_type: &str,
+    match_type: Option<&str>,
     url: Option<&str>,
     interval: Option<&str>,
     tolerance: Option<i64>,
@@ -973,39 +983,49 @@ pub fn save_outbound_group(
     exclude_keywords: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "INSERT OR REPLACE INTO outbound_groups (tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))",
-        params![tag, group_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords],
+        "INSERT OR REPLACE INTO outbound_groups (tag, group_type, match_type, url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))",
+        params![tag, group_type, match_type.unwrap_or("auto"), url, interval, tolerance, static_nodes, node_types, subscriptions, include_keywords, exclude_keywords],
     )?;
     let _ = refresh_node_group_version_code(conn)?;
     Ok(())
 }
 
 pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<Vec<String>> {
-    // 1. Check if it is a dynamic group
-    let is_dynamic = {
-        let nt = group.node_types.as_deref().unwrap_or("all");
-        let sub = group.subscriptions.as_deref().unwrap_or("all");
-        let inc = group.include_keywords.as_deref().unwrap_or("");
-        let exc = group.exclude_keywords.as_deref().unwrap_or("");
-        nt != "all" || sub != "all" || !inc.trim().is_empty() || !exc.trim().is_empty()
-    };
-
-    if !is_dynamic {
-        // Manual selection
-        let tags: Vec<String> =
+    let is_static = group.match_type.as_deref() == Some("static");
+    if is_static {
+        let static_tags: Vec<String> =
             serde_json::from_str(group.static_nodes.as_deref().unwrap_or("[]")).unwrap_or_default();
-        return Ok(tags);
+        let nodes = get_nodes(conn)?;
+        let existing_tags: std::collections::HashSet<String> = nodes
+            .into_iter()
+            .filter(|n| n.enabled)
+            .map(|n| n.tag)
+            .collect();
+        let valid_tags: Vec<String> = static_tags
+            .into_iter()
+            .filter(|t| existing_tags.contains(t) || t == "direct" || t == "block")
+            .collect();
+        return Ok(valid_tags);
     }
 
-    // 2. Parse criteria
-    let node_type_filter = group.node_types.as_deref().unwrap_or("all");
-    let sub_filter = group.subscriptions.as_deref().unwrap_or("all");
+    // Dynamic / Auto-match group
+    let sub_filter = group.subscriptions.as_deref().unwrap_or("all").trim();
+    let selected_subs: Vec<&str> =
+        if sub_filter.is_empty() || sub_filter.eq_ignore_ascii_case("all") {
+            Vec::new()
+        } else {
+            sub_filter
+                .split([',', '，', ' ', '\n', '\t', '\r'])
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
 
     let inc_kws: Vec<String> = group
         .include_keywords
         .as_ref()
         .map(|s| {
-            s.split([',', '，', ' ', '\n', '\t', '\r'])
+            s.split([',', '，', '\n', '\t', '\r'])
                 .map(|x| x.trim().to_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect()
@@ -1016,120 +1036,115 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
         .exclude_keywords
         .as_ref()
         .map(|s| {
-            s.split([',', '，', ' ', '\n', '\t', '\r'])
+            s.split([',', '，', '\n', '\t', '\r'])
                 .map(|x| x.trim().to_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect()
         })
         .unwrap_or_default();
 
-    // 3. Query all enabled nodes from DB
     let nodes = get_nodes(conn)?;
     let mut resolved_tags = Vec::new();
 
-    // Filter nodes
-    if node_type_filter == "all" || node_type_filter == "node" {
-        for node in nodes {
-            if !node.enabled {
+    for node in nodes {
+        if !node.enabled {
+            continue;
+        }
+
+        // Check subscription filter
+        if !selected_subs.is_empty() {
+            let mut sub_matched = false;
+            for sub_item in &selected_subs {
+                if sub_item.eq_ignore_ascii_case("custom") && node.is_custom {
+                    sub_matched = true;
+                    break;
+                }
+                if let Ok(target_sub_id) = sub_item.parse::<i64>()
+                    && node.subscription_id == Some(target_sub_id)
+                {
+                    sub_matched = true;
+                    break;
+                }
+            }
+            if !sub_matched {
                 continue;
             }
-
-            // Check subscription filter
-            if sub_filter != "all" {
-                if sub_filter == "custom" {
-                    if !node.is_custom {
-                        continue;
-                    }
-                } else if let Ok(target_sub_id) = sub_filter.parse::<i64>() {
-                    if node.subscription_id != Some(target_sub_id) {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-            }
-
-            let tag_lower = node.tag.to_lowercase();
-            let server_lower = node.server.to_lowercase();
-
-            // Check positive keywords
-            if !inc_kws.is_empty() {
-                let matches_any = inc_kws
-                    .iter()
-                    .any(|kw| tag_lower.contains(kw) || server_lower.contains(kw));
-                if !matches_any {
-                    continue;
-                }
-            }
-
-            // Check negative keywords
-            if !exc_kws.is_empty() {
-                let matches_any = exc_kws
-                    .iter()
-                    .any(|kw| tag_lower.contains(kw) || server_lower.contains(kw));
-                if matches_any {
-                    continue;
-                }
-            }
-
-            resolved_tags.push(node.tag);
         }
-    }
 
-    // Filter other groups and system outbounds
-    if node_type_filter == "all" || node_type_filter == "group" {
-        // Query other groups (excluding self to avoid circular reference)
-        let all_g = get_outbound_groups(conn)?;
-        for g in all_g {
-            if g.tag == group.tag {
+        let tag_lower = node.tag.to_lowercase();
+        let server_lower = node.server.to_lowercase();
+
+        // Check positive keywords (matches any keyword)
+        if !inc_kws.is_empty() {
+            let matches_any = inc_kws
+                .iter()
+                .any(|kw| tag_lower.contains(kw) || server_lower.contains(kw));
+            if !matches_any {
                 continue;
             }
-            let tag_lower = g.tag.to_lowercase();
-
-            // Check positive keywords
-            if !inc_kws.is_empty() {
-                let matches_any = inc_kws.iter().any(|kw| tag_lower.contains(kw));
-                if !matches_any {
-                    continue;
-                }
-            }
-
-            // Check negative keywords
-            if !exc_kws.is_empty() {
-                let matches_any = exc_kws.iter().any(|kw| tag_lower.contains(kw));
-                if matches_any {
-                    continue;
-                }
-            }
-
-            resolved_tags.push(g.tag);
         }
 
-        // Check system outbounds
-        for sys_tag in &["direct", "block"] {
-            let tag_lower = sys_tag.to_lowercase();
-
-            // Check positive keywords
-            if !inc_kws.is_empty() {
-                let matches_any = inc_kws.iter().any(|kw| tag_lower.contains(kw));
-                if !matches_any {
-                    continue;
-                }
+        // Check negative keywords (excluded if any matches)
+        if !exc_kws.is_empty() {
+            let matches_any = exc_kws
+                .iter()
+                .any(|kw| tag_lower.contains(kw) || server_lower.contains(kw));
+            if matches_any {
+                continue;
             }
-
-            // Check negative keywords
-            if !exc_kws.is_empty() {
-                let matches_any = exc_kws.iter().any(|kw| tag_lower.contains(kw));
-                if matches_any {
-                    continue;
-                }
-            }
-
-            resolved_tags.push(sys_tag.to_string());
         }
+
+        resolved_tags.push(node.tag);
     }
 
     Ok(resolved_tags)
+}
+
+pub fn refresh_all_groups(conn: &Connection) -> Result<usize> {
+    let groups = get_outbound_groups(conn)?;
+    let all_nodes = get_nodes(conn)?;
+    let existing_tags: std::collections::HashSet<String> = all_nodes
+        .into_iter()
+        .filter(|n| n.enabled)
+        .map(|n| n.tag)
+        .collect();
+    let mut updated_count = 0;
+
+    for group in groups {
+        let is_static = group.match_type.as_deref() == Some("static");
+        if is_static {
+            let static_list: Vec<String> =
+                serde_json::from_str(group.static_nodes.as_deref().unwrap_or("[]"))
+                    .unwrap_or_default();
+            let filtered: Vec<String> = static_list
+                .into_iter()
+                .filter(|t| existing_tags.contains(t) || t == "direct" || t == "block")
+                .collect();
+            let new_json = serde_json::to_string(&filtered)?;
+            if Some(&new_json) != group.static_nodes.as_ref() {
+                conn.execute(
+                    "UPDATE outbound_groups SET static_nodes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                    params![new_json, group.id],
+                )?;
+                updated_count += 1;
+            }
+        } else {
+            let resolved = resolve_group_nodes(conn, &group)?;
+            let new_json = serde_json::to_string(&resolved)?;
+            if Some(&new_json) != group.static_nodes.as_ref() {
+                conn.execute(
+                    "UPDATE outbound_groups SET static_nodes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                    params![new_json, group.id],
+                )?;
+                updated_count += 1;
+            }
+        }
+    }
+
+    if updated_count > 0 {
+        let _ = refresh_node_group_version_code(conn)?;
+    }
+    Ok(updated_count)
 }
 
 pub fn delete_outbound_group(conn: &Connection, id: i64) -> Result<()> {
@@ -1829,6 +1844,7 @@ mod tests {
             &conn,
             "manual-group",
             "selector",
+            Some("static"),
             None,
             None,
             None,
@@ -1845,6 +1861,7 @@ mod tests {
             &conn,
             "dynamic-sub-group",
             "urltest",
+            Some("auto"),
             Some("http://cp.cloudflare.com/generate_204"),
             Some("3m"),
             Some(50),

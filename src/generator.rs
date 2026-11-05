@@ -802,6 +802,7 @@ mod tests {
             &conn,
             "Proxy-Group",
             "selector",
+            Some("auto"),
             None,
             None,
             None,

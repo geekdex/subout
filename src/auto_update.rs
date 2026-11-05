@@ -254,27 +254,57 @@ pub async fn run_auto_update_process(
             "  -> 测速完成，共删除超时节点 {deleted_count} 个: {deleted_tags:?}"
         ));
 
-        // Step 4: Auto-configure nodes in all groups that have "conditional auto-matching" enabled
-        update_log("步骤 4: 正在将最新节点自动配置更新到已开启“启用条件自动匹配”的出站组中...");
+        // Step 4: Auto-configure nodes in all groups (both dynamic auto-match and static groups)
+        update_log("步骤 4: 正在根据最新节点池更新所有节点组合 (自动匹配与静态节点)...");
         {
             let mut conn_groups = Connection::open(db_path)?;
             conn_groups.busy_timeout(std::time::Duration::from_secs(5))?;
             let tx = conn_groups.transaction()?;
             let groups = crate::db::get_outbound_groups(&tx)?;
+            let all_nodes = crate::db::get_nodes(&tx)?;
+            let existing_tags: std::collections::HashSet<String> = all_nodes
+                .into_iter()
+                .filter(|n| n.enabled)
+                .map(|n| n.tag)
+                .collect();
+
             for g in groups {
-                let is_dynamic = g.node_types.is_some()
-                    || g.subscriptions.is_some()
-                    || g.include_keywords.is_some()
-                    || g.exclude_keywords.is_some();
-                if is_dynamic {
+                let is_static = g.match_type.as_deref() == Some("static");
+                if is_static {
+                    let static_list: Vec<String> =
+                        serde_json::from_str(g.static_nodes.as_deref().unwrap_or("[]"))
+                            .unwrap_or_default();
+                    let orig_count = static_list.len();
+                    let valid_list: Vec<String> = static_list
+                        .into_iter()
+                        .filter(|t| {
+                            (existing_tags.contains(t) && !deleted_tags.contains(t))
+                                || t == "direct"
+                                || t == "block"
+                        })
+                        .collect();
+                    let valid_count = valid_list.len();
+                    let new_json = serde_json::to_string(&valid_list)?;
+                    if Some(&new_json) != g.static_nodes.as_ref() {
+                        tx.execute(
+                            "UPDATE outbound_groups SET static_nodes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                            rusqlite::params![new_json, g.id],
+                        )?;
+                        let pruned = orig_count.saturating_sub(valid_count);
+                        update_log(&format!(
+                            "  -> 静态节点组合 '{}' 已更新，有效节点 {} 个 (自动剔除 {} 个失效节点)",
+                            g.tag, valid_count, pruned
+                        ));
+                    }
+                } else {
                     let resolved = crate::db::resolve_group_nodes(&tx, &g)?;
                     let resolved_json = serde_json::to_string(&resolved)?;
                     tx.execute(
-                        "UPDATE outbound_groups SET static_nodes = ? WHERE id = ?",
+                        "UPDATE outbound_groups SET static_nodes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
                         rusqlite::params![resolved_json, g.id],
                     )?;
                     update_log(&format!(
-                        "  -> 出站组 '{}' (条件自动匹配) 已更新，匹配到 {} 个节点",
+                        "  -> 自动匹配节点组合 '{}' 已更新，匹配到 {} 个节点",
                         g.tag,
                         resolved.len()
                     ));
@@ -542,6 +572,7 @@ mod tests {
             &conn,
             "HK-Group",
             "urltest",
+            Some("auto"),
             Some("http://cp.cloudflare.com/generate_204"),
             Some("3m"),
             Some(50),
@@ -606,6 +637,7 @@ mod tests {
             &conn,
             "Auto-Group",
             "urltest",
+            Some("auto"),
             None,
             None,
             None,

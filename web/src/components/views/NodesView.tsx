@@ -10,6 +10,13 @@ import {
   Globe,
   Radio,
   StopCircle,
+  Eye,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  FileCode,
+  Info,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -17,7 +24,8 @@ import { Badge } from "../ui/Badge";
 import { Table, Column } from "../ui/Table";
 import { Dialog } from "../ui/Dialog";
 import { Select } from "../ui/Select";
-import { NodeItem, SPEED_TEST_ENDPOINTS } from "../../types/api";
+import { CopyButton } from "../ui/CopyButton";
+import { NodeItem, Subscription, SPEED_TEST_ENDPOINTS } from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import {
@@ -29,11 +37,13 @@ import {
 
 interface NodesViewProps {
   nodes?: NodeItem[];
+  subscriptions?: Subscription[];
   onRefresh: () => void;
 }
 
 export const NodesView: React.FC<NodesViewProps> = ({
   nodes = [],
+  subscriptions = [],
   onRefresh,
 }) => {
   // Local nodes state allowing instant one-by-one rendering during speed tests
@@ -43,7 +53,22 @@ export const NodesView: React.FC<NodesViewProps> = ({
   }, [nodes]);
 
   const [search, setSearch] = useState("");
+  const [selectedSubscription, setSelectedSubscription] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  // Pagination states: default 20, supports 50, 100, 200
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  // Detail Modal states
+  const [detailNode, setDetailNode] = useState<NodeItem | null>(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<"info" | "json">("info");
+
+  // Reset to page 1 when filtering or changing page size
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, selectedSubscription, pageSize]);
 
   // Testing states
   const [testingBatchActive, setTestingBatchActive] = useState(false);
@@ -82,6 +107,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
   const { success, error } = useToast();
 
   const safeNodes = Array.isArray(localNodes) ? localNodes : [];
+  const safeSubscriptions = Array.isArray(subscriptions) ? subscriptions : [];
 
   const currentEndpoint =
     SPEED_TEST_ENDPOINTS.find((ep) => ep.url === selectedEndpointUrl) ||
@@ -98,17 +124,40 @@ export const NodesView: React.FC<NodesViewProps> = ({
     }
   };
 
-  const filteredNodes = safeNodes.filter(
-    (n) =>
-      (n.tag || "").toLowerCase().includes(search.toLowerCase()) ||
-      (n.server || "").toLowerCase().includes(search.toLowerCase()) ||
-      (n.node_type || "").toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredNodes = safeNodes.filter((n) => {
+    // 1. Subscription filter
+    if (selectedSubscription !== "all") {
+      if (selectedSubscription === "custom") {
+        if (!n.is_custom) return false;
+      } else {
+        const subId = Number(selectedSubscription);
+        if (n.subscription_id !== subId) return false;
+      }
+    }
+
+    // 2. Search query filter
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const matchTag = (n.tag || "").toLowerCase().includes(q);
+      const matchServer = (n.server || "").toLowerCase().includes(q);
+      const matchType = (n.node_type || "").toLowerCase().includes(q);
+      const matchSub = (n.subscription_label || "").toLowerCase().includes(q);
+      if (!matchTag && !matchServer && !matchType && !matchSub) {
+        return false;
+      }
+    }
+
+    return true;
+  });
 
   const sortedNodes = [...filteredNodes].sort((a, b) => {
     let cmp = 0;
     if (sortKey === "tag") {
       cmp = (a.tag || "").localeCompare(b.tag || "");
+    } else if (sortKey === "subscription") {
+      const labelA = a.subscription_label || (a.is_custom ? "自定义节点" : "");
+      const labelB = b.subscription_label || (b.is_custom ? "自定义节点" : "");
+      cmp = labelA.localeCompare(labelB);
     } else if (sortKey === "node_type") {
       cmp = (a.node_type || "").localeCompare(b.node_type || "");
     } else if (sortKey === "server") {
@@ -143,11 +192,28 @@ export const NodesView: React.FC<NodesViewProps> = ({
     }
   };
 
+  // Pagination calculations: 20 per page by default, supports 50, 100, 200
+  const totalCount = sortedNodes.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalCount);
+  const pagedNodes = sortedNodes.slice(startIndex, endIndex);
+
+  const currentPageIds = pagedNodes.map((n) => n.id);
+  const isAllCurrentPageSelected =
+    currentPageIds.length > 0 &&
+    currentPageIds.every((id) => selectedIds.includes(id));
+
   const handleSelectAll = () => {
-    if (selectedIds.length === filteredNodes.length) {
-      setSelectedIds([]);
+    if (isAllCurrentPageSelected) {
+      setSelectedIds((prev) =>
+        prev.filter((id) => !currentPageIds.includes(id)),
+      );
     } else {
-      setSelectedIds(filteredNodes.map((n) => n.id));
+      setSelectedIds((prev) =>
+        Array.from(new Set([...prev, ...currentPageIds])),
+      );
     }
   };
 
@@ -195,6 +261,18 @@ export const NodesView: React.FC<NodesViewProps> = ({
               }
             : n,
         ),
+      );
+
+      setDetailNode((prev) =>
+        prev && prev.id === node.id
+          ? {
+              ...prev,
+              last_web_latency: res.web_latency ?? (isTimeout ? -1 : l),
+              last_tcp_latency: res.tcp_latency,
+              last_tested_at: nowStr,
+              last_target_url: selectedEndpointUrl,
+            }
+          : prev,
       );
 
       if (isTimeout) {
@@ -362,10 +440,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
           type="button"
           onClick={handleSelectAll}
           className="p-1 text-slate-400 hover:text-slate-200"
-          title="全选 / 取消全选"
+          title="全选当前页 / 取消全选"
         >
-          {selectedIds.length > 0 &&
-          selectedIds.length === filteredNodes.length ? (
+          {isAllCurrentPageSelected ? (
             <CheckSquare className="w-4 h-4 text-sky-400" />
           ) : (
             <Square className="w-4 h-4" />
@@ -399,6 +476,28 @@ export const NodesView: React.FC<NodesViewProps> = ({
           </span>
         </div>
       ),
+    },
+    {
+      key: "subscription",
+      header: "所属订阅 / 来源",
+      sortable: true,
+      render: (node) => {
+        if (node.is_custom) {
+          return (
+            <Badge variant="warning" size="sm">
+              自定义节点
+            </Badge>
+          );
+        }
+        return (
+          <span
+            className="text-xs text-slate-300 font-medium truncate max-w-[140px] inline-block"
+            title={node.subscription_label || "未知订阅"}
+          >
+            {node.subscription_label || "未知订阅"}
+          </span>
+        );
+      },
     },
     {
       key: "node_type",
@@ -526,6 +625,20 @@ export const NodesView: React.FC<NodesViewProps> = ({
           testingId === node.id || testingNodeMap[node.id] !== undefined;
         return (
           <div className="flex items-center justify-end gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={testingBatchActive}
+              onClick={() => {
+                setDetailNode(node);
+                setDetailTab("info");
+                setDetailModalOpen(true);
+              }}
+              icon={<Eye className="w-3.5 h-3.5 text-sky-400" />}
+              title="查看节点详情与配置 JSON"
+            >
+              详情
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -690,16 +803,49 @@ export const NodesView: React.FC<NodesViewProps> = ({
 
       {/* Filter / Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="w-full sm:w-80">
-          <Input
-            placeholder="搜索节点名称、IP 或协议..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            icon={<Search className="w-4 h-4" />}
-            clearable
-            onClear={() => setSearch("")}
-          />
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-2xl">
+          <div className="w-full sm:w-72">
+            <Input
+              placeholder="搜索节点名称、IP 或所属订阅..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              icon={<Search className="w-4 h-4" />}
+              clearable
+              onClear={() => setSearch("")}
+            />
+          </div>
+
+          <div className="w-full sm:w-60">
+            <Select
+              value={selectedSubscription}
+              onChange={setSelectedSubscription}
+              options={[
+                {
+                  value: "all",
+                  label: `全部来源 (${safeNodes.length})`,
+                },
+                ...safeSubscriptions.map((s) => {
+                  const count = safeNodes.filter(
+                    (n) => n.subscription_id === s.id,
+                  ).length;
+                  return {
+                    value: String(s.id),
+                    label: `${s.label || "未命名订阅"} (${count})`,
+                  };
+                }),
+                ...(safeNodes.some((n) => n.is_custom)
+                  ? [
+                      {
+                        value: "custom",
+                        label: `自定义节点 (${safeNodes.filter((n) => n.is_custom).length})`,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          </div>
         </div>
+
         {selectedIds.length > 0 && (
           <div className="text-xs text-slate-400">
             已选中{" "}
@@ -714,12 +860,84 @@ export const NodesView: React.FC<NodesViewProps> = ({
       {/* Nodes Table */}
       <Table
         columns={columns}
-        data={sortedNodes}
+        data={pagedNodes}
         keyField="id"
         sortKey={sortKey}
         sortDirection={sortDirection}
         onSort={handleSort}
       />
+
+      {/* Pagination Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-2 px-1 text-xs text-slate-400">
+        <div className="flex items-center gap-2">
+          <span>
+            显示第{" "}
+            <span className="font-semibold text-slate-200">
+              {totalCount > 0 ? startIndex + 1 : 0}
+            </span>{" "}
+            到 <span className="font-semibold text-slate-200">{endIndex}</span>{" "}
+            条，共{" "}
+            <span className="font-semibold text-sky-400">{totalCount}</span>{" "}
+            条节点
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-500 text-[11px]">每页</span>
+            <div className="w-28">
+              <Select
+                value={String(pageSize)}
+                onChange={(v) => setPageSize(Number(v))}
+                options={[
+                  { value: "20", label: "20 条" },
+                  { value: "50", label: "50 条" },
+                  { value: "100", label: "100 条" },
+                  { value: "200", label: "200 条" },
+                ]}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage(1)}
+              icon={<ChevronsLeft className="w-3.5 h-3.5" />}
+              title="首页"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              icon={<ChevronLeft className="w-3.5 h-3.5" />}
+              title="上一页"
+            />
+            <span className="px-2 font-mono text-slate-300 select-none">
+              {safeCurrentPage} / {totalPages}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              icon={<ChevronRight className="w-3.5 h-3.5" />}
+              title="下一页"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage(totalPages)}
+              icon={<ChevronsRight className="w-3.5 h-3.5" />}
+              title="末页"
+            />
+          </div>
+        </div>
+      </div>
 
       {/* Batch Delete Confirmation Modal */}
       <Dialog
@@ -750,6 +968,210 @@ export const NodesView: React.FC<NodesViewProps> = ({
         <div className="text-xs text-rose-300">
           批量删除节点将自动触发全局版本号（versionCode）更新，各客户端订阅下次访问将按需懒同步。
         </div>
+      </Dialog>
+
+      {/* Node Detail Modal with JSON View */}
+      <Dialog
+        open={detailModalOpen && !!detailNode}
+        onClose={() => setDetailModalOpen(false)}
+        size="2xl"
+        title={
+          <div className="flex items-center gap-2">
+            <span>节点配置详情</span>
+            {detailNode && (
+              <Badge variant="neutral" size="sm">
+                {detailNode.node_type.toUpperCase()}
+              </Badge>
+            )}
+          </div>
+        }
+        description={detailNode ? detailNode.tag : ""}
+        footer={
+          <>
+            {detailNode && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  handleTestLatency(detailNode);
+                }}
+                icon={<Zap className="w-3.5 h-3.5 text-sky-400" />}
+              >
+                立即测速
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDetailModalOpen(false)}
+            >
+              关闭
+            </Button>
+          </>
+        }
+      >
+        {detailNode && (
+          <div className="space-y-4">
+            {/* View Switcher Tabs */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 rounded-lg border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDetailTab("info")}
+                className={`py-1.5 px-3 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${
+                  detailTab === "info"
+                    ? "bg-sky-500 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Info className="w-3.5 h-3.5" />
+                <span>节点参数详情</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDetailTab("json")}
+                className={`py-1.5 px-3 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${
+                  detailTab === "json"
+                    ? "bg-sky-500 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <FileCode className="w-3.5 h-3.5" />
+                <span>原始 JSON 视图</span>
+              </button>
+            </div>
+
+            {/* TAB 1: Structured Details */}
+            {detailTab === "info" && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
+                    <span className="text-[11px] text-slate-500">节点标识 (Tag)</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-100 truncate">
+                        {detailNode.tag}
+                      </span>
+                      <CopyButton text={detailNode.tag} size="sm" />
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
+                    <span className="text-[11px] text-slate-500">所属订阅 / 来源</span>
+                    <div>
+                      {detailNode.is_custom ? (
+                        <Badge variant="warning" size="sm">
+                          自定义节点
+                        </Badge>
+                      ) : (
+                        <Badge variant="neutral" size="sm">
+                          {detailNode.subscription_label || "未知订阅"}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
+                    <span className="text-[11px] text-slate-500">服务器与端口</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-slate-200">
+                        {detailNode.server}:{detailNode.port}
+                      </span>
+                      <CopyButton
+                        text={`${detailNode.server}:${detailNode.port}`}
+                        size="sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
+                    <span className="text-[11px] text-slate-500">协议类型</span>
+                    <div>
+                      <Badge variant="info" size="sm">
+                        {detailNode.node_type.toUpperCase()}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
+                    <span className="text-[11px] text-slate-500">最新测速结果</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-slate-100">
+                        Web 延迟:{" "}
+                        {detailNode.last_web_latency !== null &&
+                        detailNode.last_web_latency !== undefined
+                          ? detailNode.last_web_latency === -1
+                            ? "不可达 / 超时"
+                            : `${detailNode.last_web_latency} ms`
+                          : "未测速"}
+                      </span>
+                      {detailNode.last_tcp_latency !== null &&
+                        detailNode.last_tcp_latency !== undefined && (
+                          <span className="text-slate-400 font-mono">
+                            (TCP: {detailNode.last_tcp_latency} ms)
+                          </span>
+                        )}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
+                    <span className="text-[11px] text-slate-500">测试点 & 时间</span>
+                    <div
+                      className="text-slate-300 truncate"
+                      title={detailNode.last_target_url || ""}
+                    >
+                      {detailNode.last_target_url
+                        ? getTestEndpointName(detailNode.last_target_url)
+                        : "暂未测试"}
+                      {detailNode.last_tested_at && (
+                        <span className="text-slate-500 text-[10px] ml-1.5 font-mono">
+                          ({formatDate(detailNode.last_tested_at)})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: Formatted JSON */}
+            {detailTab === "json" && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400 font-mono">
+                    sing-box Outbound 配置
+                  </span>
+                  <CopyButton
+                    text={(() => {
+                      try {
+                        return JSON.stringify(
+                          JSON.parse(detailNode.raw_json),
+                          null,
+                          2,
+                        );
+                      } catch {
+                        return detailNode.raw_json;
+                      }
+                    })()}
+                    label="复制 JSON"
+                  />
+                </div>
+                <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto max-h-[50vh] leading-relaxed shadow-inner">
+                  {(() => {
+                    try {
+                      return JSON.stringify(
+                        JSON.parse(detailNode.raw_json),
+                        null,
+                        2,
+                      );
+                    } catch {
+                      return detailNode.raw_json;
+                    }
+                  })()}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
       </Dialog>
     </div>
   );

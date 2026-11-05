@@ -333,7 +333,11 @@ const AppContent: React.FC = () => {
           )}
 
           {currentTab === "nodes" && (
-            <NodesView nodes={nodes} onRefresh={loadAllData} />
+            <NodesView
+              nodes={nodes}
+              subscriptions={subscriptions}
+              onRefresh={loadAllData}
+            />
           )}
 
           {currentTab === "groups" && (
@@ -341,6 +345,7 @@ const AppContent: React.FC = () => {
               groups={nodeGroups}
               versionCode={versionCode}
               nodes={nodes}
+              subscriptions={subscriptions}
               onRefresh={loadAllData}
             />
           )}

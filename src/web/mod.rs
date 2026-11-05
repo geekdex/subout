@@ -211,6 +211,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/node-groups/batch-delete",
             post(groups::batch_delete_groups),
         )
+        .route("/api/node-groups/:id/sync", post(groups::sync_group))
         .route(
             "/api/groups",
             get(groups::get_groups).post(groups::add_group),
