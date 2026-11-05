@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Server,
   Activity,
@@ -7,33 +7,96 @@ import {
   Zap,
   CheckSquare,
   Square,
+  Globe,
+  Radio,
+  StopCircle,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Badge } from "../ui/Badge";
 import { Table, Column } from "../ui/Table";
 import { Dialog } from "../ui/Dialog";
-import { NodeItem } from "../../types/api";
+import { Select } from "../ui/Select";
+import { NodeItem, SPEED_TEST_ENDPOINTS } from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
-import { formatLatency, getErrorMessage } from "../../utils/format";
+import {
+  formatDate,
+  formatLatency,
+  getErrorMessage,
+  getTestEndpointName,
+} from "../../utils/format";
 
 interface NodesViewProps {
   nodes?: NodeItem[];
   onRefresh: () => void;
 }
 
-export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) => {
+export const NodesView: React.FC<NodesViewProps> = ({
+  nodes = [],
+  onRefresh,
+}) => {
+  // Local nodes state allowing instant one-by-one rendering during speed tests
+  const [localNodes, setLocalNodes] = useState<NodeItem[]>(nodes);
+  useEffect(() => {
+    setLocalNodes(nodes);
+  }, [nodes]);
+
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [testingAll, setTestingAll] = useState(false);
+
+  // Testing states
+  const [testingBatchActive, setTestingBatchActive] = useState(false);
   const [testingId, setTestingId] = useState<number | null>(null);
+  const [testingNodeMap, setTestingNodeMap] = useState<
+    Record<number, "pending" | "testing" | "completed">
+  >({});
+  const [batchProgress, setBatchProgress] = useState<{
+    completed: number;
+    total: number;
+  }>({ completed: 0, total: 0 });
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
 
+  // Speed test endpoint state, persisted in localStorage safely
+  const [selectedEndpointUrl, setSelectedEndpointUrl] = useState<string>(() => {
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        return (
+          window.localStorage.getItem("subout_speedtest_endpoint") ||
+          SPEED_TEST_ENDPOINTS[0].url
+        );
+      } catch {
+        return SPEED_TEST_ENDPOINTS[0].url;
+      }
+    }
+    return SPEED_TEST_ENDPOINTS[0].url;
+  });
+
+  // Sorting state
+  const [sortKey, setSortKey] = useState<string>("id");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+
   const { success, error } = useToast();
 
-  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  const safeNodes = Array.isArray(localNodes) ? localNodes : [];
+
+  const currentEndpoint =
+    SPEED_TEST_ENDPOINTS.find((ep) => ep.url === selectedEndpointUrl) ||
+    SPEED_TEST_ENDPOINTS[0];
+
+  const handleEndpointChange = (url: string) => {
+    setSelectedEndpointUrl(url);
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        window.localStorage.setItem("subout_speedtest_endpoint", url);
+      } catch {
+        // ignore
+      }
+    }
+  };
 
   const filteredNodes = safeNodes.filter(
     (n) =>
@@ -41,6 +104,44 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
       (n.server || "").toLowerCase().includes(search.toLowerCase()) ||
       (n.node_type || "").toLowerCase().includes(search.toLowerCase()),
   );
+
+  const sortedNodes = [...filteredNodes].sort((a, b) => {
+    let cmp = 0;
+    if (sortKey === "tag") {
+      cmp = (a.tag || "").localeCompare(b.tag || "");
+    } else if (sortKey === "node_type") {
+      cmp = (a.node_type || "").localeCompare(b.node_type || "");
+    } else if (sortKey === "server") {
+      cmp = `${a.server}:${a.port}`.localeCompare(`${b.server}:${b.port}`);
+    } else if (sortKey === "latency_ms") {
+      const latA =
+        a.last_web_latency ?? a.last_tcp_latency ?? a.latency_ms ?? null;
+      const latB =
+        b.last_web_latency ?? b.last_tcp_latency ?? b.latency_ms ?? null;
+      const score = (v: number | null) => {
+        if (v === null || v === undefined) return 999999;
+        if (v <= 0) return 888888;
+        return v;
+      };
+      cmp = score(latA) - score(latB);
+    } else if (sortKey === "last_tested_at") {
+      const dateA = a.last_tested_at || "";
+      const dateB = b.last_tested_at || "";
+      cmp = dateA.localeCompare(dateB);
+    } else {
+      cmp = a.id - b.id;
+    }
+    return sortDirection === "asc" ? cmp : -cmp;
+  });
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection(key === "latency_ms" ? "asc" : "desc");
+    }
+  };
 
   const handleSelectAll = () => {
     if (selectedIds.length === filteredNodes.length) {
@@ -58,31 +159,169 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
     }
   };
 
+  // Cancel running speed test
+  const handleCancelTest = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setTestingBatchActive(false);
+    setTestingNodeMap({});
+  };
+
+  // Single node speed test
   const handleTestLatency = async (node: NodeItem) => {
     setTestingId(node.id);
+    setTestingNodeMap((prev) => ({ ...prev, [node.id]: "testing" }));
     try {
-      const res = await api.testNodeLatency(node.id);
-      const l = res.latency_ms;
-      success("测速完成", `${node.tag}: ${l !== null && l !== undefined ? `${l} ms` : "超时"}`);
+      const res = await api.testNodeLatency(node.id, selectedEndpointUrl);
+      const l = res.web_latency ?? res.latency_ms;
+      const isTimeout = l === null || l === undefined || l <= 0;
+      const nowStr = new Date()
+        .toISOString()
+        .replace("T", " ")
+        .substring(0, 19);
+
+      // Render updated node immediately
+      setLocalNodes((prev) =>
+        prev.map((n) =>
+          n.id === node.id
+            ? {
+                ...n,
+                last_web_latency: res.web_latency ?? (isTimeout ? -1 : l),
+                last_tcp_latency: res.tcp_latency,
+                last_tested_at: nowStr,
+                last_target_url: selectedEndpointUrl,
+              }
+            : n,
+        ),
+      );
+
+      if (isTimeout) {
+        success(
+          "测速完成",
+          `${node.tag} (${currentEndpoint.name}): 超时 / 不可达`,
+        );
+      } else {
+        const tcpExtra =
+          res.tcp_latency && res.tcp_latency > 0
+            ? ` (TCP: ${res.tcp_latency} ms)`
+            : "";
+        success(
+          "测速完成",
+          `${node.tag} (${currentEndpoint.name}): ${l} ms${tcpExtra}`,
+        );
+      }
       onRefresh();
     } catch (err: unknown) {
       error("测速失败", getErrorMessage(err));
     } finally {
       setTestingId(null);
+      setTestingNodeMap((prev) => {
+        const next = { ...prev };
+        delete next[node.id];
+        return next;
+      });
     }
   };
 
-  const handleTestAll = async () => {
-    setTestingAll(true);
-    try {
-      await api.testAllNodesLatency();
-      success("全部节点测速完成");
-      onRefresh();
-    } catch (err: unknown) {
-      error("测速失败", getErrorMessage(err));
-    } finally {
-      setTestingAll(false);
+  // Batch speed test using real-time streaming: tests and renders node by node
+  const runBatchTest = async (targetIds: number[], label: string) => {
+    if (targetIds.length === 0) return;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
+    const ac = new AbortController();
+    abortControllerRef.current = ac;
+
+    // Mark all target nodes as pending in the UI so each displays a progressbar
+    const initialMap: Record<number, "pending" | "testing" | "completed"> = {};
+    for (const id of targetIds) {
+      initialMap[id] = "pending";
+    }
+    setTestingNodeMap(initialMap);
+    setBatchProgress({ completed: 0, total: targetIds.length });
+    setTestingBatchActive(true);
+
+    try {
+      await api.pingNodesStream(
+        {
+          ids: targetIds,
+          targetUrl: selectedEndpointUrl,
+          testType: "both",
+        },
+        (event) => {
+          if (event.status === "testing") {
+            setTestingNodeMap((prev) => ({
+              ...prev,
+              [event.id]: "testing",
+            }));
+          } else if (event.status === "completed") {
+            // Immediately update and render this single node
+            setTestingNodeMap((prev) => {
+              const next = { ...prev };
+              delete next[event.id];
+              return next;
+            });
+            const effectiveWeb =
+              event.web_latency !== null && event.web_latency !== undefined
+                ? event.web_latency
+                : -1;
+            const effectiveTcp =
+              event.tcp_latency !== null && event.tcp_latency !== undefined
+                ? event.tcp_latency
+                : -1;
+            const nowStr =
+              event.tested_at ||
+              new Date().toISOString().replace("T", " ").substring(0, 19);
+
+            setLocalNodes((prev) =>
+              prev.map((n) =>
+                n.id === event.id
+                  ? {
+                      ...n,
+                      last_web_latency: effectiveWeb,
+                      last_tcp_latency: effectiveTcp,
+                      last_tested_at: nowStr,
+                      last_target_url: event.target_url || selectedEndpointUrl,
+                    }
+                  : n,
+              ),
+            );
+            setBatchProgress((prev) => ({
+              ...prev,
+              completed: event.completed ?? prev.completed + 1,
+            }));
+          }
+        },
+        ac.signal,
+      );
+      success(
+        `${label}完成`,
+        `已使用「${currentEndpoint.name}」测速 ${targetIds.length} 个节点`,
+      );
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        success("测速已中止", "已保留所有已测速节点的最新结果");
+      } else {
+        error("测速失败", getErrorMessage(err));
+      }
+    } finally {
+      setTestingBatchActive(false);
+      setTestingNodeMap({});
+      abortControllerRef.current = null;
+      onRefresh();
+    }
+  };
+
+  const handleTestSelected = () => {
+    runBatchTest(selectedIds, "所选测速");
+  };
+
+  const handleTestAll = () => {
+    const allIds = safeNodes.map((n) => n.id);
+    runBatchTest(allIds, "全量测速");
   };
 
   const handleBatchDelete = async () => {
@@ -101,6 +340,20 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
     }
   };
 
+  // Node pool statistics
+  const testedCount = safeNodes.filter(
+    (n) => n.last_web_latency !== null || n.last_tcp_latency !== null,
+  ).length;
+  const availableCount = safeNodes.filter((n) => {
+    const lat = n.last_web_latency ?? n.last_tcp_latency;
+    return lat !== null && lat !== undefined && lat > 0;
+  }).length;
+
+  const progressPercent =
+    batchProgress.total > 0
+      ? Math.round((batchProgress.completed / batchProgress.total) * 100)
+      : 0;
+
   const columns: Column<NodeItem>[] = [
     {
       key: "select",
@@ -109,6 +362,7 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
           type="button"
           onClick={handleSelectAll}
           className="p-1 text-slate-400 hover:text-slate-200"
+          title="全选 / 取消全选"
         >
           {selectedIds.length > 0 &&
           selectedIds.length === filteredNodes.length ? (
@@ -159,6 +413,7 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
     {
       key: "server",
       header: "服务器与端口",
+      sortable: true,
       render: (node) => (
         <span className="font-mono text-slate-300">
           {node.server}:{node.port}
@@ -167,15 +422,98 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
     },
     {
       key: "latency_ms",
-      header: "延迟",
+      header: "测速结果 / 测试点",
       sortable: true,
       render: (node) => {
-        const rawLatency = node.last_tcp_latency ?? node.last_web_latency ?? node.latency_ms;
-        const { text, color } = formatLatency(rawLatency);
+        const testStatus = testingNodeMap[node.id];
+        const isNodeTesting = testStatus === "testing" || testingId === node.id;
+        const isNodePending = testStatus === "pending";
+
+        // Dynamic testing state: render active animated progress bar
+        if (isNodeTesting) {
+          return (
+            <div className="flex flex-col gap-1.5 w-36 py-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-sky-400 font-medium flex items-center gap-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500" />
+                  </span>
+                  测速中...
+                </span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden relative">
+                <div className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-sky-500 via-indigo-500 to-emerald-400 rounded-full animate-progress" />
+              </div>
+            </div>
+          );
+        }
+
+        // Queued state: render animated waiting progress bar
+        if (isNodePending) {
+          return (
+            <div className="flex flex-col gap-1.5 w-36 py-1">
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
+                  排队中...
+                </span>
+              </div>
+              <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden relative">
+                <div className="absolute inset-y-0 w-1/4 bg-slate-600/50 rounded-full animate-progress-slow" />
+              </div>
+            </div>
+          );
+        }
+
+        // Completed / Default state: renders measured result immediately upon completion
+        const primaryLatency =
+          node.last_web_latency !== null &&
+          node.last_web_latency !== undefined &&
+          node.last_web_latency > 0
+            ? node.last_web_latency
+            : node.last_web_latency === -1 || node.last_tcp_latency === -1
+              ? -1
+              : node.last_tcp_latency ?? node.latency_ms;
+        const { text, color } = formatLatency(primaryLatency);
+        const endpointName = getTestEndpointName(node.last_target_url);
+
         return (
-          <span className={`font-mono text-xs font-medium ${color}`}>
-            {text}
-          </span>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`font-mono text-xs font-semibold ${color}`}>
+                {text}
+              </span>
+              {node.last_tcp_latency !== null &&
+                node.last_tcp_latency !== undefined &&
+                node.last_tcp_latency > 0 &&
+                node.last_web_latency !== null &&
+                node.last_web_latency !== undefined && (
+                  <span
+                    className="text-[10px] text-slate-500 font-mono"
+                    title={`TCP 握手延迟: ${node.last_tcp_latency} ms`}
+                  >
+                    (TCP {node.last_tcp_latency}ms)
+                  </span>
+                )}
+            </div>
+            {node.last_tested_at ? (
+              <div
+                className="flex items-center gap-1 text-[11px] text-slate-400"
+                title={`测试点: ${endpointName}\n目标 URL: ${node.last_target_url || "-"}\n测试时间: ${node.last_tested_at}`}
+              >
+                <span className="text-slate-300 font-medium truncate max-w-[130px]">
+                  {endpointName}
+                </span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-500 font-mono text-[10px] shrink-0">
+                  {formatDate(node.last_tested_at)}
+                </span>
+              </div>
+            ) : (
+              <span className="text-[10px] text-slate-600">暂未测试</span>
+            )}
+          </div>
         );
       },
     },
@@ -183,44 +521,51 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
       key: "actions",
       header: "操作",
       className: "text-right",
-      render: (node) => (
-        <div className="flex items-center justify-end gap-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            loading={testingId === node.id}
-            onClick={() => handleTestLatency(node)}
-            icon={<Zap className="w-3.5 h-3.5" />}
-            title="测速"
-          >
-            测速
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              try {
-                await api.deleteNode(node.id);
-                success("节点已删除");
-                onRefresh();
-              } catch (err: unknown) {
-                error("删除失败", getErrorMessage(err));
-              }
-            }}
-            className="text-rose-400 hover:text-rose-300"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-      ),
+      render: (node) => {
+        const isTestingThis =
+          testingId === node.id || testingNodeMap[node.id] !== undefined;
+        return (
+          <div className="flex items-center justify-end gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={isTestingThis}
+              disabled={testingBatchActive}
+              onClick={() => handleTestLatency(node)}
+              icon={<Zap className="w-3.5 h-3.5" />}
+              title={`使用当前测试点 [${currentEndpoint.name}] 测速`}
+            >
+              测速
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={testingBatchActive}
+              onClick={async () => {
+                try {
+                  await api.deleteNode(node.id);
+                  success("节点已删除");
+                  onRefresh();
+                } catch (err: unknown) {
+                  error("删除失败", getErrorMessage(err));
+                }
+              }}
+              className="text-rose-400 hover:text-rose-300"
+              title="删除节点"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Top action header */}
-      <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
+      <div className="glass-panel p-5 sm:p-6 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
+        <div className="space-y-1">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Server className="w-5 h-5 text-sky-400" />
             <span>节点池管理 (Node Pool)</span>
@@ -228,32 +573,120 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
               共 {safeNodes.length} 个
             </Badge>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            订阅拉取的所有出站节点统一汇集在此，可单点测速、批量筛选、或供节点组合动态聚合。
+          <p className="text-xs text-slate-400">
+            订阅拉取的所有出站节点统一汇集在此，可切换测试点单点测速、批量测速、或供节点组合动态聚合。
           </p>
+          <div className="flex items-center gap-3 text-xs text-slate-400 pt-1">
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <Globe className="w-3.5 h-3.5 text-sky-400" />
+              当前测试点:{" "}
+              <span className="font-semibold text-sky-300">
+                {currentEndpoint.name}
+              </span>
+            </span>
+            <span className="text-slate-600">|</span>
+            <span>
+              已测速:{" "}
+              <span className="text-slate-200 font-medium">{testedCount}</span>{" "}
+              / {safeNodes.length}
+            </span>
+            <span>
+              可用:{" "}
+              <span className="text-emerald-400 font-medium">
+                {availableCount}
+              </span>
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
-          {selectedIds.length > 0 && (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setBatchDeleteModalOpen(true)}
-              icon={<Trash2 className="w-4 h-4" />}
-            >
-              删除所选 ({selectedIds.length})
-            </Button>
-          )}
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={testingAll}
-            onClick={handleTestAll}
-            icon={<Activity className="w-4 h-4 text-emerald-400" />}
-          >
-            全量测速
-          </Button>
+
+        {/* Speed test controls & batch actions */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto">
+          {/* Endpoint selector dropdown */}
+          <div className="w-full sm:w-60">
+            <Select
+              disabled={testingBatchActive}
+              value={selectedEndpointUrl}
+              onChange={handleEndpointChange}
+              options={SPEED_TEST_ENDPOINTS.map((ep) => ({
+                value: ep.url,
+                label: ep.name,
+                description: ep.url,
+              }))}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedIds.length > 0 && !testingBatchActive && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleTestSelected}
+                  icon={<Radio className="w-3.5 h-3.5 text-sky-400" />}
+                  title={`使用 [${currentEndpoint.name}] 测速选中的 ${selectedIds.length} 个节点`}
+                >
+                  测速所选 ({selectedIds.length})
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setBatchDeleteModalOpen(true)}
+                  icon={<Trash2 className="w-3.5 h-3.5" />}
+                >
+                  删除所选 ({selectedIds.length})
+                </Button>
+              </>
+            )}
+
+            {testingBatchActive ? (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={handleCancelTest}
+                icon={<StopCircle className="w-4 h-4 text-rose-300" />}
+                title="中止当前正在进行的批量测速"
+              >
+                停止测速 ({batchProgress.completed}/{batchProgress.total})
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleTestAll}
+                icon={<Activity className="w-4 h-4 text-emerald-400" />}
+                title={`使用 [${currentEndpoint.name}] 对全部节点执行测速`}
+              >
+                全量测速
+              </Button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Global Batch Speed Test Progress Banner */}
+      {testingBatchActive && (
+        <div className="glass-panel p-4 border border-sky-500/30 bg-sky-950/20 rounded-xl space-y-2 animate-in fade-in duration-300">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-white font-medium flex items-center gap-2">
+              <Activity className="w-4 h-4 text-sky-400 animate-spin" />
+              正在测试节点连通性及延迟 · 目标:{" "}
+              <span className="text-sky-300 font-semibold">
+                {currentEndpoint.name}
+              </span>
+            </span>
+            <span className="text-sky-300 font-mono font-semibold">
+              {batchProgress.completed} / {batchProgress.total} (
+              {progressPercent}%)
+            </span>
+          </div>
+          <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden shadow-inner">
+            <div
+              className="h-full bg-gradient-to-r from-sky-500 via-indigo-500 to-emerald-400 transition-all duration-300 ease-out"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Filter / Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -269,13 +702,24 @@ export const NodesView: React.FC<NodesViewProps> = ({ nodes = [], onRefresh }) =
         </div>
         {selectedIds.length > 0 && (
           <div className="text-xs text-slate-400">
-            已选中 <span className="font-semibold text-sky-400">{selectedIds.length}</span> 个节点
+            已选中{" "}
+            <span className="font-semibold text-sky-400">
+              {selectedIds.length}
+            </span>{" "}
+            个节点
           </div>
         )}
       </div>
 
       {/* Nodes Table */}
-      <Table columns={columns} data={filteredNodes} keyField="id" />
+      <Table
+        columns={columns}
+        data={sortedNodes}
+        keyField="id"
+        sortKey={sortKey}
+        sortDirection={sortDirection}
+        onSort={handleSort}
+      />
 
       {/* Batch Delete Confirmation Modal */}
       <Dialog

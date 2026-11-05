@@ -2,7 +2,9 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
+    response::sse::{Event, KeepAlive, Sse},
 };
+use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -363,12 +365,62 @@ pub struct PingRequest {
     pub target_url: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+pub struct SinglePingPayload {
+    pub target_url: Option<String>,
+    pub test_type: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TestEndpointDto {
+    pub name: &'static str,
+    pub url: &'static str,
+}
+
+pub const TEST_ENDPOINTS: &[TestEndpointDto] = &[
+    TestEndpointDto {
+        name: "Google 静态资源",
+        url: "https://www.gstatic.com/generate_204",
+    },
+    TestEndpointDto {
+        name: "Google 主站连通性",
+        url: "https://www.google.com/generate_204",
+    },
+    TestEndpointDto {
+        name: "Cloudflare 连通性",
+        url: "https://cp.cloudflare.com/generate_204",
+    },
+    TestEndpointDto {
+        name: "Apple 网络连通性",
+        url: "https://captive.apple.com/hotspot-detect.html",
+    },
+    TestEndpointDto {
+        name: "Mozilla 网络连通性",
+        url: "https://detectportal.firefox.com/success.txt",
+    },
+    TestEndpointDto {
+        name: "Cloudflare 网络诊断",
+        url: "https://1.1.1.1/cdn-cgi/trace",
+    },
+];
+
+pub const DEFAULT_SPEED_TEST_URL: &str = "https://www.gstatic.com/generate_204";
+
+pub fn get_test_endpoint_name(url: &str) -> &'static str {
+    for ep in TEST_ENDPOINTS {
+        if ep.url == url {
+            return ep.name;
+        }
+    }
+    "自定义测试点"
+}
+
 #[derive(Serialize)]
 pub struct PingResponse {
     pub id: i64,
-    pub latency: Option<u64>,
-    pub tcp_latency: Option<u64>,
-    pub web_latency: Option<u64>,
+    pub latency: Option<i64>,
+    pub tcp_latency: Option<i64>,
+    pub web_latency: Option<i64>,
 }
 
 struct SingBoxGuard {
@@ -426,13 +478,8 @@ async fn test_transport_latency(server: &str, port: u16, node_type: &str) -> Opt
     }
 }
 
-pub async fn test_node_web_latency(
-    raw_json: String,
-    target_url: String,
-    sem: Arc<Semaphore>,
-) -> Option<u64> {
+pub async fn test_node_web_latency_internal(raw_json: String, target_url: String) -> Option<u64> {
     let singbox_bin = crate::kernel::get_singbox_executable()?;
-    let _permit = sem.acquire().await.ok()?;
 
     tokio::time::timeout(Duration::from_secs(7), async {
         // 1. Get a random free port
@@ -520,12 +567,12 @@ pub async fn test_node_web_latency(
                     .redirect(reqwest::redirect::Policy::limited(10))
                     .timeout(Duration::from_millis(5000))
                     .build()
-                    && let Ok(resp) = client.get(&target_url).send().await {
-                        let status = resp.status().as_u16();
-                        if status < 400 || status == 403 || status == 405 || status == 429 {
-                            latency = Some(start.elapsed().as_millis() as u64);
-                        }
-                    }
+                && let Ok(_resp) = client.get(&target_url).send().await
+            {
+                // As long as the HTTP request reaches the target site and gets an HTTP response,
+                // record the round-trip time directly ("返回时什么就是什么，正常网络请求")
+                latency = Some(start.elapsed().as_millis() as u64);
+            }
         }
 
         latency
@@ -533,6 +580,15 @@ pub async fn test_node_web_latency(
     .await
     .ok()
     .flatten()
+}
+
+pub async fn test_node_web_latency(
+    raw_json: String,
+    target_url: String,
+    sem: Arc<Semaphore>,
+) -> Option<u64> {
+    let _permit = sem.acquire().await.ok()?;
+    test_node_web_latency_internal(raw_json, target_url).await
 }
 
 pub async fn ping_nodes(
@@ -544,8 +600,9 @@ pub async fn ping_nodes(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    let test_type = payload.test_type.as_deref().unwrap_or("tcp");
-    if test_type == "web" && crate::kernel::get_singbox_executable().is_none() {
+    let test_type = payload.test_type.as_deref().unwrap_or("both");
+    let singbox_available = crate::kernel::get_singbox_executable().is_some();
+    if test_type == "web" && !singbox_available {
         return Err((
             StatusCode::BAD_REQUEST,
             "当前系统尚未安装 sing-box 内核，无法执行节点网页延迟测试。请先在【内核管理】中一键下载安装内核。".to_string(),
@@ -560,14 +617,12 @@ pub async fn ping_nodes(
     })?;
 
     let ids = if payload.ids.is_empty() {
-        let mut stmt = conn
-            .prepare("SELECT id FROM nodes WHERE enabled = 1")
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "查询节点失败".to_string(),
-                )
-            })?;
+        let mut stmt = conn.prepare("SELECT id FROM nodes").map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "查询节点失败".to_string(),
+            )
+        })?;
         let node_ids: Vec<i64> = stmt
             .query_map([], |row| row.get(0))
             .map_err(|_| {
@@ -601,7 +656,7 @@ pub async fn ping_nodes(
 
     let target_url = payload
         .target_url
-        .unwrap_or_else(|| "http://www.gstatic.com/generate_204".to_string());
+        .unwrap_or_else(|| DEFAULT_SPEED_TEST_URL.to_string());
 
     let mut tasks = Vec::new();
     if test_type == "web" {
@@ -611,9 +666,9 @@ pub async fn ping_nodes(
                 tasks.push(tokio::spawn(async move {
                     PingResponse {
                         id,
-                        latency: None,
+                        latency: Some(-1),
                         tcp_latency: None,
-                        web_latency: None,
+                        web_latency: Some(-1),
                     }
                 }));
                 continue;
@@ -622,11 +677,12 @@ pub async fn ping_nodes(
             let target_url = target_url.clone();
             tasks.push(tokio::spawn(async move {
                 let latency = test_node_web_latency(raw_json, target_url, sem).await;
+                let lat_val = Some(latency.map_or(-1, |v| v as i64));
                 PingResponse {
                     id,
-                    latency,
+                    latency: lat_val,
                     tcp_latency: None,
-                    web_latency: latency,
+                    web_latency: lat_val,
                 }
             }));
         }
@@ -637,9 +693,9 @@ pub async fn ping_nodes(
                 tasks.push(tokio::spawn(async move {
                     PingResponse {
                         id,
-                        latency: None,
-                        tcp_latency: None,
-                        web_latency: None,
+                        latency: Some(-1),
+                        tcp_latency: Some(-1),
+                        web_latency: Some(-1),
                     }
                 }));
                 continue;
@@ -647,16 +703,34 @@ pub async fn ping_nodes(
             let sem = sem.clone();
             let target_url = target_url.clone();
             tasks.push(tokio::spawn(async move {
-                // 1. Test transport connectivity (TCP stream for TCP nodes, UDP probe for UDP nodes like Hysteria2)
-                let tcp_latency = test_transport_latency(&server, port, &node_type).await;
+                // 1. Run transport probe and singbox web latency test concurrently
+                let tcp_task = test_transport_latency(&server, port, &node_type);
+                let web_task = test_node_web_latency(raw_json, target_url, sem);
+                let (tcp_latency, web_latency) = tokio::join!(tcp_task, web_task);
 
-                // 2. Test Web latency regardless of transport probe result
-                let web_latency = test_node_web_latency(raw_json, target_url, sem).await;
+                let web_val = if singbox_available {
+                    Some(web_latency.map_or(-1, |v| v as i64))
+                } else {
+                    None
+                };
+                let tcp_val = Some(tcp_latency.map_or(-1, |v| v as i64));
+                let primary = if let Some(w) = web_val
+                    && w > 0
+                {
+                    Some(w)
+                } else if let Some(t) = tcp_val
+                    && t > 0
+                {
+                    Some(t)
+                } else {
+                    Some(-1)
+                };
+
                 PingResponse {
                     id,
-                    latency: web_latency.or(tcp_latency),
-                    tcp_latency,
-                    web_latency,
+                    latency: primary,
+                    tcp_latency: tcp_val,
+                    web_latency: web_val,
                 }
             }));
         }
@@ -667,8 +741,8 @@ pub async fn ping_nodes(
                 tasks.push(tokio::spawn(async move {
                     PingResponse {
                         id,
-                        latency: None,
-                        tcp_latency: None,
+                        latency: Some(-1),
+                        tcp_latency: Some(-1),
                         web_latency: None,
                     }
                 }));
@@ -676,10 +750,11 @@ pub async fn ping_nodes(
             }
             tasks.push(tokio::spawn(async move {
                 let latency = test_transport_latency(&server, port, &node_type).await;
+                let tcp_val = Some(latency.map_or(-1, |v| v as i64));
                 PingResponse {
                     id,
-                    latency,
-                    tcp_latency: latency,
+                    latency: tcp_val,
+                    tcp_latency: tcp_val,
                     web_latency: None,
                 }
             }));
@@ -702,12 +777,9 @@ pub async fn ping_nodes(
         };
         for item in &results {
             let (tcp, web) = match test_type {
-                "both" => (
-                    Some(item.tcp_latency.map_or(-1, |v| v as i64)),
-                    Some(item.web_latency.map_or(-1, |v| v as i64)),
-                ),
-                "web" => (None, Some(item.web_latency.map_or(-1, |v| v as i64))),
-                _ => (Some(item.tcp_latency.map_or(-1, |v| v as i64)), None),
+                "both" => (item.tcp_latency, item.web_latency),
+                "web" => (None, item.web_latency),
+                _ => (item.tcp_latency, None),
             };
             let _ = db::update_node_ping_result(&conn, item.id, tcp, web, &now_str, target_url_opt);
         }
@@ -720,39 +792,310 @@ pub async fn ping_single_node(
     State(state): State<AppState>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<i64>,
+    body_bytes: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
+    let payload: SinglePingPayload = if body_bytes.is_empty() {
+        SinglePingPayload::default()
+    } else {
+        serde_json::from_slice(&body_bytes).unwrap_or_default()
+    };
+
+    let target_url = payload
+        .target_url
+        .unwrap_or_else(|| DEFAULT_SPEED_TEST_URL.to_string());
+    let test_type = payload.test_type.unwrap_or_else(|| "both".to_string());
+
     let req = PingRequest {
         ids: vec![id],
-        test_type: Some("tcp".to_string()),
-        target_url: None,
+        test_type: Some(test_type),
+        target_url: Some(target_url),
     };
     let res = ping_nodes(State(state), headers, Json(req)).await?;
-    let lat = res.first().and_then(|r| r.tcp_latency.or(r.latency));
+    let first = res.first();
+    let lat = first.and_then(|r| r.web_latency.or(r.latency).or(r.tcp_latency));
+    let tcp_lat = first.and_then(|r| r.tcp_latency);
+    let web_lat = first.and_then(|r| r.web_latency);
     Ok(Json(serde_json::json!({
         "success": true,
-        "latency_ms": lat
+        "latency_ms": lat,
+        "tcp_latency": tcp_lat,
+        "web_latency": web_lat,
     })))
 }
 
 pub async fn ping_all_nodes(
     State(state): State<AppState>,
     headers: HeaderMap,
+    body_bytes: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
+    let payload: SinglePingPayload = if body_bytes.is_empty() {
+        SinglePingPayload::default()
+    } else {
+        serde_json::from_slice(&body_bytes).unwrap_or_default()
+    };
+
+    let target_url = payload
+        .target_url
+        .unwrap_or_else(|| DEFAULT_SPEED_TEST_URL.to_string());
+    let test_type = payload.test_type.unwrap_or_else(|| "both".to_string());
+
     let req = PingRequest {
         ids: vec![],
-        test_type: Some("tcp".to_string()),
-        target_url: None,
+        test_type: Some(test_type),
+        target_url: Some(target_url),
     };
-    let _ = ping_nodes(State(state), headers, Json(req)).await?;
-    Ok(Json(serde_json::json!({ "success": true })))
+    let res = ping_nodes(State(state), headers, Json(req)).await?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "count": res.len(),
+    })))
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NodePingProgressEvent {
+    pub id: i64,
+    pub status: String, // "testing" | "completed" | "all_done"
+    pub latency: Option<i64>,
+    pub tcp_latency: Option<i64>,
+    pub web_latency: Option<i64>,
+    pub tested_at: Option<String>,
+    pub target_url: Option<String>,
+    pub total: Option<usize>,
+    pub completed: Option<usize>,
+}
+
+pub async fn ping_nodes_stream(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<PingRequest>,
+) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, String)>
+{
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    let test_type = payload.test_type.unwrap_or_else(|| "both".to_string());
+    let target_url = payload
+        .target_url
+        .unwrap_or_else(|| DEFAULT_SPEED_TEST_URL.to_string());
+
+    let conn = get_db_conn(&state.db_path).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "数据库连接失败".to_string(),
+        )
+    })?;
+
+    let ids = if payload.ids.is_empty() {
+        let mut stmt = conn.prepare("SELECT id FROM nodes").map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "查询节点失败".to_string(),
+            )
+        })?;
+        let node_ids: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "查询节点失败".to_string(),
+                )
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        node_ids
+    } else {
+        payload.ids
+    };
+
+    let mut nodes_to_ping = Vec::new();
+    for id in &ids {
+        let res: Result<(String, i64, String, String), rusqlite::Error> = conn.query_row(
+            "SELECT server, port, raw_json, node_type FROM nodes WHERE id = ?",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        );
+        if let Ok((server, port, raw_json, node_type)) = res {
+            nodes_to_ping.push((*id, server, port as u16, raw_json, node_type));
+        }
+    }
+    drop(conn);
+
+    let total_nodes = nodes_to_ping.len();
+    let (tx, rx) = tokio::sync::mpsc::channel::<NodePingProgressEvent>(64);
+    let db_path = state.db_path.clone();
+
+    tokio::spawn(async move {
+        let sem = Arc::new(Semaphore::new(6));
+        let completed_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+
+        for (id, server, port, raw_json, node_type) in nodes_to_ping {
+            let tx = tx.clone();
+            let sem = sem.clone();
+            let target_url = target_url.clone();
+            let test_type = test_type.clone();
+            let db_path = db_path.clone();
+            let completed_counter = completed_counter.clone();
+
+            tasks.push(tokio::spawn(async move {
+                // 1. Wait for semaphore permit BEFORE marking node as testing
+                let Ok(_permit) = sem.acquire().await else {
+                    return;
+                };
+
+                // 2. Notify frontend that this node is actively testing
+                let _ = tx
+                    .send(NodePingProgressEvent {
+                        id,
+                        status: "testing".to_string(),
+                        latency: None,
+                        tcp_latency: None,
+                        web_latency: None,
+                        tested_at: None,
+                        target_url: Some(target_url.clone()),
+                        total: Some(total_nodes),
+                        completed: Some(
+                            completed_counter.load(std::sync::atomic::Ordering::Relaxed),
+                        ),
+                    })
+                    .await;
+
+                // 3. Perform the test under the acquired permit
+                let singbox_available = crate::kernel::get_singbox_executable().is_some();
+                let (tcp_latency, web_latency) = if test_type == "web" {
+                    if singbox_available && !server.is_empty() && !raw_json.is_empty() {
+                        let web =
+                            test_node_web_latency_internal(raw_json, target_url.clone()).await;
+                        (None, Some(web.map_or(-1, |v| v as i64)))
+                    } else if !singbox_available {
+                        (None, None)
+                    } else {
+                        (None, Some(-1))
+                    }
+                } else if test_type == "both" {
+                    if server.is_empty() || port == 0 || raw_json.is_empty() {
+                        (Some(-1), Some(-1))
+                    } else {
+                        let tcp_task = test_transport_latency(&server, port, &node_type);
+                        let web_task = async {
+                            if singbox_available {
+                                let w =
+                                    test_node_web_latency_internal(raw_json, target_url.clone())
+                                        .await;
+                                Some(w.map_or(-1, |v| v as i64))
+                            } else {
+                                None
+                            }
+                        };
+                        let (tcp, web) = tokio::join!(tcp_task, web_task);
+                        (Some(tcp.map_or(-1, |v| v as i64)), web)
+                    }
+                } else {
+                    // tcp only
+                    let tcp = if server.is_empty() || port == 0 {
+                        Some(-1)
+                    } else {
+                        let t = test_transport_latency(&server, port, &node_type).await;
+                        Some(t.map_or(-1, |v| v as i64))
+                    };
+                    (tcp, None)
+                };
+
+                let primary_latency = if let Some(w) = web_latency
+                    && w > 0
+                {
+                    Some(w)
+                } else if let Some(t) = tcp_latency
+                    && t > 0
+                {
+                    Some(t)
+                } else {
+                    Some(-1)
+                };
+
+                let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+                // 4. Update database for this node
+                if let Ok(conn) = get_db_conn(&db_path) {
+                    let (tcp_db, web_db) = match test_type.as_str() {
+                        "both" => (tcp_latency, web_latency),
+                        "web" => (None, web_latency),
+                        _ => (tcp_latency, None),
+                    };
+                    let _ = db::update_node_ping_result(
+                        &conn,
+                        id,
+                        tcp_db,
+                        web_db,
+                        &now_str,
+                        Some(target_url.as_str()),
+                    );
+                }
+
+                // Drop permit immediately so the next queued node can proceed without waiting
+                drop(_permit);
+
+                let completed =
+                    completed_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+
+                // 5. Send completed event for this node
+                let _ = tx
+                    .send(NodePingProgressEvent {
+                        id,
+                        status: "completed".to_string(),
+                        latency: primary_latency,
+                        tcp_latency,
+                        web_latency,
+                        tested_at: Some(now_str),
+                        target_url: Some(target_url),
+                        total: Some(total_nodes),
+                        completed: Some(completed),
+                    })
+                    .await;
+            }));
+        }
+
+        for task in tasks {
+            let _ = task.await;
+        }
+
+        // 6. Send all_done event
+        let _ = tx
+            .send(NodePingProgressEvent {
+                id: 0,
+                status: "all_done".to_string(),
+                latency: None,
+                tcp_latency: None,
+                web_latency: None,
+                tested_at: None,
+                target_url: None,
+                total: Some(total_nodes),
+                completed: Some(completed_counter.load(std::sync::atomic::Ordering::Relaxed)),
+            })
+            .await;
+    });
+
+    let stream = futures_util::stream::unfold(rx, |mut receiver| async move {
+        let msg = receiver.recv().await?;
+        let json_str = serde_json::to_string(&msg).ok()?;
+        let event = Event::default().data(json_str);
+        Some((Ok::<_, std::convert::Infallible>(event), receiver))
+    });
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+pub async fn get_test_endpoints() -> Json<Vec<TestEndpointDto>> {
+    Json(TEST_ENDPOINTS.to_vec())
 }
 
 pub async fn get_speed_test_summary(
@@ -953,5 +1296,42 @@ mod tests {
 
         let res = validate_node_json("node-1", "vless", "1.2.3.4", 443, &json);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_speed_test_endpoints_and_defaults() {
+        assert_eq!(TEST_ENDPOINTS.len(), 6);
+        assert_eq!(
+            DEFAULT_SPEED_TEST_URL,
+            "https://www.gstatic.com/generate_204"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://www.gstatic.com/generate_204"),
+            "Google 静态资源"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://www.google.com/generate_204"),
+            "Google 主站连通性"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://cp.cloudflare.com/generate_204"),
+            "Cloudflare 连通性"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://captive.apple.com/hotspot-detect.html"),
+            "Apple 网络连通性"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://detectportal.firefox.com/success.txt"),
+            "Mozilla 网络连通性"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://1.1.1.1/cdn-cgi/trace"),
+            "Cloudflare 网络诊断"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://unknown.com/test"),
+            "自定义测试点"
+        );
     }
 }

@@ -104,10 +104,20 @@ pub async fn fetch_and_update_subscription(db_path: &str, sub_id: i64) -> Result
             }
 
             let mut tag_counts = HashMap::new();
+            let mut existing_test_info = HashMap::new();
             for node in &existing_nodes {
                 if node.subscription_id != Some(sub_id) {
                     *tag_counts.entry(node.tag.clone()).or_insert(0) += 1;
                 }
+                existing_test_info.insert(
+                    node.tag.clone(),
+                    (
+                        node.last_tcp_latency,
+                        node.last_web_latency,
+                        node.last_tested_at.clone(),
+                        node.last_target_url.clone(),
+                    ),
+                );
             }
 
             // Deduplicate and save new nodes
@@ -151,9 +161,13 @@ pub async fn fetch_and_update_subscription(db_path: &str, sub_id: i64) -> Result
                 let enabled_int = 1;
                 let is_custom_int = 0;
 
+                let (prev_tcp, prev_web, prev_tested, prev_target) = existing_test_info
+                    .remove(outbound.tag())
+                    .unwrap_or((None, None, None, None));
+
                 tx.execute(
-                    "INSERT OR REPLACE INTO nodes (subscription_id, tag, node_type, server, port, raw_json, enabled, is_custom) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    params![Some(sub_id), outbound.tag(), node_type, server, port, raw_json, enabled_int, is_custom_int],
+                    "INSERT OR REPLACE INTO nodes (subscription_id, tag, node_type, server, port, raw_json, enabled, is_custom, last_tcp_latency, last_web_latency, last_tested_at, last_target_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params![Some(sub_id), outbound.tag(), node_type, server, port, raw_json, enabled_int, is_custom_int, prev_tcp, prev_web, prev_tested, prev_target],
                 )?;
             }
 

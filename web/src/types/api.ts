@@ -83,9 +83,61 @@ export interface NodeItem {
   last_tcp_latency?: number | null;
   last_web_latency?: number | null;
   last_tested_at?: string | null;
+  last_target_url?: string | null;
   created_at?: string;
   updated_at?: string;
 }
+
+export interface SpeedTestEndpoint {
+  name: string;
+  url: string;
+  description?: string;
+}
+
+export interface NodePingProgressEvent {
+  id: number;
+  status: "testing" | "completed" | "all_done";
+  latency?: number | null;
+  tcp_latency?: number | null;
+  web_latency?: number | null;
+  tested_at?: string | null;
+  target_url?: string | null;
+  total?: number;
+  completed?: number;
+}
+
+export const SPEED_TEST_ENDPOINTS: SpeedTestEndpoint[] = [
+  {
+    name: "Google 静态资源",
+    url: "https://www.gstatic.com/generate_204",
+    description: "Google 极简 204 探测点（默认推荐，响应最快）",
+  },
+  {
+    name: "Google 主站连通性",
+    url: "https://www.google.com/generate_204",
+    description: "Google 主站 204 连通性探测",
+  },
+  {
+    name: "Cloudflare 连通性",
+    url: "https://cp.cloudflare.com/generate_204",
+    description: "Cloudflare 全球 Anycast 边缘网络连通性",
+  },
+  {
+    name: "Apple 网络连通性",
+    url: "https://captive.apple.com/hotspot-detect.html",
+    description: "Apple 官方联网诊断与 Hotspot 探测",
+  },
+  {
+    name: "Mozilla 网络连通性",
+    url: "https://detectportal.firefox.com/success.txt",
+    description: "Mozilla Firefox 网络连通性探测",
+  },
+  {
+    name: "Cloudflare 网络诊断",
+    url: "https://1.1.1.1/cdn-cgi/trace",
+    description: "Cloudflare 1.1.1.1 节点追踪与路由诊断",
+  },
+];
 
 export interface NodeGroup {
   id: number;

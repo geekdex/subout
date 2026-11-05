@@ -29,7 +29,10 @@ export function formatDuration(seconds: number): string {
 export function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "-";
   try {
-    const d = new Date(dateStr);
+    const normalized = dateStr.includes("T")
+      ? dateStr
+      : dateStr.replace(" ", "T");
+    const d = new Date(normalized);
     if (isNaN(d.getTime())) return dateStr;
     return d.toLocaleString("zh-CN", {
       hour12: false,
@@ -49,10 +52,10 @@ export function formatLatency(latencyMs: number | null | undefined): {
   text: string;
   color: string;
 } {
-  if (latencyMs === null || latencyMs === undefined || latencyMs < 0) {
+  if (latencyMs === null || latencyMs === undefined) {
     return { text: "未测试", color: "text-slate-500" };
   }
-  if (latencyMs === 0) {
+  if (latencyMs <= 0) {
     return { text: "超时", color: "text-rose-400" };
   }
   if (latencyMs < 150) {
@@ -62,6 +65,32 @@ export function formatLatency(latencyMs: number | null | undefined): {
     return { text: `${latencyMs} ms`, color: "text-amber-400" };
   }
   return { text: `${latencyMs} ms`, color: "text-rose-400" };
+}
+
+export const KNOWN_SPEED_TEST_ENDPOINTS: Record<string, string> = {
+  "https://www.gstatic.com/generate_204": "Google 静态资源",
+  "https://www.google.com/generate_204": "Google 主站连通性",
+  "https://cp.cloudflare.com/generate_204": "Cloudflare 连通性",
+  "https://captive.apple.com/hotspot-detect.html": "Apple 网络连通性",
+  "https://detectportal.firefox.com/success.txt": "Mozilla 网络连通性",
+  "https://1.1.1.1/cdn-cgi/trace": "Cloudflare 网络诊断",
+  "http://www.gstatic.com/generate_204": "Google 静态资源",
+  "http://www.google.com/generate_204": "Google 主站连通性",
+  "http://cp.cloudflare.com/generate_204": "Cloudflare 连通性",
+};
+
+export function getTestEndpointName(url?: string | null): string {
+  if (!url) return "未指定测试点";
+  const trimmed = url.trim();
+  if (KNOWN_SPEED_TEST_ENDPOINTS[trimmed]) {
+    return KNOWN_SPEED_TEST_ENDPOINTS[trimmed];
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.hostname || trimmed;
+  } catch {
+    return trimmed;
+  }
 }
 
 export function getErrorMessage(err: unknown): string {

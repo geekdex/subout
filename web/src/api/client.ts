@@ -12,6 +12,8 @@ import {
   AutoUpdateSettings,
   AutoUpdateSnapshot,
   SystemInfo,
+  SpeedTestEndpoint,
+  NodePingProgressEvent,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -422,33 +424,140 @@ export const api = {
   },
   async testNodeLatency(
     nodeId: number,
-  ): Promise<{ latency_ms: number | null }> {
+    targetUrl?: string,
+  ): Promise<{
+    latency_ms: number | null;
+    tcp_latency?: number | null;
+    web_latency?: number | null;
+  }> {
     try {
-      return await request(`/api/nodes/${nodeId}/test`, { method: "POST" });
+      return await request(`/api/nodes/${nodeId}/test`, {
+        method: "POST",
+        body: JSON.stringify({ target_url: targetUrl, test_type: "both" }),
+      });
     } catch {
       const res = await request<
         Array<{
           id: number;
           tcp_latency?: number | null;
+          web_latency?: number | null;
           latency?: number | null;
         }>
       >("/api/nodes/ping", {
         method: "POST",
-        body: JSON.stringify({ ids: [nodeId], test_type: "tcp" }),
+        body: JSON.stringify({
+          ids: [nodeId],
+          test_type: "both",
+          target_url: targetUrl,
+        }),
       });
       const first = res?.[0];
-      return { latency_ms: first?.tcp_latency ?? first?.latency ?? null };
+      return {
+        latency_ms:
+          first?.web_latency ?? first?.latency ?? first?.tcp_latency ?? null,
+        tcp_latency: first?.tcp_latency ?? null,
+        web_latency: first?.web_latency ?? null,
+      };
     }
   },
-  async testAllNodesLatency(): Promise<{ success: boolean }> {
+  async testAllNodesLatency(
+    targetUrl?: string,
+    ids?: number[],
+  ): Promise<{ success: boolean; count?: number }> {
     try {
-      return await request("/api/nodes/test-all", { method: "POST" });
+      if (ids && ids.length > 0) {
+        await request("/api/nodes/ping", {
+          method: "POST",
+          body: JSON.stringify({
+            ids,
+            test_type: "both",
+            target_url: targetUrl,
+          }),
+        });
+        return { success: true, count: ids.length };
+      }
+      return await request("/api/nodes/test-all", {
+        method: "POST",
+        body: JSON.stringify({ target_url: targetUrl, test_type: "both" }),
+      });
     } catch {
       await request("/api/nodes/ping", {
         method: "POST",
-        body: JSON.stringify({ ids: [], test_type: "tcp" }),
+        body: JSON.stringify({
+          ids: ids || [],
+          test_type: "both",
+          target_url: targetUrl,
+        }),
       });
       return { success: true };
+    }
+  },
+  async getTestEndpoints(): Promise<SpeedTestEndpoint[]> {
+    return request<SpeedTestEndpoint[]>("/api/nodes/test-endpoints");
+  },
+  async pingNodesStream(
+    options: {
+      ids?: number[];
+      targetUrl?: string;
+      testType?: string;
+    },
+    onProgress: (event: NodePingProgressEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const token = localStorage.getItem("subout_token");
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await fetch("/api/nodes/ping-stream", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ids: options.ids || [],
+        target_url: options.targetUrl,
+        test_type: options.testType || "both",
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`测速请求失败: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("无法读取服务器流式响应");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data:")) {
+          const jsonStr = trimmed.slice(5).trim();
+          if (jsonStr) {
+            try {
+              const eventData: NodePingProgressEvent = JSON.parse(jsonStr);
+              onProgress(eventData);
+            } catch {
+              // ignore malformed line
+            }
+          }
+        }
+      }
     }
   },
 

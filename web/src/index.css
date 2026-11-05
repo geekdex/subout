@@ -42,6 +42,28 @@
   animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+@keyframes progress-shimmer {
+  0% {
+    transform: translateX(-100%);
+    width: 35%;
+  }
+  50% {
+    width: 65%;
+  }
+  100% {
+    transform: translateX(350%);
+    width: 35%;
+  }
+}
+
+.animate-progress {
+  animation: progress-shimmer 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-progress-slow {
+  animation: progress-shimmer 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 /* Safe area padding utilities for mobile notches & home indicator */
 .pt-safe {
   padding-top: max(1.25rem, env(safe-area-inset-top, 1.25rem));
