@@ -77,9 +77,7 @@ impl PlatformStrategy for FallbackPlatform {
         &self,
         _managed_pid: Option<u32>,
     ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
-        Box::pin(async move {
-            Ok(crate::platform::TakeoverDiagnoseResult::no_conflict())
-        })
+        Box::pin(async move { Ok(crate::platform::TakeoverDiagnoseResult::no_conflict()) })
     }
 
     fn enable_system_proxy(&self, _port: u16, _sudo_pass: Option<&str>) {}

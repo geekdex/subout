@@ -55,18 +55,18 @@ pub fn get_config_path_variants(running_config_path: &Path) -> Vec<String> {
             vars.push(c_str);
         }
     }
-    if running_config_path.is_relative() {
-        if let Ok(cwd) = std::env::current_dir() {
-            let abs = cwd.join(running_config_path);
-            let abs_str = abs.to_string_lossy().to_string();
-            if !vars.contains(&abs_str) {
-                vars.push(abs_str);
-            }
-            if let Ok(abs_canon) = std::fs::canonicalize(&abs) {
-                let abs_canon_str = abs_canon.to_string_lossy().to_string();
-                if !vars.contains(&abs_canon_str) {
-                    vars.push(abs_canon_str);
-                }
+    if running_config_path.is_relative()
+        && let Ok(cwd) = std::env::current_dir()
+    {
+        let abs = cwd.join(running_config_path);
+        let abs_str = abs.to_string_lossy().to_string();
+        if !vars.contains(&abs_str) {
+            vars.push(abs_str);
+        }
+        if let Ok(abs_canon) = std::fs::canonicalize(&abs) {
+            let abs_canon_str = abs_canon.to_string_lossy().to_string();
+            if !vars.contains(&abs_canon_str) {
+                vars.push(abs_canon_str);
             }
         }
     }

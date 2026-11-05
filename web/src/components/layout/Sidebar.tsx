@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { Tooltip } from "../ui/Tooltip";
+import { KernelDownloadStatus } from "../../types/api";
 
 export type NavTab =
   | "dashboard"
@@ -33,6 +34,7 @@ interface SidebarProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   isKernelReady: boolean;
+  downloadStatus?: KernelDownloadStatus | null;
   appMode: "simple" | "expert";
   versionCode?: string | number;
   nodeCount?: number;
@@ -46,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   onSelectTab,
   isKernelReady,
+  downloadStatus,
   appMode,
   versionCode,
   mobileOpen = false,
@@ -430,15 +433,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-2 h-2 rounded-full",
                 isKernelReady
                   ? "bg-emerald-400 shadow-sm shadow-emerald-400/50"
-                  : "bg-amber-400 animate-pulse",
+                  : downloadStatus?.status === "downloading" ||
+                      downloadStatus?.status === "extracting"
+                    ? "bg-amber-400 animate-spin"
+                    : "bg-amber-400 animate-pulse",
               )}
             />
             <span
               className={
-                isKernelReady ? "text-emerald-400 font-medium" : "text-amber-400"
+                isKernelReady
+                  ? "text-emerald-400 font-medium"
+                  : downloadStatus?.status === "downloading"
+                    ? "text-amber-300 font-medium"
+                    : downloadStatus?.status === "extracting"
+                      ? "text-cyan-300 font-medium"
+                      : "text-amber-400"
               }
             >
-              {isKernelReady ? "内核就绪" : "内核未就绪"}
+              {isKernelReady
+                ? "内核就绪"
+                : downloadStatus?.status === "downloading"
+                  ? `下载中 ${downloadStatus.progress.toFixed(0)}%`
+                  : downloadStatus?.status === "extracting"
+                    ? "正在安装..."
+                    : "内核未就绪"}
             </span>
           </span>
         </div>

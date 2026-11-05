@@ -120,7 +120,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         // Settings APIs
         .route("/api/settings", get(settings::get_settings))
         .route("/api/settings/sudo", post(settings::save_sudo_password))
-        .route("/api/system/sudo-password", post(settings::save_sudo_password))
+        .route(
+            "/api/system/sudo-password",
+            post(settings::save_sudo_password),
+        )
         .route(
             "/api/settings/auto-update",
             get(settings::get_auto_update_settings).post(settings::save_auto_update_settings),

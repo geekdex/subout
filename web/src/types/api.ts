@@ -30,6 +30,15 @@ export interface ServiceStatus {
   system_proxy_enabled?: boolean;
 }
 
+export interface KernelDownloadStatus {
+  status: "idle" | "downloading" | "extracting" | "ready" | "error";
+  progress: number;
+  downloaded_bytes: number;
+  total_bytes: number;
+  speed_bytes_per_sec: number;
+  error?: string | null;
+}
+
 export interface KernelInfo {
   binary_path: string;
   installed: boolean;
@@ -40,6 +49,9 @@ export interface KernelInfo {
   ready: boolean;
   gatekeeper_blocked: boolean;
   message?: string | null;
+  os?: string;
+  arch?: string;
+  download_status?: KernelDownloadStatus;
 }
 
 export interface TakeoverDiagnoseResult {

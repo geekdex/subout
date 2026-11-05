@@ -4,8 +4,14 @@ use anyhow::anyhow;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::platform::{get_config_path_variants, BoxFuture, PlatformStrategy};
+use crate::platform::{BoxFuture, PlatformStrategy, get_config_path_variants};
 use crate::service::ConflictingProcessInfo;
+
+struct RawProc {
+    pid: u32,
+    comm: String,
+    full_cmd: String,
+}
 
 pub struct LinuxPlatform;
 
@@ -189,8 +195,10 @@ impl PlatformStrategy for LinuxPlatform {
             let config_variants = get_config_path_variants(running_config_path);
             let mut results: Vec<ConflictingProcessInfo> = Vec::new();
             let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-            let mut excluded_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-            let mut children_map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+            let mut excluded_pids: std::collections::HashSet<u32> =
+                std::collections::HashSet::new();
+            let mut children_map: std::collections::HashMap<u32, Vec<u32>> =
+                std::collections::HashMap::new();
 
             // 1. Query ps
             if let Ok(output) = std::process::Command::new("ps")
@@ -199,11 +207,6 @@ impl PlatformStrategy for LinuxPlatform {
                 && output.status.success()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                struct RawProc {
-                    pid: u32,
-                    comm: String,
-                    full_cmd: String,
-                }
                 let mut procs = Vec::new();
 
                 for line in stdout.lines().skip(1) {
@@ -268,7 +271,8 @@ impl PlatformStrategy for LinuxPlatform {
                         || proc.full_cmd.contains("target/debug/subout")
                         || proc.full_cmd.contains("target/release/subout")
                         || proc.full_cmd.contains("cargo")
-                        || (managed_pid.is_some() && config_variants.iter().any(|v| proc.full_cmd.contains(v)));
+                        || (managed_pid.is_some()
+                            && config_variants.iter().any(|v| proc.full_cmd.contains(v)));
 
                     if is_subout {
                         continue;
@@ -346,7 +350,9 @@ impl PlatformStrategy for LinuxPlatform {
                         let is_subout = comm == "subout"
                             || comm.contains("subout")
                             || cmdline.as_deref().is_some_and(|c| {
-                                c.contains("subout") || (managed_pid.is_some() && config_variants.iter().any(|v| c.contains(v)))
+                                c.contains("subout")
+                                    || (managed_pid.is_some()
+                                        && config_variants.iter().any(|v| c.contains(v)))
                             });
 
                         if is_subout {
@@ -486,8 +492,9 @@ impl PlatformStrategy for LinuxPlatform {
                                 continue;
                             }
                             let full_cmd = parts[2..].join(" ");
-                            let is_subout_instance = config_variants.iter().any(|v| full_cmd.contains(v))
-                                || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
+                            let is_subout_instance =
+                                config_variants.iter().any(|v| full_cmd.contains(v))
+                                    || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
                             if is_subout_instance {
                                 pids_to_kill.push(pid);
                             }
@@ -654,7 +661,14 @@ impl PlatformStrategy for LinuxPlatform {
             let mut service_display_name = "Linux systemd 守护服务".to_string();
             let mut target_unit = "sing-box".to_string();
 
-            for unit in ["subout", "subout.service", "sing-box", "sing-box.service", "singbox", "singbox.service"] {
+            for unit in [
+                "subout",
+                "subout.service",
+                "sing-box",
+                "sing-box.service",
+                "singbox",
+                "singbox.service",
+            ] {
                 if let Ok(output) = tokio::process::Command::new("systemctl")
                     .args(["is-active", unit])
                     .output()
@@ -676,11 +690,31 @@ impl PlatformStrategy for LinuxPlatform {
 
             if !systemd_detected {
                 for (p, unit, name) in [
-                    ("/etc/systemd/system/subout.service", "subout", "Subout 系统守护服务"),
-                    ("/etc/systemd/system/sing-box.service", "sing-box", "sing-box 系统服务"),
-                    ("/etc/systemd/system/singbox.service", "singbox", "singbox 系统服务"),
-                    ("/lib/systemd/system/sing-box.service", "sing-box", "sing-box 系统服务"),
-                    ("/usr/lib/systemd/system/sing-box.service", "sing-box", "sing-box 系统服务"),
+                    (
+                        "/etc/systemd/system/subout.service",
+                        "subout",
+                        "Subout 系统守护服务",
+                    ),
+                    (
+                        "/etc/systemd/system/sing-box.service",
+                        "sing-box",
+                        "sing-box 系统服务",
+                    ),
+                    (
+                        "/etc/systemd/system/singbox.service",
+                        "singbox",
+                        "singbox 系统服务",
+                    ),
+                    (
+                        "/lib/systemd/system/sing-box.service",
+                        "sing-box",
+                        "sing-box 系统服务",
+                    ),
+                    (
+                        "/usr/lib/systemd/system/sing-box.service",
+                        "sing-box",
+                        "sing-box 系统服务",
+                    ),
                 ] {
                     if Path::new(p).exists() {
                         systemd_detected = true;
@@ -692,14 +726,20 @@ impl PlatformStrategy for LinuxPlatform {
             }
 
             if systemd_detected {
-                let stop_cmd = format!("sudo systemctl stop {target_unit} && sudo systemctl disable {target_unit}");
-                let msg = format!("检测到外部 systemd 服务 ({target_unit}) 正在运行或已注册守护。外部守护进程具备 Restart 保活机制。Subout 支持通过 Sudo 授权一键停止并禁用外部服务以释放端口，也可复制右侧命令在终端手动解除。");
+                let stop_cmd = format!(
+                    "sudo systemctl stop {target_unit} && sudo systemctl disable {target_unit}"
+                );
+                let msg = format!(
+                    "检测到外部 systemd 服务 ({target_unit}) 正在运行或已注册守护。外部守护进程具备 Restart 保活机制。Subout 支持通过 Sudo 授权一键停止并禁用外部服务以释放端口，也可复制右侧命令在终端手动解除。"
+                );
                 return Ok(crate::platform::TakeoverDiagnoseResult {
                     has_conflict: true,
                     conflict_type: Some("systemd".to_string()),
                     conflict_name: Some(service_display_name),
                     suggestion_command: Some(stop_cmd.clone()),
-                    suggestion: Some(format!("外部进程受 systemd 托管。建议点击「一键接管并终止冲突进程」授权接管，或在终端执行解除命令：{stop_cmd}")),
+                    suggestion: Some(format!(
+                        "外部进程受 systemd 托管。建议点击「一键接管并终止冲突进程」授权接管，或在终端执行解除命令：{stop_cmd}"
+                    )),
                     message: msg.clone(),
                     details: msg,
                     pids,
@@ -715,7 +755,11 @@ impl PlatformStrategy for LinuxPlatform {
                         .collect::<Vec<_>>()
                         .join(" ")
                 );
-                let pid_str = pids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+                let pid_str = pids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let msg = format!(
                     "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。这些进程可能正在占用代理端口或 TUN 网络资源。点击接管可自动终止并释放冲突。",
                     pids.len(),

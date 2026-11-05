@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   AlertTriangle,
   Download,
@@ -6,20 +6,30 @@ import {
   Cpu,
   Terminal,
   Zap,
+  Loader2,
+  XCircle,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { CopyButton } from "../ui/CopyButton";
-import { KernelInfo, TakeoverDiagnoseResult } from "../../types/api";
+import {
+  KernelInfo,
+  KernelDownloadStatus,
+  TakeoverDiagnoseResult,
+} from "../../types/api";
 import { SudoModal } from "./SudoModal";
+import { formatBytes } from "../../utils/format";
 
 export interface GatekeeperModalProps {
   kernelInfo: KernelInfo | null;
   takeoverDiagnose: TakeoverDiagnoseResult | null;
   loading?: boolean;
   downloading: boolean;
+  downloadStatus?: KernelDownloadStatus | null;
+  cancelling?: boolean;
   takingOver?: boolean;
-  onDownloadKernel: () => void;
+  onDownloadKernel: (options?: { version?: string; mirror?: boolean }) => void;
+  onCancelDownload?: () => void;
   onTakeover: () => void;
   isSudoModalOpen?: boolean;
   sudoError?: string | null;
@@ -33,8 +43,11 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
   takeoverDiagnose,
   loading = false,
   downloading,
+  downloadStatus,
+  cancelling = false,
   takingOver = false,
   onDownloadKernel,
+  onCancelDownload,
   onTakeover,
   isSudoModalOpen = false,
   sudoError = null,
@@ -42,6 +55,7 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
   onCloseSudoModal,
   onSubmitSudo,
 }) => {
+  const [useMirror, setUseMirror] = useState(false);
   const isKernelReady = kernelInfo?.ready ?? false;
   const hasConflict = takeoverDiagnose?.has_conflict ?? false;
 
@@ -241,19 +255,153 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
             )}
           </div>
 
-          {/* Action Button: Full width on mobile */}
-          <div className="pt-2 flex flex-col sm:flex-row justify-end">
-            <Button
-              variant="primary"
-              size="md"
-              loading={downloading}
-              onClick={() => onDownloadKernel()}
-              icon={<Download className="w-4 h-4" />}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold border-amber-400 w-full sm:w-auto justify-center text-xs sm:text-sm"
-            >
-              一键下载 {kernelInfo?.pinned_version || "1.14.4"} 内核
-            </Button>
-          </div>
+          {/* Active Download Progress Section */}
+          {(downloading ||
+            downloadStatus?.status === "downloading" ||
+            downloadStatus?.status === "extracting") && (
+            <div className="mt-2 p-4 rounded-xl bg-slate-900/90 border border-amber-500/40 backdrop-blur space-y-3.5">
+              {/* Header line: status text + percent badge + cancel button */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-sm font-semibold text-slate-100 break-words">
+                      {downloadStatus?.status === "extracting"
+                        ? "下载完成，正在解压与校验内核文件..."
+                        : `正在下载 sing-box ${kernelInfo?.pinned_version || "1.14.4"} 内核...`}
+                    </span>
+                    <p className="text-xs text-slate-400 mt-0.5 break-words">
+                      {downloadStatus?.status === "extracting"
+                        ? "自动解压并配置文件执行权限，完成后将自动就绪"
+                        : "系统构件正在通过网络流式下载，可随时取消"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                  <span className="px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-300 font-mono text-xs font-bold border border-amber-500/30">
+                    {downloadStatus?.status === "extracting"
+                      ? "100%"
+                      : `${(downloadStatus?.progress ?? 0).toFixed(1)}%`}
+                  </span>
+
+                  {onCancelDownload && downloadStatus?.status !== "extracting" && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={cancelling}
+                      onClick={onCancelDownload}
+                      icon={<XCircle className="w-3.5 h-3.5" />}
+                      className="text-xs text-rose-300 hover:text-rose-200 border-rose-500/40 hover:border-rose-500/60 hover:bg-rose-500/10"
+                    >
+                      取消下载
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Progress Bar Container */}
+              <div className="w-full bg-slate-950/80 rounded-full h-2.5 sm:h-3 overflow-hidden border border-slate-800 p-0.5">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ease-out ${
+                    downloadStatus?.status === "extracting"
+                      ? "w-full bg-gradient-to-r from-emerald-500 to-cyan-400 animate-pulse"
+                      : "bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400"
+                  }`}
+                  style={{
+                    width:
+                      downloadStatus?.status === "extracting"
+                        ? "100%"
+                        : `${Math.max(
+                            0,
+                            Math.min(100, downloadStatus?.progress ?? 0),
+                          )}%`,
+                  }}
+                />
+              </div>
+
+              {/* Download Metrics Footer */}
+              <div className="flex items-center justify-between text-xs text-slate-400 flex-wrap gap-2 pt-0.5 font-mono">
+                <div className="flex items-center gap-3">
+                  <span>
+                    已下载:{" "}
+                    <strong className="text-slate-200 font-medium">
+                      {formatBytes(downloadStatus?.downloaded_bytes ?? 0)}
+                    </strong>
+                    {downloadStatus?.total_bytes && downloadStatus.total_bytes > 0
+                      ? ` / ${formatBytes(downloadStatus.total_bytes)}`
+                      : ""}
+                  </span>
+                  {downloadStatus?.status !== "extracting" && (
+                    <span>
+                      速度:{" "}
+                      <strong className="text-amber-300 font-medium">
+                        {formatBytes(downloadStatus?.speed_bytes_per_sec ?? 0)}/s
+                      </strong>
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <span>
+                    系统构件: {kernelInfo?.os || "linux"}-{kernelInfo?.arch || "amd64"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Download Error Banner */}
+          {!downloading &&
+            downloadStatus?.status === "error" && (
+              <div className="mt-2 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span className="break-words">
+                    {downloadStatus.error || "下载或安装内核失败，请检查网络或切换加速镜像"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onDownloadKernel({ mirror: useMirror })}
+                    icon={<Download className="w-3.5 h-3.5" />}
+                    className="text-xs text-rose-200 border-rose-500/40 hover:bg-rose-500/20"
+                  >
+                    重试下载
+                  </Button>
+                </div>
+              </div>
+            )}
+
+          {/* Action Row: Shown when not currently downloading */}
+          {!downloading &&
+            downloadStatus?.status !== "downloading" &&
+            downloadStatus?.status !== "extracting" && (
+              <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={useMirror}
+                    onChange={(e) => setUseMirror(e.target.checked)}
+                    className="rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-amber-500/30 w-4 h-4 cursor-pointer"
+                  />
+                  <span>使用国内加速镜像（中国大陆网络环境推荐）</span>
+                </label>
+
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => onDownloadKernel({ mirror: useMirror })}
+                  icon={<Download className="w-4 h-4" />}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold border-amber-400 w-full sm:w-auto justify-center text-xs sm:text-sm"
+                >
+                  一键下载 {kernelInfo?.pinned_version || "1.14.4"} 内核
+                </Button>
+              </div>
+            )}
         </div>
 
         {/* If there is also a process conflict, show sub-card */}

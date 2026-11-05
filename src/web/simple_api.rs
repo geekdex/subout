@@ -59,7 +59,9 @@ pub async fn save_simple_config(
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
     let (config, apply, sudo_pass, takeover) = match payload {
-        SaveSimpleConfigPayload::Wrapped(req) => (req.config, req.apply, req.sudo_pass, req.takeover),
+        SaveSimpleConfigPayload::Wrapped(req) => {
+            (req.config, req.apply, req.sudo_pass, req.takeover)
+        }
         SaveSimpleConfigPayload::Direct(cfg) => (cfg, Some(true), None, None),
     };
 

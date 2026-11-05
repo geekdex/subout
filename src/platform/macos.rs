@@ -4,8 +4,14 @@ use anyhow::anyhow;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::platform::{get_config_path_variants, BoxFuture, PlatformStrategy};
+use crate::platform::{BoxFuture, PlatformStrategy, get_config_path_variants};
 use crate::service::ConflictingProcessInfo;
+
+struct RawProc {
+    pid: u32,
+    comm: String,
+    full_cmd: String,
+}
 
 pub struct MacOsPlatform;
 
@@ -175,13 +181,9 @@ impl PlatformStrategy for MacOsPlatform {
                 && output.status.success()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                struct RawProc {
-                    pid: u32,
-                    comm: String,
-                    full_cmd: String,
-                }
                 let mut procs = Vec::new();
-                let mut children_map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+                let mut children_map: std::collections::HashMap<u32, Vec<u32>> =
+                    std::collections::HashMap::new();
 
                 for line in stdout.lines().skip(1) {
                     let trimmed = line.trim();
@@ -217,7 +219,8 @@ impl PlatformStrategy for MacOsPlatform {
                 }
 
                 // Recursively gather all descendant PIDs of current_pid and managed_pid
-                let mut excluded_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+                let mut excluded_pids: std::collections::HashSet<u32> =
+                    std::collections::HashSet::new();
                 let mut queue = Vec::new();
                 queue.push(current_pid);
                 if let Some(mpid) = managed_pid {
@@ -246,7 +249,8 @@ impl PlatformStrategy for MacOsPlatform {
                         || proc.full_cmd.contains("target/debug/subout")
                         || proc.full_cmd.contains("target/release/subout")
                         || proc.full_cmd.contains("cargo")
-                        || (managed_pid.is_some() && config_variants.iter().any(|v| proc.full_cmd.contains(v)));
+                        || (managed_pid.is_some()
+                            && config_variants.iter().any(|v| proc.full_cmd.contains(v)));
 
                     if is_subout {
                         continue;
@@ -354,8 +358,9 @@ impl PlatformStrategy for MacOsPlatform {
                                 continue;
                             }
                             let full_cmd = parts[2..].join(" ");
-                            let is_subout_instance = config_variants.iter().any(|v| full_cmd.contains(v))
-                                || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
+                            let is_subout_instance =
+                                config_variants.iter().any(|v| full_cmd.contains(v))
+                                    || (exclude_pid.is_some() && Some(ppid) == exclude_pid);
                             if is_subout_instance {
                                 pids_to_kill.push(pid);
                             }
@@ -439,10 +444,30 @@ impl PlatformStrategy for MacOsPlatform {
             ];
             if let Some(home) = dirs::home_dir() {
                 let home_agents = home.join("Library/LaunchAgents");
-                candidate_plists.push(home_agents.join("io.github.geekdex.subout.plist").to_string_lossy().to_string());
-                candidate_plists.push(home_agents.join("sing-box.plist").to_string_lossy().to_string());
-                candidate_plists.push(home_agents.join("homebrew.mxcl.sing-box.plist").to_string_lossy().to_string());
-                candidate_plists.push(home_agents.join("com.sagernet.sing-box.plist").to_string_lossy().to_string());
+                candidate_plists.push(
+                    home_agents
+                        .join("io.github.geekdex.subout.plist")
+                        .to_string_lossy()
+                        .to_string(),
+                );
+                candidate_plists.push(
+                    home_agents
+                        .join("sing-box.plist")
+                        .to_string_lossy()
+                        .to_string(),
+                );
+                candidate_plists.push(
+                    home_agents
+                        .join("homebrew.mxcl.sing-box.plist")
+                        .to_string_lossy()
+                        .to_string(),
+                );
+                candidate_plists.push(
+                    home_agents
+                        .join("com.sagernet.sing-box.plist")
+                        .to_string_lossy()
+                        .to_string(),
+                );
             }
 
             for plist in &candidate_plists {
@@ -526,22 +551,64 @@ impl PlatformStrategy for MacOsPlatform {
 
             if !launchd_detected {
                 let mut candidate_plists = vec![
-                    (PathBuf::from("/Library/LaunchDaemons/io.github.geekdex.subout.plist"), "Subout 系统守护服务"),
-                    (PathBuf::from("/Library/LaunchDaemons/com.geekdex.subout.plist"), "Subout 系统守护服务"),
-                    (PathBuf::from("/Library/LaunchDaemons/com.subout.server.plist"), "Subout 系统守护服务"),
-                    (PathBuf::from("/Library/LaunchDaemons/sing-box.plist"), "sing-box 系统守护服务"),
-                    (PathBuf::from("/Library/LaunchDaemons/homebrew.mxcl.sing-box.plist"), "Homebrew sing-box 服务"),
-                    (PathBuf::from("/Library/LaunchDaemons/com.sagernet.sing-box.plist"), "sing-box 系统守护服务"),
-                    (PathBuf::from("/Library/LaunchAgents/io.github.geekdex.subout.plist"), "Subout 用户守护服务"),
-                    (PathBuf::from("/Library/LaunchAgents/sing-box.plist"), "sing-box 用户守护服务"),
-                    (PathBuf::from("/Library/LaunchAgents/homebrew.mxcl.sing-box.plist"), "Homebrew sing-box 服务"),
-                    (PathBuf::from("/Library/LaunchAgents/com.sagernet.sing-box.plist"), "sing-box 用户守护服务"),
+                    (
+                        PathBuf::from("/Library/LaunchDaemons/io.github.geekdex.subout.plist"),
+                        "Subout 系统守护服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchDaemons/com.geekdex.subout.plist"),
+                        "Subout 系统守护服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchDaemons/com.subout.server.plist"),
+                        "Subout 系统守护服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchDaemons/sing-box.plist"),
+                        "sing-box 系统守护服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchDaemons/homebrew.mxcl.sing-box.plist"),
+                        "Homebrew sing-box 服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchDaemons/com.sagernet.sing-box.plist"),
+                        "sing-box 系统守护服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchAgents/io.github.geekdex.subout.plist"),
+                        "Subout 用户守护服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchAgents/sing-box.plist"),
+                        "sing-box 用户守护服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchAgents/homebrew.mxcl.sing-box.plist"),
+                        "Homebrew sing-box 服务",
+                    ),
+                    (
+                        PathBuf::from("/Library/LaunchAgents/com.sagernet.sing-box.plist"),
+                        "sing-box 用户守护服务",
+                    ),
                 ];
                 if let Some(home) = dirs::home_dir() {
-                    candidate_plists.push((home.join("Library/LaunchAgents/io.github.geekdex.subout.plist"), "Subout 用户服务"));
-                    candidate_plists.push((home.join("Library/LaunchAgents/sing-box.plist"), "sing-box 用户服务"));
-                    candidate_plists.push((home.join("Library/LaunchAgents/homebrew.mxcl.sing-box.plist"), "Homebrew sing-box 服务"));
-                    candidate_plists.push((home.join("Library/LaunchAgents/com.sagernet.sing-box.plist"), "sing-box 用户服务"));
+                    candidate_plists.push((
+                        home.join("Library/LaunchAgents/io.github.geekdex.subout.plist"),
+                        "Subout 用户服务",
+                    ));
+                    candidate_plists.push((
+                        home.join("Library/LaunchAgents/sing-box.plist"),
+                        "sing-box 用户服务",
+                    ));
+                    candidate_plists.push((
+                        home.join("Library/LaunchAgents/homebrew.mxcl.sing-box.plist"),
+                        "Homebrew sing-box 服务",
+                    ));
+                    candidate_plists.push((
+                        home.join("Library/LaunchAgents/com.sagernet.sing-box.plist"),
+                        "sing-box 用户服务",
+                    ));
                 }
                 for (path, label) in candidate_plists {
                     if path.is_file() {
@@ -560,14 +627,19 @@ impl PlatformStrategy for MacOsPlatform {
                 );
                 let msg = format!(
                     "检测到外部 macOS launchd 守护服务正在管理 sing-box 或 Subout{}。外部守护进程具备 KeepAlive 自动拉起机制，直接强制结束会被系统再次重启。Subout 支持通过 Sudo 授权一键卸载外部守护服务并释放端口，也可复制右侧命令在终端手动解除。",
-                    plist_path.as_ref().map(|p| format!(" ({p})")).unwrap_or_default()
+                    plist_path
+                        .as_ref()
+                        .map(|p| format!(" ({p})"))
+                        .unwrap_or_default()
                 );
                 return Ok(crate::platform::TakeoverDiagnoseResult {
                     has_conflict: true,
                     conflict_type: Some("launchd".to_string()),
                     conflict_name: Some(service_display_name),
                     suggestion_command: Some(unload_cmd.clone()),
-                    suggestion: Some(format!("外部进程受 launchd 托管守护。建议点击「一键接管并终止冲突进程」授权接管，或在终端执行解除命令：{unload_cmd}")),
+                    suggestion: Some(format!(
+                        "外部进程受 launchd 托管守护。建议点击「一键接管并终止冲突进程」授权接管，或在终端执行解除命令：{unload_cmd}"
+                    )),
                     message: msg.clone(),
                     details: msg,
                     pids,
@@ -583,7 +655,11 @@ impl PlatformStrategy for MacOsPlatform {
                         .collect::<Vec<_>>()
                         .join(" ")
                 );
-                let pid_str = pids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+                let pid_str = pids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let msg = format!(
                     "检测到 {} 个正在运行的外部 sing-box 进程 (PID: {})。这些进程可能正在占用代理端口 (如 7890/2080) 或 TUN 虚拟网卡，导致 Subout 无法正常启动或网络冲突。",
                     pids.len(),

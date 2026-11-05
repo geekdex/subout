@@ -72,10 +72,7 @@ pub async fn save_sudo_password(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    let effective_pass = payload
-        .sudo_pass
-        .or(payload.password)
-        .unwrap_or_default();
+    let effective_pass = payload.sudo_pass.or(payload.password).unwrap_or_default();
     let trimmed = effective_pass.trim();
     if trimmed.is_empty() {
         state.service_manager.clear_saved_sudo_pass().await;

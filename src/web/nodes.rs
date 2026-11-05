@@ -562,10 +562,20 @@ pub async fn ping_nodes(
     let ids = if payload.ids.is_empty() {
         let mut stmt = conn
             .prepare("SELECT id FROM nodes WHERE enabled = 1")
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "查询节点失败".to_string()))?;
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "查询节点失败".to_string(),
+                )
+            })?;
         let node_ids: Vec<i64> = stmt
             .query_map([], |row| row.get(0))
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "查询节点失败".to_string()))?
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "查询节点失败".to_string(),
+                )
+            })?
             .filter_map(Result::ok)
             .collect();
         node_ids

@@ -181,7 +181,12 @@ pub async fn update_config(
     }
 
     let existing = db::get_config_profile_by_id(&conn, id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("查询配置失败: {e}")))?
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("查询配置失败: {e}"),
+            )
+        })?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "配置不存在".to_string()))?;
 
     let platform = match payload.platform.as_deref() {

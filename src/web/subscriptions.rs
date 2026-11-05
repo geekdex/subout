@@ -203,7 +203,12 @@ pub async fn fetch_single_subscription(
 
     fetcher::fetch_and_update_subscription(&state.db_path, id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("拉取订阅失败: {e}")))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("拉取订阅失败: {e}"),
+            )
+        })?;
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
     let node_count: i64 = conn

@@ -27,9 +27,16 @@ pub async fn get_kernel_status(
     Ok(Json(status_guard.clone()))
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct DownloadKernelPayload {
+    pub version: Option<String>,
+    pub mirror: Option<bool>,
+}
+
 pub async fn download_kernel(
     State(state): State<AppState>,
     headers: HeaderMap,
+    payload: Option<Json<DownloadKernelPayload>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
@@ -45,6 +52,8 @@ pub async fn download_kernel(
         }
     }
 
+    let use_mirror = payload.and_then(|Json(p)| p.mirror).unwrap_or(false);
+
     state
         .kernel_download_cancel
         .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -58,6 +67,7 @@ pub async fn download_kernel(
         let result = std::panic::AssertUnwindSafe(kernel::download_and_install_kernel(
             status_lock_clone,
             cancel_flag_clone,
+            use_mirror,
         ))
         .catch_unwind()
         .await;

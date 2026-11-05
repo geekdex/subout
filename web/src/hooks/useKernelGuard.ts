@@ -1,6 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api, setGatekeeperBlockedHandler } from "../api/client";
-import { KernelInfo, TakeoverDiagnoseResult } from "../types/api";
+import {
+  KernelInfo,
+  KernelDownloadStatus,
+  TakeoverDiagnoseResult,
+} from "../types/api";
 import { useToast } from "./useToast";
 import { getErrorMessage } from "../utils/format";
 
@@ -18,10 +22,20 @@ if (typeof window !== "undefined") {
   }
 }
 
+export interface DownloadKernelOptions {
+  version?: string;
+  mirror?: boolean;
+}
+
 export function useKernelGuard() {
-  const [kernelInfo, setKernelInfo] = useState<KernelInfo | null>(memoryKernelCache);
+  const [kernelInfo, setKernelInfo] = useState<KernelInfo | null>(
+    memoryKernelCache,
+  );
   const [loading, setLoading] = useState(memoryKernelCache === null);
-  const [downloading, setDownloading] = useState(false);
+  const [downloadStatus, setDownloadStatus] =
+    useState<KernelDownloadStatus | null>(null);
+  const [isStartingDownload, setIsStartingDownload] = useState(false);
+  const [cancellingDownload, setCancellingDownload] = useState(false);
   const [takingOver, setTakingOver] = useState(false);
   const [takeoverDiagnose, setTakeoverDiagnose] =
     useState<TakeoverDiagnoseResult | null>(null);
@@ -29,6 +43,17 @@ export function useKernelGuard() {
   const [sudoError, setSudoError] = useState<string | null>(null);
   const [sudoActionLoading, setSudoActionLoading] = useState(false);
   const { success, error } = useToast();
+
+  const downloadPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+
+  const stopDownloadPolling = useCallback(() => {
+    if (downloadPollTimerRef.current !== null) {
+      clearInterval(downloadPollTimerRef.current);
+      downloadPollTimerRef.current = null;
+    }
+  }, []);
 
   const fetchKernelInfo = useCallback(async () => {
     try {
@@ -49,38 +74,146 @@ export function useKernelGuard() {
           // ignore
         }
       }
+      return info;
     } catch (err: unknown) {
       console.warn("Failed to fetch kernel info:", getErrorMessage(err));
+      return null;
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const pollDownloadStatus = useCallback(async () => {
+    try {
+      const st = await api.getKernelStatus();
+      setDownloadStatus(st);
+
+      if (st.status === "ready") {
+        stopDownloadPolling();
+        setIsStartingDownload(false);
+        const latestInfo = await fetchKernelInfo();
+        const displayVersion =
+          latestInfo?.pinned_version || latestInfo?.version || "1.14.4";
+        success(
+          "内核安装完成",
+          `sing-box ${displayVersion} 已成功安装并就绪`,
+        );
+      } else if (st.status === "error") {
+        stopDownloadPolling();
+        setIsStartingDownload(false);
+        error(
+          "下载内核失败",
+          st.error || "下载或解压过程中发生错误，请重试或勾选加速镜像",
+        );
+      } else if (st.status === "idle") {
+        stopDownloadPolling();
+        setIsStartingDownload(false);
+      }
+    } catch (err: unknown) {
+      console.warn("Failed to poll kernel download status:", err);
+    }
+  }, [fetchKernelInfo, stopDownloadPolling, success, error]);
+
+  const startDownloadPolling = useCallback(() => {
+    if (downloadPollTimerRef.current !== null) {
+      clearInterval(downloadPollTimerRef.current);
+    }
+    downloadPollTimerRef.current = setInterval(pollDownloadStatus, 500);
+  }, [pollDownloadStatus]);
+
   useEffect(() => {
-    fetchKernelInfo();
+    fetchKernelInfo().then((info) => {
+      if (info?.download_status) {
+        setDownloadStatus(info.download_status);
+        if (
+          info.download_status.status === "downloading" ||
+          info.download_status.status === "extracting"
+        ) {
+          startDownloadPolling();
+        }
+      }
+    });
 
     // Hook API 428 response
     setGatekeeperBlockedHandler(() => {
       fetchKernelInfo();
     });
-    const interval = setInterval(fetchKernelInfo, 10000);
-    return () => clearInterval(interval);
-  }, [fetchKernelInfo]);
 
-  const handleDownloadKernel = async (version?: string | unknown) => {
-    const validVersion =
-      typeof version === "string" && version.trim().length > 0
-        ? version.trim()
-        : "1.14.4";
-    setDownloading(true);
+    const interval = setInterval(fetchKernelInfo, 10000);
+    return () => {
+      clearInterval(interval);
+      stopDownloadPolling();
+    };
+  }, [fetchKernelInfo, startDownloadPolling, stopDownloadPolling]);
+
+  const handleDownloadKernel = async (
+    options?: DownloadKernelOptions | string | unknown,
+  ) => {
+    let validVersion = "1.14.4";
+    let useMirror = false;
+
+    if (typeof options === "string" && options.trim().length > 0) {
+      validVersion = options.trim();
+    } else if (options && typeof options === "object") {
+      const opt = options as DownloadKernelOptions;
+      if (typeof opt.version === "string" && opt.version.trim().length > 0) {
+        validVersion = opt.version.trim();
+      }
+      if (typeof opt.mirror === "boolean") {
+        useMirror = opt.mirror;
+      }
+    }
+
+    setIsStartingDownload(true);
+    setDownloadStatus({
+      status: "downloading",
+      progress: 0.0,
+      downloaded_bytes: 0,
+      total_bytes: 0,
+      speed_bytes_per_sec: 0,
+      error: null,
+    });
+
     try {
-      const res = await api.downloadKernel(validVersion);
-      success("内核下载完成", res.message || `成功安装 sing-box ${validVersion}`);
+      await api.downloadKernel({ version: validVersion, mirror: useMirror });
+      // Start real-time polling immediately
+      startDownloadPolling();
+      // Also immediately fire one poll tick
+      await pollDownloadStatus();
+    } catch (err: unknown) {
+      setIsStartingDownload(false);
+      setDownloadStatus({
+        status: "error",
+        progress: 0,
+        downloaded_bytes: 0,
+        total_bytes: 0,
+        speed_bytes_per_sec: 0,
+        error: getErrorMessage(err),
+      });
+      error("发起内核下载失败", getErrorMessage(err));
+    }
+  };
+
+  const handleCancelDownload = async () => {
+    setCancellingDownload(true);
+    try {
+      await api.cancelKernelDownload();
+      stopDownloadPolling();
+      setIsStartingDownload(false);
+      setDownloadStatus({
+        status: "idle",
+        progress: 0,
+        downloaded_bytes: 0,
+        total_bytes: 0,
+        speed_bytes_per_sec: 0,
+        error: "下载已取消",
+      });
+      success("已取消下载", "已成功终止 sing-box 内核下载任务");
       await fetchKernelInfo();
     } catch (err: unknown) {
-      error("下载内核失败", getErrorMessage(err));
+      error("取消下载失败", getErrorMessage(err));
     } finally {
-      setDownloading(false);
+      setCancellingDownload(false);
     }
   };
 
@@ -92,7 +225,6 @@ export function useKernelGuard() {
       await fetchKernelInfo();
     } catch (err: unknown) {
       const errMsg = getErrorMessage(err);
-      // If error indicates that sudo/root privileges are required, pop up the interactive Sudo dialog
       if (
         errMsg.includes("Sudo") ||
         errMsg.includes("Root") ||
@@ -147,14 +279,22 @@ export function useKernelGuard() {
     setSudoError(null);
   };
 
+  const isDownloading =
+    isStartingDownload ||
+    downloadStatus?.status === "downloading" ||
+    downloadStatus?.status === "extracting";
+
   return {
     kernelInfo,
     loading,
-    downloading,
+    downloading: isDownloading,
+    downloadStatus,
+    cancellingDownload,
     takingOver,
     takeoverDiagnose,
     isReady: kernelInfo?.ready ?? false,
     downloadKernel: handleDownloadKernel,
+    cancelDownload: handleCancelDownload,
     takeoverService: handleTakeover,
     refreshKernel: fetchKernelInfo,
     isSudoModalOpen,

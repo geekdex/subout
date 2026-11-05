@@ -179,4 +179,120 @@ describe('GatekeeperModal', () => {
 
     expect(handleSubmitSudo).toHaveBeenCalledWith('testpass');
   });
+
+  it('renders live download progress, speed, bytes and cancel button when downloading', () => {
+    const handleCancel = vi.fn();
+    render(
+      <GatekeeperModal
+        kernelInfo={{
+          binary_path: '',
+          installed: false,
+          version: null,
+          supported_versions: ['1.14.*'],
+          pinned_version: '1.14.4',
+          ready: false,
+          gatekeeper_blocked: true,
+          message: null,
+          os: 'linux',
+          arch: 'amd64',
+        }}
+        takeoverDiagnose={null}
+        downloading={true}
+        downloadStatus={{
+          status: 'downloading',
+          progress: 45.67,
+          downloaded_bytes: 14500000,
+          total_bytes: 31710753,
+          speed_bytes_per_sec: 2500000,
+          error: null,
+        }}
+        onDownloadKernel={vi.fn()}
+        onCancelDownload={handleCancel}
+        onTakeover={vi.fn()}
+      />
+    );
+
+    // Progress percentage
+    expect(screen.getByText('45.7%')).toBeDefined();
+    // Status text
+    expect(screen.getByText(/正在下载 sing-box 1.14.4 内核/)).toBeDefined();
+    // Metrics
+    expect(screen.getByText(/已下载:/)).toBeDefined();
+    expect(screen.getByText(/速度:/)).toBeDefined();
+    expect(screen.getByText(/2.38 MB\/s/)).toBeDefined();
+
+    // Cancel button
+    const cancelBtn = screen.getByText('取消下载');
+    fireEvent.click(cancelBtn);
+    expect(handleCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders extracting status when archive is unpacking', () => {
+    render(
+      <GatekeeperModal
+        kernelInfo={{
+          binary_path: '',
+          installed: false,
+          version: null,
+          supported_versions: ['1.14.*'],
+          pinned_version: '1.14.4',
+          ready: false,
+          gatekeeper_blocked: true,
+          message: null,
+        }}
+        takeoverDiagnose={null}
+        downloading={true}
+        downloadStatus={{
+          status: 'extracting',
+          progress: 100,
+          downloaded_bytes: 31710753,
+          total_bytes: 31710753,
+          speed_bytes_per_sec: 0,
+          error: null,
+        }}
+        onDownloadKernel={vi.fn()}
+        onTakeover={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/下载完成，正在解压与校验内核文件/)).toBeDefined();
+    expect(screen.getByText('100%')).toBeDefined();
+    // Cancel button is hidden during extraction
+    expect(screen.queryByText('取消下载')).toBeNull();
+  });
+
+  it('renders error banner with retry button on download error', () => {
+    const handleDownload = vi.fn();
+    render(
+      <GatekeeperModal
+        kernelInfo={{
+          binary_path: '',
+          installed: false,
+          version: null,
+          supported_versions: ['1.14.*'],
+          pinned_version: '1.14.4',
+          ready: false,
+          gatekeeper_blocked: true,
+          message: null,
+        }}
+        takeoverDiagnose={null}
+        downloading={false}
+        downloadStatus={{
+          status: 'error',
+          progress: 0,
+          downloaded_bytes: 0,
+          total_bytes: 0,
+          speed_bytes_per_sec: 0,
+          error: '网络连接超时，请切换镜像源重试',
+        }}
+        onDownloadKernel={handleDownload}
+        onTakeover={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('网络连接超时，请切换镜像源重试')).toBeDefined();
+    const retryBtn = screen.getByText('重试下载');
+    fireEvent.click(retryBtn);
+    expect(handleDownload).toHaveBeenCalledTimes(1);
+  });
 });

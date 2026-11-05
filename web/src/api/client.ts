@@ -2,6 +2,7 @@ import {
   ConfigProfile,
   ServiceStatus,
   KernelInfo,
+  KernelDownloadStatus,
   TakeoverDiagnoseResult,
   NodeItem,
   NodeGroup,
@@ -135,21 +136,42 @@ export const api = {
     return {
       ...(raw as unknown as KernelInfo),
       installed: Boolean(raw.installed ?? raw.is_installed),
-      pinned_version: (raw.pinned_version as string) || (raw.recommended_version as string) || "1.14.4",
+      pinned_version:
+        (raw.pinned_version as string) ||
+        (raw.recommended_version as string) ||
+        "1.14.4",
       ready: isReady,
       gatekeeper_blocked: !isReady,
       version: (raw.version as string) || null,
-      raw_version: (raw.raw_version as string) || (raw.version as string) || null,
+      raw_version:
+        (raw.raw_version as string) || (raw.version as string) || null,
       binary_path: (raw.binary_path as string) || "",
       supported_versions: (raw.supported_versions as string[]) || ["1.14.*"],
+      download_status: raw.download_status as KernelDownloadStatus | undefined,
     };
   },
+  async getKernelStatus(): Promise<KernelDownloadStatus> {
+    return request<KernelDownloadStatus>("/api/kernel/status");
+  },
   async downloadKernel(
-    version = "1.14.4",
-  ): Promise<{ message: string; version: string }> {
+    options?: { version?: string; mirror?: boolean } | string,
+  ): Promise<{ message: string; version?: string; status: string }> {
+    let version = "1.14.4";
+    let mirror = false;
+    if (typeof options === "string" && options.trim()) {
+      version = options.trim();
+    } else if (options && typeof options === "object") {
+      if (options.version) version = options.version;
+      if (options.mirror !== undefined) mirror = options.mirror;
+    }
     return request("/api/kernel/download", {
       method: "POST",
-      body: JSON.stringify({ version }),
+      body: JSON.stringify({ version, mirror }),
+    });
+  },
+  async cancelKernelDownload(): Promise<{ status: string; message: string }> {
+    return request("/api/kernel/cancel", {
+      method: "POST",
     });
   },
   async diagnoseTakeover(): Promise<TakeoverDiagnoseResult> {
@@ -322,13 +344,13 @@ export const api = {
 
   // Simple Config
   async getSimpleConfig(): Promise<SimpleConfig> {
-    const res = await request<any>("/api/simple-config");
-    return res?.config ? res.config : res;
+    const res = await request<Record<string, unknown>>("/api/simple-config");
+    return (res?.config ? res.config : res) as SimpleConfig;
   },
   async saveSimpleConfig(
     cfg: SimpleConfig,
     apply = true,
-  ): Promise<{ success: boolean; generated?: any }> {
+  ): Promise<{ success: boolean; generated?: unknown }> {
     return request("/api/simple-config", {
       method: "POST",
       body: JSON.stringify({ config: cfg, apply }),
@@ -364,9 +386,11 @@ export const api = {
 
   // Nodes
   async listNodes(): Promise<NodeItem[]> {
-    const res = await request<any>("/api/nodes?limit=10000");
+    const res = await request<Record<string, unknown> | NodeItem[]>("/api/nodes?limit=10000");
     if (Array.isArray(res)) return res;
-    if (Array.isArray(res?.nodes)) return res.nodes;
+    if (res && typeof res === "object" && "nodes" in res && Array.isArray(res.nodes)) {
+      return res.nodes as NodeItem[];
+    }
     return [];
   },
   async saveNode(payload: Partial<NodeItem>): Promise<NodeItem> {
@@ -507,9 +531,13 @@ export const api = {
 
   // Logs
   async getServiceLogs(lines = 200): Promise<{ logs: string[] }> {
-    const res = await request<any>(`/api/service/logs?lines=${lines}`);
+    const res = await request<Record<string, unknown> | string[]>(
+      `/api/service/logs?lines=${lines}`,
+    );
     if (Array.isArray(res)) return { logs: res };
-    if (Array.isArray(res?.logs)) return { logs: res.logs };
+    if (res && typeof res === "object" && "logs" in res && Array.isArray(res.logs)) {
+      return { logs: res.logs as string[] };
+    }
     return { logs: [] };
   },
   async clearServiceLogs(): Promise<{ success: boolean }> {

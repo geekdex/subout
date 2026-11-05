@@ -255,7 +255,9 @@ pub fn get_kernel_info(status: &KernelDownloadStatus) -> KernelInfoResponse {
         (false, default_path.to_string_lossy().to_string(), None)
     };
 
-    let is_version_satisfies = raw_version.as_deref().is_some_and(is_supported_kernel_version);
+    let is_version_satisfies = raw_version
+        .as_deref()
+        .is_some_and(is_supported_kernel_version);
     let ready = is_installed && is_version_satisfies;
     let gatekeeper_blocked = !ready;
     let clean_version = raw_version.as_deref().and_then(extract_semver_string);
@@ -308,6 +310,8 @@ pub fn extract_archive(
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(dest_dir)?;
     let target_path = dest_dir.join(binary_name);
+    let temp_name = format!(".{binary_name}.tmp.{}", std::process::id());
+    let temp_path = dest_dir.join(temp_name);
 
     if archive_type == "zip" {
         let cursor = Cursor::new(archive_bytes);
@@ -317,16 +321,23 @@ pub fn extract_archive(
         let mut extracted = false;
         for i in 0..zip_archive.len() {
             let mut file = zip_archive.by_index(i)?;
+            if file.is_dir() {
+                continue;
+            }
             let file_name = file.name().to_string();
-            if file_name.ends_with(binary_name) || file_name == binary_name {
-                let mut outfile = File::create(&target_path)?;
+            let matches =
+                Path::new(&file_name).file_name().and_then(|n| n.to_str()) == Some(binary_name);
+            if matches {
+                let mut outfile = File::create(&temp_path)?;
                 std::io::copy(&mut file, &mut outfile)?;
+                outfile.sync_all()?;
                 extracted = true;
                 break;
             }
         }
 
         if !extracted {
+            let _ = std::fs::remove_file(&temp_path);
             return Err(anyhow!("在 Zip 压缩包中未找到可执行文件 {binary_name}"));
         }
     } else if archive_type == "tar.gz" {
@@ -337,18 +348,22 @@ pub fn extract_archive(
         let mut extracted = false;
         for entry_res in tar_archive.entries()? {
             let mut entry = entry_res?;
+            if entry.header().entry_type().is_dir() {
+                continue;
+            }
             let path = entry.path()?;
-            let file_name = path.to_string_lossy().to_string();
-
-            if file_name.ends_with(binary_name) || file_name == binary_name {
-                let mut outfile = File::create(&target_path)?;
+            let matches = path.file_name().and_then(|n| n.to_str()) == Some(binary_name);
+            if matches {
+                let mut outfile = File::create(&temp_path)?;
                 std::io::copy(&mut entry, &mut outfile)?;
+                outfile.sync_all()?;
                 extracted = true;
                 break;
             }
         }
 
         if !extracted {
+            let _ = std::fs::remove_file(&temp_path);
             return Err(anyhow!("在 Tar 压缩包中未找到可执行文件 {binary_name}"));
         }
     } else {
@@ -358,17 +373,33 @@ pub fn extract_archive(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&target_path)?.permissions();
+        let mut perms = std::fs::metadata(&temp_path)?.permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(&target_path, perms)?;
+        std::fs::set_permissions(&temp_path, perms)?;
     }
 
+    // Atomic rename over target to prevent partial binary execution or ETXTBSY on Linux
+    #[cfg(windows)]
+    {
+        if target_path.exists() {
+            let _ = std::fs::remove_file(&target_path);
+        }
+    }
+    std::fs::rename(&temp_path, &target_path)?;
+
     Ok(target_path)
+}
+
+async fn wait_for_cancel(cancel_flag: &std::sync::atomic::AtomicBool) {
+    while !cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }
 
 pub async fn download_and_install_kernel(
     status_lock: Arc<RwLock<KernelDownloadStatus>>,
     cancel_flag: Arc<std::sync::atomic::AtomicBool>,
+    use_mirror: bool,
 ) -> Result<PathBuf> {
     let target = detect_current_target()
         .ok_or_else(|| anyhow!("当前系统架构不支持自动下载 sing-box 内核"))?;
@@ -383,32 +414,90 @@ pub async fn download_and_install_kernel(
         st.error = None;
     }
 
-    // 仅限制连接与读取超时，不限制总时长：大文件在慢速网络下可能超过任意总超时，
-    // 而读取超时足以检测连接停滞（60 秒收不到数据即报错）
     let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(15))
         .read_timeout(std::time::Duration::from_secs(60))
         .build()?;
 
-    let response = match client.get(target.url).send().await {
-        Ok(res) => {
-            if !res.status().is_success() {
-                let err_msg = format!("下载失败，HTTP 状态码: {}", res.status());
+    let primary_url = target.url;
+    let mirror_url = format!("https://ghproxy.net/{}", target.url);
+
+    let mut download_url = if use_mirror {
+        mirror_url.clone()
+    } else {
+        primary_url.to_string()
+    };
+
+    let send_request = |url: String| {
+        let client = client.clone();
+        let cancel_flag = cancel_flag.clone();
+        async move {
+            tokio::select! {
+                res = client.get(&url).send() => Some(res),
+                () = wait_for_cancel(&cancel_flag) => None,
+            }
+        }
+    };
+
+    let mut response = match send_request(download_url.clone()).await {
+        Some(Ok(res)) => res,
+        None => {
+            let mut st = status_lock.write().await;
+            st.status = "idle".to_string();
+            st.error = Some("下载已取消".to_string());
+            return Err(anyhow!("下载已取消"));
+        }
+        Some(Err(e)) => {
+            if use_mirror {
+                let err_msg = format!("发起内核下载请求失败: {e}");
                 let mut st = status_lock.write().await;
                 st.status = "error".to_string();
                 st.error = Some(err_msg.clone());
                 return Err(anyhow!(err_msg));
             }
-            res
-        }
-        Err(e) => {
-            let err_msg = format!("发起内核下载请求失败: {e}");
-            let mut st = status_lock.write().await;
-            st.status = "error".to_string();
-            st.error = Some(err_msg.clone());
-            return Err(anyhow!(err_msg));
+            eprintln!(
+                "[Kernel] Direct GitHub connection failed ({e}), falling back to acceleration mirror..."
+            );
+            download_url = mirror_url.clone();
+            match send_request(download_url.clone()).await {
+                Some(Ok(res)) => res,
+                None => {
+                    let mut st = status_lock.write().await;
+                    st.status = "idle".to_string();
+                    st.error = Some("下载已取消".to_string());
+                    return Err(anyhow!("下载已取消"));
+                }
+                Some(Err(err2)) => {
+                    let err_msg = format!("发起内核下载请求失败 (官方源与镜像均不可达): {err2}");
+                    let mut st = status_lock.write().await;
+                    st.status = "error".to_string();
+                    st.error = Some(err_msg.clone());
+                    return Err(anyhow!(err_msg));
+                }
+            }
         }
     };
+
+    if !response.status().is_success() && !use_mirror {
+        eprintln!(
+            "[Kernel] Direct download returned HTTP {}, falling back to mirror...",
+            response.status()
+        );
+        download_url = mirror_url.clone();
+        if let Some(Ok(fallback_res)) = send_request(download_url.clone()).await
+            && fallback_res.status().is_success()
+        {
+            response = fallback_res;
+        }
+    }
+
+    if !response.status().is_success() {
+        let err_msg = format!("下载失败，HTTP 状态码: {}", response.status());
+        let mut st = status_lock.write().await;
+        st.status = "error".to_string();
+        st.error = Some(err_msg.clone());
+        return Err(anyhow!(err_msg));
+    }
 
     let total_size = response.content_length().unwrap_or(0);
     {
@@ -418,7 +507,6 @@ pub async fn download_and_install_kernel(
 
     let mut stream = response.bytes_stream();
 
-    // 预分配容量做上限保护（128MB），防止异常的 Content-Length 导致过度分配
     let mut downloaded_data = Vec::with_capacity(match total_size {
         0 => 16 * 1024 * 1024,
         n if n <= 128 * 1024 * 1024 => n as usize,
@@ -426,32 +514,34 @@ pub async fn download_and_install_kernel(
     });
     let mut downloaded_bytes: u64 = 0;
 
-    // 滑动窗口测速：每秒结算一次，窗口内沿用上次速度，避免读锁与数值抖动
     let mut speed_window_start = std::time::Instant::now();
     let mut speed_window_bytes: u64 = 0;
     let mut speed_bytes_per_sec: u64 = 0;
 
-    // 进度单调递增；状态写入按 200ms 节流，避免频繁锁竞争
     let mut last_reported_progress = 0.0f64;
     let mut last_update_time: Option<std::time::Instant> = None;
 
-    while let Some(chunk_res) = stream.next().await {
-        if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
-            let mut st = status_lock.write().await;
-            st.status = "idle".to_string();
-            st.error = Some("下载已取消".to_string());
-            return Err(anyhow!("下载已取消"));
-        }
+    loop {
+        let chunk_opt = tokio::select! {
+            res = stream.next() => res,
+            () = wait_for_cancel(&cancel_flag) => {
+                let mut st = status_lock.write().await;
+                st.status = "idle".to_string();
+                st.error = Some("下载已取消".to_string());
+                return Err(anyhow!("下载已取消"));
+            }
+        };
 
-        let chunk = match chunk_res {
-            Ok(c) => c,
-            Err(e) => {
+        let chunk = match chunk_opt {
+            Some(Ok(c)) => c,
+            Some(Err(e)) => {
                 let err_msg = format!("下载数据流中断: {e}");
                 let mut st = status_lock.write().await;
                 st.status = "error".to_string();
                 st.error = Some(err_msg.clone());
                 return Err(anyhow!(err_msg));
             }
+            None => break,
         };
 
         downloaded_bytes += chunk.len() as u64;
@@ -476,15 +566,12 @@ pub async fn download_and_install_kernel(
             }
         }
 
-        // 注意：这里绝不能使用 blocking_read()/blocking_write()——
-        // 它们会经 future::block_on 在异步运行时线程上直接 panic，
-        // 这正是下载任务静默崩溃、进度停在 0% 的根因。
-        // 所有跟踪状态均保存在本地变量中，仅在需要写入时获取写锁。
         let should_update = last_update_time
-            .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(200));
+            .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(150));
         if should_update {
             let mut st = status_lock.write().await;
             st.downloaded_bytes = downloaded_bytes;
+            st.total_bytes = total_size;
             st.progress = last_reported_progress;
             st.speed_bytes_per_sec = speed_bytes_per_sec;
             last_update_time = Some(now);
@@ -498,7 +585,7 @@ pub async fn download_and_install_kernel(
         return Err(anyhow!("下载已取消"));
     }
 
-    // Extract（进度置为 extracting 前先补写最终下载数值——节流可能跳过最后一段增量）
+    // Extract
     {
         let mut st = status_lock.write().await;
         st.status = "extracting".to_string();
@@ -510,8 +597,6 @@ pub async fn download_and_install_kernel(
         st.speed_bytes_per_sec = 0;
     }
 
-    // 解压与版本校验是阻塞的文件/子进程操作，放入 blocking 线程池执行，
-    // 避免占用异步 runtime worker 线程
     let kernel_dir = get_kernel_dir();
     let archive_type = target.archive_type;
     let binary_name = target.binary_name;
@@ -533,6 +618,11 @@ pub async fn download_and_install_kernel(
         }
     };
 
+    // Invalidate version cache so the new binary version is immediately detected
+    if let Ok(mut guard) = KERNEL_VERSION_CACHE.write() {
+        *guard = None;
+    }
+
     // Verify installation
     let verify_path = binary_path.clone();
     let installed_version =
@@ -540,12 +630,20 @@ pub async fn download_and_install_kernel(
             .await
             .map_err(|e| anyhow!("内核校验任务执行异常: {e}"))?;
 
-    if installed_version.is_some() {
-        let mut st = status_lock.write().await;
-        st.status = "ready".to_string();
-        st.progress = 100.0;
-        st.error = None;
-        Ok(binary_path)
+    if let Some(ver) = installed_version {
+        if is_supported_kernel_version(&ver) {
+            let mut st = status_lock.write().await;
+            st.status = "ready".to_string();
+            st.progress = 100.0;
+            st.error = None;
+            Ok(binary_path)
+        } else {
+            let err_msg = format!("内核安装完成但版本不兼容: {ver}，需要 1.14.*");
+            let mut st = status_lock.write().await;
+            st.status = "error".to_string();
+            st.error = Some(err_msg.clone());
+            Err(anyhow!(err_msg))
+        }
     } else {
         let err_msg = "内核解压完成，但运行校验失败，请检查系统兼容性".to_string();
         let mut st = status_lock.write().await;
@@ -630,5 +728,62 @@ mod tests {
         assert!(!is_supported_kernel_version("sing-box version 1.12.0"));
         assert!(!is_supported_kernel_version("sing-box version 1.15.0"));
         assert!(!is_supported_kernel_version("unknown string"));
+    }
+
+    #[test]
+    fn test_extract_archive_tar_gz() {
+        let temp_dir = std::env::temp_dir().join(format!("subout_test_tar_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let dest = &temp_dir;
+
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        {
+            let mut tar = tar::Builder::new(&mut enc);
+            let content = b"echo sing-box test";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar.append_data(
+                &mut header,
+                "sing-box-1.14.4-linux-amd64/sing-box",
+                &content[..],
+            )
+            .unwrap();
+            tar.finish().unwrap();
+        }
+        let gz_bytes = enc.finish().unwrap();
+
+        let extracted = extract_archive(&gz_bytes, "tar.gz", dest, "sing-box").unwrap();
+        assert!(extracted.exists());
+        let read = std::fs::read(&extracted).unwrap();
+        assert_eq!(read, b"echo sing-box test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_extract_archive_zip() {
+        use std::io::Write;
+        let temp_dir = std::env::temp_dir().join(format!("subout_test_zip_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let dest = &temp_dir;
+
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("sing-box-1.14.4-windows-amd64/sing-box.exe", options)
+                .unwrap();
+            zip.write_all(b"windows binary test").unwrap();
+            zip.finish().unwrap();
+        }
+        let zip_bytes = buf.into_inner();
+
+        let extracted = extract_archive(&zip_bytes, "zip", dest, "sing-box.exe").unwrap();
+        assert!(extracted.exists());
+        let read = std::fs::read(&extracted).unwrap();
+        assert_eq!(read, b"windows binary test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

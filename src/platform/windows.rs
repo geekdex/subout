@@ -306,7 +306,11 @@ impl PlatformStrategy for WindowsPlatform {
                         .collect::<Vec<_>>()
                         .join(" /PID ")
                 );
-                let pid_str = pids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+                let pid_str = pids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let msg = format!(
                     "检测到 {} 个正在运行的外部 sing-box.exe 进程 (PID: {})。这些进程可能正在占用代理端口或虚拟网卡接口。",
                     pids.len(),
@@ -552,7 +556,8 @@ pub fn filter_conflicting_processes(
     let config_variants = crate::platform::get_config_path_variants(running_config_path);
     let mut results = Vec::new();
     let mut seen_pids = std::collections::HashSet::new();
-    let mut children_map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let mut children_map: std::collections::HashMap<u32, Vec<u32>> =
+        std::collections::HashMap::new();
 
     for item in &items {
         if let (Some(pid), Some(ppid)) = (item.process_id, item.parent_process_id) {
@@ -606,7 +611,9 @@ pub fn filter_conflicting_processes(
             c_lower.contains("subout.exe")
                 || c_lower.contains("subout web")
                 || (managed_pid.is_some()
-                    && config_variants.iter().any(|v| c.contains(v) || c.contains(&v.replace('/', "\\"))))
+                    && config_variants
+                        .iter()
+                        .any(|v| c.contains(v) || c.contains(&v.replace('/', "\\"))))
         });
 
         if is_subout_instance {

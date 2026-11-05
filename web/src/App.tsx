@@ -59,10 +59,13 @@ const AppContent: React.FC = () => {
     kernelInfo,
     loading: kernelLoading,
     downloading,
+    downloadStatus,
+    cancellingDownload,
     takingOver,
     takeoverDiagnose,
     isReady: isKernelReady,
     downloadKernel,
+    cancelDownload,
     takeoverService,
     isSudoModalOpen,
     sudoError,
@@ -100,8 +103,7 @@ const AppContent: React.FC = () => {
       if (cfgs.status === "fulfilled") setConfigs(cfgs.value);
       if (subs.status === "fulfilled") setSubscriptions(subs.value);
       if (nds.status === "fulfilled") {
-        const val = nds.value;
-        setNodes(Array.isArray(val) ? val : (val as any)?.nodes || []);
+        setNodes(Array.isArray(nds.value) ? nds.value : []);
       }
       if (grps.status === "fulfilled") {
         setNodeGroups(grps.value.groups);
@@ -221,6 +223,7 @@ const AppContent: React.FC = () => {
           setMobileMenuOpen(false);
         }}
         isKernelReady={isKernelReady}
+        downloadStatus={downloadStatus}
         appMode={systemInfo?.app_mode ?? "simple"}
         versionCode={versionCode}
         nodeCount={nodes.length}
@@ -263,8 +266,11 @@ const AppContent: React.FC = () => {
             takeoverDiagnose={takeoverDiagnose}
             loading={kernelLoading}
             downloading={downloading}
+            downloadStatus={downloadStatus}
+            cancelling={cancellingDownload}
             takingOver={takingOver}
             onDownloadKernel={downloadKernel}
+            onCancelDownload={cancelDownload}
             onTakeover={takeoverService}
             isSudoModalOpen={isSudoModalOpen}
             sudoError={sudoError}

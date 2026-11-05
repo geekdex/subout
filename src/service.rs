@@ -239,13 +239,12 @@ impl SingBoxServiceManager {
         // Load permanent sudo password from database if configured
         if let Some(ref path) = *self.db_path.read().await
             && let Ok(conn) = rusqlite::Connection::open(path)
+            && let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password")
         {
-            if let Ok(Some(pass)) = crate::db::get_setting(&conn, "sudo_password") {
-                let trimmed = pass.trim();
-                if !trimmed.is_empty() {
-                    *self.saved_sudo_pass.write().await = Some(trimmed.to_string());
-                    *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
-                }
+            let trimmed = pass.trim();
+            if !trimmed.is_empty() {
+                *self.saved_sudo_pass.write().await = Some(trimmed.to_string());
+                *self.cached_sudo_pass.write().await = Some(trimmed.to_string());
             }
         }
     }
@@ -388,7 +387,9 @@ impl SingBoxServiceManager {
         detect_conflicting_singbox_processes(managed_pid)
     }
 
-    pub async fn diagnose_takeover_conflict(&self) -> Result<crate::platform::TakeoverDiagnoseResult> {
+    pub async fn diagnose_takeover_conflict(
+        &self,
+    ) -> Result<crate::platform::TakeoverDiagnoseResult> {
         let managed_pid = self.get_managed_pid().await;
         crate::platform::current_platform()
             .diagnose_takeover_conflict(managed_pid)
@@ -523,15 +524,17 @@ impl SingBoxServiceManager {
                     .unwrap_or(None)
                     .unwrap_or_default();
                 if let Ok(id) = running_id_str.parse::<i64>() {
-                    let parsed_content = if let Ok(Some(prof)) = crate::db::get_config_profile_by_id(&conn, id) {
-                        serde_json::from_str::<Value>(&prof.content).ok()
-                    } else if let Ok(Some(history)) = crate::db::get_config_history_detail(&conn, id)
-                        && let Some(content_str) = history.content
-                    {
-                        serde_json::from_str::<Value>(&content_str).ok()
-                    } else {
-                        None
-                    };
+                    let parsed_content =
+                        if let Ok(Some(prof)) = crate::db::get_config_profile_by_id(&conn, id) {
+                            serde_json::from_str::<Value>(&prof.content).ok()
+                        } else if let Ok(Some(history)) =
+                            crate::db::get_config_history_detail(&conn, id)
+                            && let Some(content_str) = history.content
+                        {
+                            serde_json::from_str::<Value>(&content_str).ok()
+                        } else {
+                            None
+                        };
 
                     if let Some(c) = parsed_content {
                         let level = c
@@ -550,7 +553,8 @@ impl SingBoxServiceManager {
                             .and_then(|o| o.as_str())
                             .map(std::string::ToString::to_string);
                         (level.or(Some("info".to_string())), disabled, output)
-                    } else if let Ok(Some(log_str)) = crate::db::get_base_config_section(&conn, "log")
+                    } else if let Ok(Some(log_str)) =
+                        crate::db::get_base_config_section(&conn, "log")
                         && let Ok(c) = serde_json::from_str::<Value>(&log_str)
                     {
                         let level = c
@@ -764,11 +768,11 @@ impl SingBoxServiceManager {
             platform.disable_system_proxy(sudo_pass);
             platform.disable_tun_dns(sudo_pass);
             *self.system_proxy_active.write().await = false;
-            self.append_log("🌐 已恢复系统直连网络与 DNS，保障网络连接不中断").await;
+            self.append_log("🌐 已恢复系统直连网络与 DNS，保障网络连接不中断")
+                .await;
         }
 
-        self.append_log("🟢 已成功平滑接管外部服务并释放端口")
-            .await;
+        self.append_log("🟢 已成功平滑接管外部服务并释放端口").await;
         Ok(())
     }
 
@@ -1478,7 +1482,8 @@ impl SingBoxServiceManager {
                 is_dead = true;
                 break;
             }
-            let conflicts = platform.detect_conflicting_processes(managed_pid, &running_config_path);
+            let conflicts =
+                platform.detect_conflicting_processes(managed_pid, &running_config_path);
             if !conflicts.iter().any(|c| c.pid == pid) {
                 is_dead = true;
                 break;
@@ -1656,15 +1661,16 @@ pub fn get_mixed_port_for_active_mode(conn: &rusqlite::Connection) -> Option<u16
             .unwrap_or(None)
             .unwrap_or_default();
         if let Ok(id) = running_id_str.parse::<i64>() {
-            let parsed_content = if let Ok(Some(prof)) = crate::db::get_config_profile_by_id(conn, id) {
-                serde_json::from_str::<Value>(&prof.content).ok()
-            } else if let Ok(Some(history)) = crate::db::get_config_history_detail(conn, id)
-                && let Some(content_str) = history.content
-            {
-                serde_json::from_str::<Value>(&content_str).ok()
-            } else {
-                None
-            };
+            let parsed_content =
+                if let Ok(Some(prof)) = crate::db::get_config_profile_by_id(conn, id) {
+                    serde_json::from_str::<Value>(&prof.content).ok()
+                } else if let Ok(Some(history)) = crate::db::get_config_history_detail(conn, id)
+                    && let Some(content_str) = history.content
+                {
+                    serde_json::from_str::<Value>(&content_str).ok()
+                } else {
+                    None
+                };
             if let Some(c) = parsed_content {
                 return get_mixed_port_from_config(&c);
             }
@@ -1917,7 +1923,10 @@ mod tests {
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
             let conflicts = detect_conflicting_singbox_processes(Some(child_pid));
-            assert!(!conflicts.iter().any(|c| c.pid == child_pid), "child must not be in conflicts");
+            assert!(
+                !conflicts.iter().any(|c| c.pid == child_pid),
+                "child must not be in conflicts"
+            );
 
             let _ = child.kill();
             let _ = child.wait();
@@ -1927,14 +1936,20 @@ mod tests {
     #[tokio::test]
     async fn test_diagnose_takeover_conflict_with_managed_pid() {
         let mgr = SingBoxServiceManager::new();
-        let diag = mgr.diagnose_takeover_conflict().await.expect("diagnose should succeed");
+        let diag = mgr
+            .diagnose_takeover_conflict()
+            .await
+            .expect("diagnose should succeed");
         println!("Diagnose result without managed PID: {diag:?}");
 
         let p = crate::platform::current_platform();
         let running_config_path = SingBoxServiceManager::get_running_config_path();
         if let Some(&first_pid) = diag.pids.first() {
             let filtered = p.detect_conflicting_processes(Some(first_pid), &running_config_path);
-            assert!(!filtered.iter().any(|c| c.pid == first_pid), "managed pid must be excluded");
+            assert!(
+                !filtered.iter().any(|c| c.pid == first_pid),
+                "managed pid must be excluded"
+            );
             let diag_managed = p.diagnose_takeover_conflict(Some(first_pid)).await.unwrap();
             assert!(!diag_managed.pids.contains(&first_pid));
         }
@@ -2121,27 +2136,42 @@ mod tests {
         mgr.set_temp_sudo_pass("temp_pass").await;
         assert!(mgr.has_temp_sudo_pass().await);
         assert!(!mgr.has_saved_sudo_pass().await);
-        assert_eq!(mgr.get_effective_sudo_pass().await, Some("temp_pass".to_string()));
-        assert_eq!(crate::db::get_setting(&conn, "sudo_password").unwrap(), None);
+        assert_eq!(
+            mgr.get_effective_sudo_pass().await,
+            Some("temp_pass".to_string())
+        );
+        assert_eq!(
+            crate::db::get_setting(&conn, "sudo_password").unwrap(),
+            None
+        );
 
         // 2. Permanent authorization DOES persist to DB
         mgr.save_sudo_pass("permanent_secret").await;
         assert!(mgr.has_saved_sudo_pass().await);
         let saved_in_db = crate::db::get_setting(&conn, "sudo_password").unwrap();
         assert_eq!(saved_in_db, Some("permanent_secret".to_string()));
-        assert_eq!(mgr.get_effective_sudo_pass().await, Some("permanent_secret".to_string()));
+        assert_eq!(
+            mgr.get_effective_sudo_pass().await,
+            Some("permanent_secret".to_string())
+        );
 
         // 3. New manager instance loads permanent sudo password from DB on startup
         let mgr2 = SingBoxServiceManager::new();
         mgr2.set_db_path(&db_path).await;
         mgr2.load_saved_sudo_pass().await;
         assert!(mgr2.has_saved_sudo_pass().await);
-        assert_eq!(mgr2.get_effective_sudo_pass().await, Some("permanent_secret".to_string()));
+        assert_eq!(
+            mgr2.get_effective_sudo_pass().await,
+            Some("permanent_secret".to_string())
+        );
 
         // 4. Clear permanent password purges from memory and DB
         mgr2.clear_saved_sudo_pass().await;
         assert!(!mgr2.has_saved_sudo_pass().await);
-        assert_eq!(crate::db::get_setting(&conn, "sudo_password").unwrap(), None);
+        assert_eq!(
+            crate::db::get_setting(&conn, "sudo_password").unwrap(),
+            None
+        );
 
         let _ = std::fs::remove_file(&db_file);
     }
