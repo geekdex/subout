@@ -28,6 +28,9 @@ export interface ServiceStatus {
   active_mode: "simple" | "expert";
   running_config_id: number | null;
   system_proxy_enabled?: boolean;
+  system_proxy_active?: boolean;
+  system_proxy_supported?: boolean;
+  system_proxy_unsupported_reason?: string | null;
 }
 
 export interface KernelDownloadStatus {

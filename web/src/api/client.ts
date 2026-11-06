@@ -48,17 +48,25 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  if (
-    !headers.has("Content-Type") &&
-    options.body &&
-    typeof options.body === "string"
-  ) {
-    headers.set("Content-Type", "application/json");
+
+  const method = (options.method || "GET").toUpperCase();
+  const isPostLike = ["POST", "PUT", "PATCH"].includes(method);
+  let body = options.body;
+
+  if (isPostLike) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (body === undefined || body === null) {
+      body = "{}";
+    }
   }
 
   const response = await fetch(url, {
     ...options,
+    method,
     headers,
+    body,
   });
 
   if (response.status === 428) {
@@ -101,6 +109,17 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
           ? data
           : `Request failed: ${response.status}`;
     throw new ApiError(errorMsg, response.status, data);
+  }
+
+  // Normalize success status for unified frontend consumption
+  if (
+    typeof data === "object" &&
+    data !== null &&
+    !("success" in data) &&
+    "status" in data &&
+    (data as { status?: unknown }).status === "success"
+  ) {
+    (data as Record<string, unknown>).success = true;
   }
 
   return data as T;
@@ -227,14 +246,31 @@ export const api = {
   async getServiceStatus(): Promise<ServiceStatus> {
     return request<ServiceStatus>("/api/service/status");
   },
-  async startService(): Promise<{ success: boolean; message: string }> {
-    return request("/api/service/start", { method: "POST" });
+  async startService(payload?: {
+    sudo_pass?: string;
+    takeover?: boolean;
+    enable_system_proxy?: boolean;
+  }): Promise<{ success: boolean; message: string }> {
+    return request("/api/service/start", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
   },
   async stopService(): Promise<{ success: boolean; message: string }> {
-    return request("/api/service/stop", { method: "POST" });
+    return request("/api/service/stop", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   },
-  async restartService(): Promise<{ success: boolean; message: string }> {
-    return request("/api/service/restart", { method: "POST" });
+  async restartService(payload?: {
+    sudo_pass?: string;
+    takeover?: boolean;
+    enable_system_proxy?: boolean;
+  }): Promise<{ success: boolean; message: string }> {
+    return request("/api/service/restart", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
   },
   async setSystemProxy(
     enabled: boolean,

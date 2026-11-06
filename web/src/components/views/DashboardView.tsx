@@ -99,18 +99,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       { name: "GitHub (代码库)", host: "github.com" },
     ];
 
-    const results: { [site: string]: number | null } = {};
-    for (const site of sites) {
+    const testSite = async (site: { name: string; host: string }) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
       const start = Date.now();
       try {
         await fetch(`https://${site.host}/favicon.ico`, {
           mode: "no-cors",
           cache: "no-store",
+          signal: controller.signal,
         });
-        results[site.name] = Date.now() - start;
+        clearTimeout(timer);
+        return { name: site.name, latency: Date.now() - start };
       } catch {
-        results[site.name] = 0; // timeout / error
+        clearTimeout(timer);
+        return { name: site.name, latency: 0 };
       }
+    };
+
+    const testResults = await Promise.all(sites.map(testSite));
+    const results: { [site: string]: number | null } = {};
+    for (const r of testResults) {
+      results[r.name] = r.latency;
     }
     setSiteResults(results);
     setSiteTesting(false);
@@ -182,7 +192,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </div>
           <div className="mt-3 text-xs text-slate-400 flex items-center justify-between">
-            <span>端口: {serviceStatus?.mixed_port ?? "2080"}</span>
+            {serviceStatus?.mixed_port ? (
+              <span>端口: {serviceStatus.mixed_port}</span>
+            ) : serviceStatus?.is_tun ? (
+              <span className="text-emerald-400 font-medium">全局透明接管</span>
+            ) : (
+              <span>端口: 未配置</span>
+            )}
             {serviceStatus?.tun_interface && (
               <span className="font-mono text-[11px] text-sky-400">
                 网卡: {serviceStatus.tun_interface}

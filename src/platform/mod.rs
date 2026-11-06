@@ -141,6 +141,12 @@ pub trait PlatformStrategy: Send + Sync {
     // ------------------------------------------------------------------------
     // 4. System Proxy & DNS Integration
     // ------------------------------------------------------------------------
+    fn is_system_proxy_supported(&self) -> bool {
+        true
+    }
+    fn system_proxy_unsupported_reason(&self) -> Option<String> {
+        None
+    }
     fn enable_system_proxy(&self, port: u16, sudo_pass: Option<&str>);
     fn disable_system_proxy(&self, sudo_pass: Option<&str>);
     fn enable_tun_dns(&self, dns_ip: &str, sudo_pass: Option<&str>);

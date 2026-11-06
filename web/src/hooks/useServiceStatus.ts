@@ -36,7 +36,11 @@ export function useServiceStatus(pollInterval = 3000) {
     setActionLoading(true);
     try {
       const res = await api.startService();
-      if (res.success) {
+      const isSuccess = Boolean(
+        res.success ||
+        (res as unknown as { status?: string }).status === "success",
+      );
+      if (isSuccess) {
         success("服务已启动", res.message);
       } else {
         error("启动失败", res.message);
@@ -53,7 +57,11 @@ export function useServiceStatus(pollInterval = 3000) {
     setActionLoading(true);
     try {
       const res = await api.stopService();
-      if (res.success) {
+      const isSuccess = Boolean(
+        res.success ||
+        (res as unknown as { status?: string }).status === "success",
+      );
+      if (isSuccess) {
         success("服务已停止", res.message);
       } else {
         error("停止失败", res.message);
@@ -70,7 +78,11 @@ export function useServiceStatus(pollInterval = 3000) {
     setActionLoading(true);
     try {
       const res = await api.restartService();
-      if (res.success) {
+      const isSuccess = Boolean(
+        res.success ||
+        (res as unknown as { status?: string }).status === "success",
+      );
+      if (isSuccess) {
         success("服务已重启", res.message);
       } else {
         error("重启失败", res.message);
@@ -87,8 +99,12 @@ export function useServiceStatus(pollInterval = 3000) {
     setActionLoading(true);
     try {
       const res = await api.setSystemProxy(enabled, sudoPass);
-      if (res.success) {
-        success(enabled ? "系统代理已开启" : "系统代理已关闭", res.message);
+      const isSuccess = Boolean(
+        res.success ||
+        (res as unknown as { status?: string }).status === "success",
+      );
+      if (isSuccess) {
+        success(enabled ? "系统代理已设置" : "系统代理已关闭", res.message);
       } else {
         error("切换系统代理失败", res.message);
       }

@@ -80,6 +80,14 @@ impl PlatformStrategy for FallbackPlatform {
         Box::pin(async move { Ok(crate::platform::TakeoverDiagnoseResult::no_conflict()) })
     }
 
+    fn is_system_proxy_supported(&self) -> bool {
+        false
+    }
+
+    fn system_proxy_unsupported_reason(&self) -> Option<String> {
+        Some("当前操作系统环境不支持自动配置系统代理".to_string())
+    }
+
     fn enable_system_proxy(&self, _port: u16, _sudo_pass: Option<&str>) {}
 
     fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {}

@@ -408,6 +408,18 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     });
 
     // 4. Inbounds section
+    let listen_addr = if cfg.inbound.allow_lan {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    };
+    let mixed_obj = json!({
+        "type": "mixed",
+        "tag": "mixed-in",
+        "listen": listen_addr,
+        "listen_port": cfg.inbound.mixed_port
+    });
+
     let inbounds_val = if cfg.inbound.inbound_type.as_str() == "tun" {
         let platform = crate::platform::current_platform();
         let effective_stack = platform.effective_tun_stack(cfg.inbound.tun_stack.as_str());
@@ -424,22 +436,9 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         if !iface_name.is_empty() {
             tun_obj["interface_name"] = json!(iface_name);
         }
-        json!([tun_obj])
+        json!([tun_obj, mixed_obj])
     } else {
-        // Mixed port HTTP / SOCKS5
-        let listen_addr = if cfg.inbound.allow_lan {
-            "0.0.0.0"
-        } else {
-            "127.0.0.1"
-        };
-        json!([
-            {
-                "type": "mixed",
-                "tag": "mixed-in",
-                "listen": listen_addr,
-                "listen_port": cfg.inbound.mixed_port
-            }
-        ])
+        json!([mixed_obj])
     };
 
     // 5. Outbounds section
@@ -565,15 +564,15 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "tag": "geosite-cn",
             "type": "remote",
             "format": "binary",
-            "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
-            "http_client": "direct",
+            "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+            "http_client": download_detour_remote,
             "update_interval": "1d"
         }),
         json!({
             "tag": "geosite-geolocation-!cn",
             "type": "remote",
             "format": "binary",
-            "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-geolocation-!cn.srs",
+            "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
             "http_client": download_detour_remote,
             "update_interval": "1d"
         }),
@@ -581,8 +580,8 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "tag": "geoip-cn",
             "type": "remote",
             "format": "binary",
-            "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
-            "http_client": "direct",
+            "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+            "http_client": download_detour_remote,
             "update_interval": "1d"
         }),
     ];
@@ -592,7 +591,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "tag": "geosite-category-ads-all",
             "type": "remote",
             "format": "binary",
-            "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
+            "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",
             "http_client": download_detour_remote,
             "update_interval": "1d"
         }));
@@ -623,7 +622,14 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }));
     }
 
-    let experimental_val = json!({});
+    let experimental_val = json!({
+        "cache_file": {
+            "enabled": true,
+            "path": "cache.db",
+            "store_fakeip": true,
+            "store_dns": true
+        }
+    });
 
     Ok(json!({
         "log": log_val,
@@ -819,7 +825,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             cn_rs.get("http_client").and_then(|d| d.as_str()),
-            Some("direct")
+            Some("proxy")
         );
         assert!(cn_rs.get("download_detour").is_none());
 
@@ -926,6 +932,9 @@ mod tests {
                 .len(),
             1
         );
+        // Both TUN and Mixed port are provided for seamless system proxy compatibility
+        assert_eq!(inbounds[1].get("type").unwrap().as_str(), Some("mixed"));
+        assert_eq!(inbounds[1].get("listen_port").unwrap().as_u64(), Some(2080));
 
         // Test mixed mode fallback/customization
         let mut mixed_cfg = SimpleConfig::default();

@@ -273,4 +273,145 @@ describe("Sidebar & Header with numeric version_code", () => {
 
     expect(onCloseMobile).toHaveBeenCalledTimes(1);
   });
+
+  it("Header allows toggling system proxy even when service is stopped (preset mode)", () => {
+    const onToggleProxy = vi.fn();
+    const onStartService = vi.fn();
+    const { rerender } = render(
+      <Header
+        systemInfo={{
+          host_os: "linux",
+          host_arch: "x86_64",
+          default_tun_stack: "system",
+          sudo_configured: true,
+          is_root: false,
+          app_mode: "simple",
+          running_config_id: null,
+        }}
+        serviceStatus={{
+          running: false,
+          ready: false,
+          pid: null,
+          uptime_secs: 0,
+          mixed_port: 2080,
+          is_tun: true,
+          tun_interface: null,
+          cpu_usage: 0,
+          memory_bytes: 0,
+          last_error: null,
+          active_mode: "simple",
+          running_config_id: null,
+          system_proxy_enabled: false,
+          system_proxy_supported: true,
+        }}
+        runningProfile={null}
+        actionLoading={false}
+        onStartService={onStartService}
+        onStopService={vi.fn()}
+        onRestartService={vi.fn()}
+        onToggleSystemProxy={onToggleProxy}
+        onSwitchMode={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+
+    // Switch should NOT be disabled when stopped if mixed_port is available
+    const proxySwitch = screen.getByRole("switch");
+    expect(proxySwitch.hasAttribute("disabled")).toBe(false);
+
+    // Clicking toggles system proxy
+    fireEvent.click(proxySwitch);
+    expect(onToggleProxy).toHaveBeenCalledWith(true);
+
+    // When preset enabled and stopped, "预设" badge appears
+    rerender(
+      <Header
+        systemInfo={{
+          host_os: "linux",
+          host_arch: "x86_64",
+          default_tun_stack: "system",
+          sudo_configured: true,
+          is_root: false,
+          app_mode: "simple",
+          running_config_id: null,
+        }}
+        serviceStatus={{
+          running: false,
+          ready: false,
+          pid: null,
+          uptime_secs: 0,
+          mixed_port: 2080,
+          is_tun: true,
+          tun_interface: null,
+          cpu_usage: 0,
+          memory_bytes: 0,
+          last_error: null,
+          active_mode: "simple",
+          running_config_id: null,
+          system_proxy_enabled: true,
+          system_proxy_supported: true,
+        }}
+        runningProfile={null}
+        actionLoading={false}
+        onStartService={onStartService}
+        onStopService={vi.fn()}
+        onRestartService={vi.fn()}
+        onToggleSystemProxy={onToggleProxy}
+        onSwitchMode={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("预设")).toBeDefined();
+
+    // Start service button works
+    const startBtn = screen.getByRole("button", { name: /启动/i });
+    fireEvent.click(startBtn);
+    expect(onStartService).toHaveBeenCalledTimes(1);
+  });
+
+  it("Header disables system proxy and shows reasonable tooltip when unsupported or no mixed port", () => {
+    const onToggleProxy = vi.fn();
+    render(
+      <Header
+        systemInfo={{
+          host_os: "linux",
+          host_arch: "x86_64",
+          default_tun_stack: "system",
+          sudo_configured: true,
+          is_root: false,
+          app_mode: "simple",
+          running_config_id: null,
+        }}
+        serviceStatus={{
+          running: false,
+          ready: false,
+          pid: null,
+          uptime_secs: 0,
+          mixed_port: null,
+          is_tun: true,
+          tun_interface: null,
+          cpu_usage: 0,
+          memory_bytes: 0,
+          last_error: null,
+          active_mode: "simple",
+          running_config_id: null,
+          system_proxy_enabled: false,
+          system_proxy_supported: false,
+          system_proxy_unsupported_reason:
+            "当前 Linux 环境未安装或不支持 gsettings（GNOME 代理设置），系统代理不可用；建议使用 TUN 模式透明代理",
+        }}
+        runningProfile={null}
+        actionLoading={false}
+        onStartService={vi.fn()}
+        onStopService={vi.fn()}
+        onRestartService={vi.fn()}
+        onToggleSystemProxy={onToggleProxy}
+        onSwitchMode={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+
+    const proxySwitch = screen.getByRole("switch");
+    expect(proxySwitch.hasAttribute("disabled")).toBe(true);
+  });
 });

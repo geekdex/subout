@@ -10,3 +10,4 @@ web/dist
 .kiro
 .cargo
 /sing-box-docs
+.agents

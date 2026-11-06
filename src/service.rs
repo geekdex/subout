@@ -164,6 +164,10 @@ pub struct ConflictingProcessInfo {
     pub exe_path: Option<String>,
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ServiceStatusInfo {
     pub running: bool,
@@ -188,6 +192,10 @@ pub struct ServiceStatusInfo {
     pub system_proxy_active: bool,
     #[serde(default)]
     pub mixed_port: Option<u16>,
+    #[serde(default = "default_true")]
+    pub system_proxy_supported: bool,
+    #[serde(default)]
+    pub system_proxy_unsupported_reason: Option<String>,
 }
 
 pub struct SingBoxServiceManager {
@@ -621,6 +629,10 @@ impl SingBoxServiceManager {
                 }
             });
 
+        let platform = crate::platform::current_platform();
+        let system_proxy_supported = platform.is_system_proxy_supported();
+        let system_proxy_unsupported_reason = platform.system_proxy_unsupported_reason();
+
         ServiceStatusInfo {
             running: is_run,
             ready: is_ready,
@@ -639,6 +651,8 @@ impl SingBoxServiceManager {
             system_proxy_enabled,
             system_proxy_active,
             mixed_port,
+            system_proxy_supported,
+            system_proxy_unsupported_reason,
         }
     }
 
@@ -687,10 +701,19 @@ impl SingBoxServiceManager {
             };
 
             if is_running {
-                platform.enable_system_proxy(port, cached_pass.as_deref());
-                *self.system_proxy_active.write().await = true;
-                self.append_log(&format!("🌐 已设置系统网络代理 (127.0.0.1:{port})"))
-                    .await;
+                if platform.is_system_proxy_supported() {
+                    platform.enable_system_proxy(port, cached_pass.as_deref());
+                    *self.system_proxy_active.write().await = true;
+                    self.append_log(&format!("🌐 已设置系统网络代理 (127.0.0.1:{port})"))
+                        .await;
+                } else {
+                    *self.system_proxy_active.write().await = false;
+                    let reason = platform
+                        .system_proxy_unsupported_reason()
+                        .unwrap_or_else(|| "当前操作系统环境不支持自动设置系统代理".to_string());
+                    self.append_log(&format!("⚠️ {reason}")).await;
+                    return Err(anyhow!("{reason}"));
+                }
             } else {
                 *self.system_proxy_active.write().await = false;
             }
@@ -1305,10 +1328,15 @@ impl SingBoxServiceManager {
 
         if system_proxy_enabled {
             if let Some(port) = get_mixed_port_from_config(config_json) {
-                platform.enable_system_proxy(port, cached_pass.as_deref());
-                *self.system_proxy_active.write().await = true;
-                self.append_log(&format!("🌐 已设置系统网络代理 (127.0.0.1:{port})"))
-                    .await;
+                if platform.is_system_proxy_supported() {
+                    platform.enable_system_proxy(port, cached_pass.as_deref());
+                    *self.system_proxy_active.write().await = true;
+                    self.append_log(&format!("🌐 已设置系统网络代理 (127.0.0.1:{port})"))
+                        .await;
+                } else if let Some(reason) = platform.system_proxy_unsupported_reason() {
+                    *self.system_proxy_active.write().await = false;
+                    self.append_log(&format!("⚠️ {reason}")).await;
+                }
             } else {
                 *self.system_proxy_active.write().await = false;
                 self.append_log(
@@ -1651,11 +1679,8 @@ pub fn get_mixed_port_for_active_mode(conn: &rusqlite::Connection) -> Option<u16
         .unwrap_or_else(|| "simple".to_string());
     if mode == "simple" {
         let simple_cfg = crate::simple_config::get_saved_simple_config(conn);
-        if simple_cfg.inbound.inbound_type == "mixed" {
-            Some(simple_cfg.inbound.mixed_port)
-        } else {
-            None
-        }
+        // 小白模式始终提供混合代理端口供系统代理使用
+        Some(simple_cfg.inbound.mixed_port)
     } else {
         let running_id_str = crate::db::get_setting(conn, "running_config_id")
             .unwrap_or(None)
@@ -1980,6 +2005,8 @@ mod tests {
             system_proxy_enabled: false,
             system_proxy_active: false,
             mixed_port: Some(2080),
+            system_proxy_supported: true,
+            system_proxy_unsupported_reason: None,
         };
 
         let json_val = serde_json::to_value(&status).unwrap();
@@ -1992,6 +2019,8 @@ mod tests {
         assert_eq!(json_val["system_proxy_enabled"], false);
         assert_eq!(json_val["system_proxy_active"], false);
         assert_eq!(json_val["mixed_port"], 2080);
+        assert_eq!(json_val["system_proxy_supported"], true);
+        assert!(json_val["system_proxy_unsupported_reason"].is_null());
     }
 
     #[test]
@@ -2414,9 +2443,9 @@ mod tests {
         let _ = crate::db::init_db(&db_path).unwrap();
         let conn = rusqlite::Connection::open(&db_path).unwrap();
 
-        // Default simple config is TUN mode -> no mixed port
+        // Default simple config is TUN mode -> mixed port is also provided for seamless system proxy compatibility
         let port = get_mixed_port_for_active_mode(&conn);
-        assert_eq!(port, None);
+        assert_eq!(port, Some(2080));
 
         let _ = std::fs::remove_file(&db_file);
     }

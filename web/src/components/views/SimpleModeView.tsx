@@ -115,18 +115,28 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
       { name: "GitHub (开发者库)", host: "github.com" },
     ];
 
-    const results: { [site: string]: number | null } = {};
-    for (const site of sites) {
+    const testSite = async (site: { name: string; host: string }) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
       const start = Date.now();
       try {
         await fetch(`https://${site.host}/favicon.ico`, {
           mode: "no-cors",
           cache: "no-store",
+          signal: controller.signal,
         });
-        results[site.name] = Date.now() - start;
+        clearTimeout(timer);
+        return { name: site.name, latency: Date.now() - start };
       } catch {
-        results[site.name] = 0; // timeout / error
+        clearTimeout(timer);
+        return { name: site.name, latency: 0 };
       }
+    };
+
+    const testResults = await Promise.all(sites.map(testSite));
+    const results: { [site: string]: number | null } = {};
+    for (const r of testResults) {
+      results[r.name] = r.latency;
     }
     setSiteResults(results);
     setSiteTesting(false);

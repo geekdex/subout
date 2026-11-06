@@ -337,6 +337,12 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         }
     }
 
+    // Migration: normalize legacy node_types ('node', 'group') in outbound_groups to 'all'
+    let _ = conn.execute(
+        "UPDATE outbound_groups SET node_types = 'all' WHERE node_types IN ('node', 'group') OR node_types IS NULL",
+        [],
+    );
+
     // Bootstrap default settings if empty
     let has_settings: i64 = conn.query_row("SELECT COUNT(*) FROM settings", [], |r| r.get(0))?;
     if has_settings == 0 {
@@ -1095,18 +1101,22 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
         .unwrap_or_default();
 
     let type_filter = group.node_types.as_deref().unwrap_or("all").trim();
-    let selected_types: Vec<String> =
-        if type_filter.is_empty() || type_filter.eq_ignore_ascii_case("all") {
-            Vec::new()
-        } else {
-            type_filter
-                .split([',', '，', ' ', '\n', '\t', '\r'])
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
+    let selected_types: Vec<String> = if type_filter.is_empty()
+        || type_filter.eq_ignore_ascii_case("all")
+        || type_filter.eq_ignore_ascii_case("node")
+        || type_filter.eq_ignore_ascii_case("group")
+    {
+        Vec::new()
+    } else {
+        type_filter
+            .split([',', '，', ' ', '\n', '\t', '\r'])
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty() && s != "all" && s != "node" && s != "group")
+            .collect()
+    };
 
     let nodes = get_nodes(conn)?;
+    let subs = get_subscriptions(conn).unwrap_or_default();
     let mut resolved_tags = Vec::new();
 
     for node in nodes {
@@ -1132,6 +1142,13 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
                 }
                 if let Ok(target_sub_id) = sub_item.parse::<i64>()
                     && node.subscription_id == Some(target_sub_id)
+                {
+                    sub_matched = true;
+                    break;
+                }
+                if let Some(nid) = node.subscription_id
+                    && let Some(sub) = subs.iter().find(|s| s.id == nid)
+                    && sub.label.eq_ignore_ascii_case(sub_item)
                 {
                     sub_matched = true;
                     break;

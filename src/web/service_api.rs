@@ -73,6 +73,7 @@ pub async fn kill_external_service(
 
     Ok(Json(serde_json::json!({
         "status": "success",
+        "success": true,
         "message": format!("已成功终止外部进程 (PID: {})", payload.pid)
     })))
 }
@@ -80,7 +81,7 @@ pub async fn kill_external_service(
 pub async fn takeover_service(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<Option<TakeoverServiceRequest>>,
+    payload: Option<Json<TakeoverServiceRequest>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
@@ -88,6 +89,7 @@ pub async fn takeover_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
+    let payload = payload.map(|Json(p)| p);
     let (sudo_pass, start_after, custom_config, enable_proxy) = if let Some(req) = payload {
         (
             req.sudo_pass.filter(|p| !p.trim().is_empty()),
@@ -119,6 +121,7 @@ pub async fn takeover_service(
 
             Ok(Json(serde_json::json!({
                 "status": "success",
+                "success": true,
                 "message": "已成功平滑接管外部服务并启动 Subout 代理"
             })))
         } else {
@@ -136,6 +139,7 @@ pub async fn takeover_service(
 
             Ok(Json(serde_json::json!({
                 "status": "success",
+                "success": true,
                 "message": "已成功终止冲突进程并恢复系统直连网络（当前尚未配置激活配置文件）"
             })))
         }
@@ -153,6 +157,7 @@ pub async fn takeover_service(
 
         Ok(Json(serde_json::json!({
             "status": "success",
+            "success": true,
             "message": "已成功接管并终止全部外部 sing-box 服务，已恢复系统直连网络"
         })))
     }
@@ -161,7 +166,7 @@ pub async fn takeover_service(
 pub async fn start_service(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<Option<StartServiceRequest>>,
+    payload: Option<Json<StartServiceRequest>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
@@ -169,6 +174,7 @@ pub async fn start_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
+    let payload = payload.map(|Json(p)| p);
     let (config_val, custom_sudo_pass, takeover, enable_proxy) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
             c
@@ -204,6 +210,7 @@ pub async fn start_service(
 
     Ok(Json(serde_json::json!({
         "status": "success",
+        "success": true,
         "message": "sing-box 服务已成功启动"
     })))
 }
@@ -225,6 +232,7 @@ pub async fn stop_service(
 
     Ok(Json(serde_json::json!({
         "status": "success",
+        "success": true,
         "message": "sing-box 服务已停止"
     })))
 }
@@ -232,7 +240,7 @@ pub async fn stop_service(
 pub async fn restart_service(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<Option<StartServiceRequest>>,
+    payload: Option<Json<StartServiceRequest>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
@@ -240,6 +248,7 @@ pub async fn restart_service(
 
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
+    let payload = payload.map(|Json(p)| p);
     let (config_val, custom_sudo_pass, takeover, enable_proxy) = if let Some(req) = payload {
         let conf = if let Some(c) = req.config {
             c
@@ -271,6 +280,7 @@ pub async fn restart_service(
 
     Ok(Json(serde_json::json!({
         "status": "success",
+        "success": true,
         "message": "sing-box 服务已重启"
     })))
 }
@@ -295,13 +305,23 @@ pub async fn set_system_proxy(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
+    let is_running = state.service_manager.is_running().await;
     Ok(Json(serde_json::json!({
         "status": "success",
+        "success": true,
         "system_proxy_enabled": payload.enabled,
         "message": if payload.enabled {
-            "已开启系统网络代理"
+            if is_running {
+                "已开启系统网络代理"
+            } else {
+                "已预设开启系统代理（启动服务时将自动为系统配置代理）"
+            }
         } else {
-            "已关闭系统网络代理"
+            if is_running {
+                "已关闭系统网络代理"
+            } else {
+                "已预设关闭系统代理"
+            }
         }
     })))
 }

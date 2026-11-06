@@ -398,13 +398,14 @@ pub async fn preview_sync_nodes(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(payload): Json<Option<SyncConfigNodesRequest>>,
+    payload: Option<Json<SyncConfigNodesRequest>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
+    let payload = payload.map(|Json(p)| p);
     let raw_content = if let Some(req) = payload
         && let Some(c) = req.content
         && !c.trim().is_empty()

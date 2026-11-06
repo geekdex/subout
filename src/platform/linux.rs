@@ -782,6 +782,33 @@ impl PlatformStrategy for LinuxPlatform {
         })
     }
 
+    fn is_system_proxy_supported(&self) -> bool {
+        #[cfg(unix)]
+        {
+            if let Ok(path_var) = std::env::var("PATH") {
+                for dir in std::env::split_paths(&path_var) {
+                    let candidate = dir.join("gsettings");
+                    if candidate.is_file() {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
+    fn system_proxy_unsupported_reason(&self) -> Option<String> {
+        if self.is_system_proxy_supported() {
+            None
+        } else {
+            Some("当前 Linux 环境未安装或不支持 gsettings（GNOME 代理设置），系统代理不可用；建议使用 TUN 模式透明代理".to_string())
+        }
+    }
+
     fn enable_system_proxy(&self, port: u16, _sudo_pass: Option<&str>) {
         #[cfg(unix)]
         {
