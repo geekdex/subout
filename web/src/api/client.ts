@@ -349,6 +349,31 @@ export const api = {
       body: JSON.stringify({ id }),
     });
   },
+  async validateConfigSchema(
+    content: string,
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    return request<{ valid: boolean; errors: string[] }>(
+      "/api/configs/validate",
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      },
+    );
+  },
+  async previewSyncConfigNodes(
+    id: number,
+    content?: string,
+  ): Promise<{
+    status: string;
+    content: string;
+    outbounds: Record<string, unknown>[];
+    report?: unknown;
+  }> {
+    return request(`/api/configs/${id}/sync-nodes`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  },
 
   // Simple Config
   async getSimpleConfig(): Promise<SimpleConfig> {

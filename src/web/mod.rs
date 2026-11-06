@@ -266,6 +266,14 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/configs/:id/set-running",
             post(configs_api::set_running_config_by_id),
         )
+        .route(
+            "/api/configs/validate",
+            post(configs_api::validate_config_schema),
+        )
+        .route(
+            "/api/configs/:id/sync-nodes",
+            post(configs_api::preview_sync_nodes),
+        )
         // Configuration Base / Running / Generated (backward compatibility)
         .route(
             "/api/config/base",

@@ -36,6 +36,24 @@ pub struct SetRunningConfigRequest {
     pub id: i64,
 }
 
+#[derive(Deserialize)]
+pub struct ValidateConfigSchemaRequest {
+    #[serde(alias = "config_json")]
+    pub content: String,
+}
+
+#[derive(Serialize)]
+pub struct ValidateConfigSchemaResponse {
+    pub valid: bool,
+    pub errors: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SyncConfigNodesRequest {
+    #[serde(alias = "config_json")]
+    pub content: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct ConfigProfileResponse {
     pub id: i64,
@@ -114,6 +132,7 @@ pub async fn create_config(
 
     let content = payload.content.unwrap_or_else(|| {
         serde_json::json!({
+            "$schema": "https://sing-box.sagernet.org/schema.json",
             "log": { "level": "info", "timestamp": true },
             "dns": {},
             "inbounds": [],
@@ -125,12 +144,21 @@ pub async fn create_config(
         .to_string()
     });
 
+    let validated_val =
+        crate::schema_validator::validate_singbox_schema_str(&content).map_err(|errs| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("配置未通过官方 JSON Schema 校验: {}", errs.join("；")),
+            )
+        })?;
+    let normalized_content = serde_json::to_string_pretty(&validated_val).unwrap_or(content);
+
     let profile = db::create_config_profile(
         &conn,
         name,
         &platform,
         payload.description.as_deref(),
-        &content,
+        &normalized_content,
     )
     .map_err(|e| {
         (
@@ -203,13 +231,23 @@ pub async fn update_config(
         None => existing.platform,
     };
 
+    let validated_val = crate::schema_validator::validate_singbox_schema_str(&payload.content)
+        .map_err(|errs| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("配置未通过官方 JSON Schema 校验: {}", errs.join("；")),
+            )
+        })?;
+    let normalized_content =
+        serde_json::to_string_pretty(&validated_val).unwrap_or_else(|_| payload.content.clone());
+
     db::update_config_profile(
         &conn,
         id,
         name,
         &platform,
         payload.description.as_deref(),
-        &payload.content,
+        &normalized_content,
     )
     .map_err(|e| {
         (
@@ -217,6 +255,24 @@ pub async fn update_config(
             format!("更新配置失败: {e}"),
         )
     })?;
+
+    if existing.is_running_config {
+        for section in [
+            "log",
+            "dns",
+            "inbounds",
+            "outbounds",
+            "route",
+            "experimental",
+            "http_clients",
+        ] {
+            if let Some(sec_val) = validated_val.get(section)
+                && let Ok(sec_str) = serde_json::to_string(sec_val)
+            {
+                let _ = db::save_base_config_section(&conn, section, &sec_str);
+            }
+        }
+    }
 
     Ok(Json(serde_json::json!({
         "status": "success",
@@ -305,4 +361,81 @@ pub async fn set_running_config_by_id(
     })?;
 
     Ok(Json(updated.into()))
+}
+
+pub async fn validate_config_schema(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ValidateConfigSchemaRequest>,
+) -> Result<Json<ValidateConfigSchemaResponse>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+
+    match crate::schema_validator::validate_singbox_schema_str(&payload.content) {
+        Ok(_) => Ok(Json(ValidateConfigSchemaResponse {
+            valid: true,
+            errors: Vec::new(),
+        })),
+        Err(errors) => Ok(Json(ValidateConfigSchemaResponse {
+            valid: false,
+            errors,
+        })),
+    }
+}
+
+pub async fn preview_sync_nodes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(payload): Json<Option<SyncConfigNodesRequest>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+
+    let raw_content = if let Some(req) = payload
+        && let Some(c) = req.content
+        && !c.trim().is_empty()
+    {
+        c
+    } else {
+        let profile = db::get_config_profile_by_id(&conn, id)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("查询配置失败: {e}"),
+                )
+            })?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "配置不存在".to_string()))?;
+        profile.content
+    };
+
+    let base_val: serde_json::Value = serde_json::from_str(&raw_content)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("配置 JSON 解析失败: {e}")))?;
+
+    let (synced_val, report) =
+        crate::generator::sync_config_with_latest_resources(&conn, &base_val, &[]).map_err(
+            |e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("同步节点与节点组合失败: {e}"),
+                )
+            },
+        )?;
+
+    let synced_str = serde_json::to_string_pretty(&synced_val).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("序列化配置失败: {e}"),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "content": synced_str,
+        "outbounds": synced_val.get("outbounds").cloned().unwrap_or(serde_json::json!([])),
+        "report": report
+    })))
 }

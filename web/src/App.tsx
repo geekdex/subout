@@ -321,6 +321,8 @@ const AppContent: React.FC = () => {
               configs={configs}
               runningProfile={runningProfile}
               systemInfo={systemInfo}
+              nodes={nodes}
+              nodeGroups={nodeGroups}
               onRefresh={loadAllData}
             />
           )}

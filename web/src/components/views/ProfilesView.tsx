@@ -16,7 +16,13 @@ import { CopyButton } from "../ui/CopyButton";
 import { Dialog } from "../ui/Dialog";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
-import { ConfigProfile, SystemInfo, PlatformType } from "../../types/api";
+import {
+  ConfigProfile,
+  SystemInfo,
+  PlatformType,
+  NodeItem,
+  NodeGroup,
+} from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import { getErrorMessage } from "../../utils/format";
@@ -26,6 +32,8 @@ interface ProfilesViewProps {
   configs: ConfigProfile[];
   runningProfile: ConfigProfile | null;
   systemInfo: SystemInfo | null;
+  nodes?: NodeItem[];
+  nodeGroups?: NodeGroup[];
   onRefresh: () => void;
 }
 
@@ -33,6 +41,8 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   configs,
   runningProfile,
   systemInfo,
+  nodes = [],
+  nodeGroups = [],
   onRefresh,
 }) => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -56,14 +66,28 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
     }
     setCreating(true);
     try {
-      // Default minimal sing-box 1.14 valid config
+      // Default sing-box 1.14 schema-compliant config
       const defaultConfig = {
+        $schema: "https://sing-box.sagernet.org/schema.json",
         log: { level: "info", timestamp: true },
         dns: {
-          servers: [{ tag: "dns_local", type: "udp", server: "223.5.5.5" }],
-          rules: [],
-          final: "dns_local",
-          strategy: "ipv4_only",
+          servers: [
+            { tag: "local-dns", type: "udp", server: "223.5.5.5" },
+            {
+              tag: "remote-dns",
+              type: "https",
+              server: "1.1.1.1",
+              detour: "proxy",
+            },
+          ],
+          rules: [
+            {
+              rule_set: ["geosite-cn"],
+              server: "local-dns",
+            },
+          ],
+          final: "remote-dns",
+          strategy: "prefer_ipv4",
         },
         inbounds: [
           newProfilePlatform === "android"
@@ -78,20 +102,46 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                 tag: "tun-in",
                 address: ["172.19.0.1/30"],
                 auto_route: true,
-                stack: "system",
+                strict_route: true,
               },
         ],
         outbounds: [
-          { type: "direct", tag: "direct" },
           { type: "selector", tag: "proxy", outbounds: ["direct"] },
+          { type: "direct", tag: "direct" },
         ],
         route: {
           rules: [
             { action: "sniff" },
-            { protocol: "dns", action: "hijack-dns" },
-            { port: 53, action: "hijack-dns" },
+            { protocol: ["dns"], action: "hijack-dns" },
+            { ip_is_private: true, outbound: "direct" },
+            { rule_set: ["geosite-cn", "geoip-cn"], outbound: "direct" },
+          ],
+          rule_set: [
+            {
+              type: "remote",
+              tag: "geosite-cn",
+              format: "binary",
+              url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+            },
+            {
+              type: "remote",
+              tag: "geoip-cn",
+              format: "binary",
+              url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+            },
           ],
           final: "proxy",
+          auto_detect_interface: true,
+          default_domain_resolver: "local-dns",
+        },
+        http_clients: [
+          { tag: "direct" },
+          { tag: "proxy", detour: "proxy" },
+        ],
+        experimental: {
+          cache_file: {
+            enabled: true,
+          },
         },
       };
 
@@ -410,6 +460,8 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       {editingProfile && (
         <ProfileEditor
           profile={editingProfile}
+          nodes={nodes}
+          nodeGroups={nodeGroups}
           onClose={() => setEditingProfile(null)}
           onSaved={() => {
             setEditingProfile(null);
