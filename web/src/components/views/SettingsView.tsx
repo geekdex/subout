@@ -17,7 +17,6 @@ import {
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Badge } from "../ui/Badge";
-import { ThemeSwitcher } from "../ui/ThemeSwitcher";
 import { SystemInfo } from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
@@ -259,18 +258,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <div className="space-y-4">
-              <div className="space-y-2">
-                <div>
-                  <span className="text-xs font-medium text-slate-200 block">
-                    全局界面主题 (Theme)
-                  </span>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    支持自动跟随系统、亮色与暗色三种主题模式，默认根据系统主题自动显示
-                  </p>
-                </div>
-                <ThemeSwitcher variant="cards" />
-              </div>
-
               <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/40 border border-slate-800">
                 <div>
                   <span className="text-xs font-medium text-slate-200 block">

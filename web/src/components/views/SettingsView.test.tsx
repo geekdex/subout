@@ -43,6 +43,14 @@ describe("SettingsView Component", () => {
     ).toBeNull();
   });
 
+  it("does not render theme switcher in settings view (migrated to header to avoid redundancy)", () => {
+    renderWithToast(
+      <SettingsView systemInfo={baseInfo} onRefreshSystemInfo={vi.fn()} />,
+    );
+
+    expect(screen.queryByText("全局界面主题 (Theme)")).toBeNull();
+  });
+
   it("renders admin web password change card and host environment status", () => {
     renderWithToast(
       <SettingsView
