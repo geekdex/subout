@@ -249,6 +249,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             get(configs_api::list_configs).post(configs_api::create_config),
         )
         .route(
+            "/api/configs/preferences",
+            get(configs_api::get_editor_preferences).post(configs_api::save_editor_preferences),
+        )
+        .route(
             "/api/configs/:id",
             get(configs_api::get_config_detail)
                 .put(configs_api::update_config)

@@ -159,7 +159,7 @@ export interface InboundItem {
   auto_route?: boolean;
   auto_redirect?: boolean;
   strict_route?: boolean;
-  dns_mode?: "" | " Evaluate" | "direct" | "fakeip" | "hosts" | string;
+  dns_mode?: "" | "direct" | "fakeip" | "hosts" | string;
   set_system_proxy?: boolean;
   include_package?: string[];
   exclude_package?: string[];
@@ -202,7 +202,15 @@ export interface SingBoxVisualConfig {
   $schema?: string;
   log?: {
     disabled?: boolean;
-    level?: "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic";
+    level?:
+      | ""
+      | "trace"
+      | "debug"
+      | "info"
+      | "warn"
+      | "error"
+      | "fatal"
+      | "panic";
     output?: string;
     timestamp?: boolean;
   };
@@ -230,13 +238,16 @@ export interface SingBoxVisualConfig {
     [key: string]: unknown;
   };
   certificate?: {
-    store?: "system" | "mozilla" | "chrome" | "none";
+    store?: "" | "system" | "mozilla" | "chrome" | "none";
     certificate?: string[];
     certificate_path?: string[];
     certificate_directory_path?: string[];
     [key: string]: unknown;
   };
+  certificate_providers?: unknown[];
   http_clients?: HttpClientItem[];
+  network_namespaces?: unknown[];
+  endpoints?: unknown[];
   inbounds?: InboundItem[];
   outbounds?: OutboundItem[];
   route?: {
@@ -253,6 +264,7 @@ export interface SingBoxVisualConfig {
     default_network_strategy?: string;
     [key: string]: unknown;
   };
+  services?: unknown[];
   experimental?: {
     cache_file?: {
       enabled?: boolean;
@@ -484,7 +496,7 @@ function normalizeRuleNode(
 }
 
 /**
- * Parses raw JSON string into normalized SingBoxVisualConfig state.
+ * Parses raw JSON string into SingBoxVisualConfig state without injecting unsolicited defaults.
  */
 export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
   let parsed: Record<string, unknown> = {};
@@ -504,7 +516,6 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
           unknown
         >)
       : {};
-  // Remove deprecated 1.14 field if present in legacy configs
   delete dnsRaw.independent_cache;
 
   const dnsRules = Array.isArray(dnsRaw.rules)
@@ -514,7 +525,7 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
             Boolean(r) && typeof r === "object",
         )
         .map((r) => normalizeRuleNode(r, 0) as DnsRuleItem)
-    : [];
+    : undefined;
 
   const routeRaw =
     parsed.route &&
@@ -533,7 +544,7 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
             Boolean(r) && typeof r === "object",
         )
         .map((r) => normalizeRuleNode(r, 0) as RouteRuleItem)
-    : [];
+    : undefined;
 
   const inboundsRaw = Array.isArray(parsed.inbounds)
     ? parsed.inbounds
@@ -543,7 +554,6 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
         )
         .map((inb) => {
           const copy: Record<string, unknown> = { ...inb };
-          // Remove legacy `stack` if present on tun inbound to strictly match root schema.json
           if (copy.type === "tun" && "stack" in copy) {
             delete copy.stack;
           }
@@ -571,7 +581,7 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
         (o): o is Record<string, unknown> =>
           Boolean(o) && typeof o === "object",
       ) as OutboundItem[])
-    : [{ type: "direct", tag: "direct" }];
+    : [];
 
   return {
     ...parsed,
@@ -579,34 +589,43 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
       typeof parsed.$schema === "string" && parsed.$schema.trim()
         ? parsed.$schema
         : "https://sing-box.sagernet.org/schema.json",
-    log: {
-      level: "info",
-      timestamp: true,
-      ...(parsed.log && typeof parsed.log === "object"
-        ? (parsed.log as Record<string, unknown>)
-        : {}),
-    },
+    log:
+      parsed.log && typeof parsed.log === "object" && !Array.isArray(parsed.log)
+        ? (parsed.log as SingBoxVisualConfig["log"])
+        : {},
     dns: {
       ...dnsRaw,
-      servers: Array.isArray(dnsRaw.servers)
-        ? (dnsRaw.servers as DnsServerItem[])
-        : [],
-      rules: dnsRules,
+      ...(Array.isArray(dnsRaw.servers)
+        ? { servers: dnsRaw.servers as DnsServerItem[] }
+        : {}),
+      ...(dnsRules !== undefined ? { rules: dnsRules } : {}),
     },
+    ntp:
+      parsed.ntp && typeof parsed.ntp === "object" && !Array.isArray(parsed.ntp)
+        ? (parsed.ntp as SingBoxVisualConfig["ntp"])
+        : {},
+    certificate:
+      parsed.certificate &&
+      typeof parsed.certificate === "object" &&
+      !Array.isArray(parsed.certificate)
+        ? (parsed.certificate as SingBoxVisualConfig["certificate"])
+        : {},
+    http_clients: Array.isArray(parsed.http_clients)
+      ? (parsed.http_clients as HttpClientItem[])
+      : [],
     inbounds: inboundsRaw,
     outbounds: outboundsRaw,
     route: {
       ...routeRaw,
-      rule_set: Array.isArray(routeRaw.rule_set)
-        ? (routeRaw.rule_set as RuleSetItem[])
-        : [],
-      rules: routeRules,
+      ...(Array.isArray(routeRaw.rule_set)
+        ? { rule_set: routeRaw.rule_set as RuleSetItem[] }
+        : {}),
+      ...(routeRules !== undefined ? { rules: routeRules } : {}),
     },
-    http_clients: Array.isArray(parsed.http_clients)
-      ? (parsed.http_clients as HttpClientItem[])
-      : undefined,
     experimental:
-      parsed.experimental && typeof parsed.experimental === "object"
+      parsed.experimental &&
+      typeof parsed.experimental === "object" &&
+      !Array.isArray(parsed.experimental)
         ? (parsed.experimental as SingBoxVisualConfig["experimental"])
         : {},
   };
@@ -622,7 +641,6 @@ function cleanRuleNode(
 
   for (const [k, v] of Object.entries(rule)) {
     if (v === undefined || v === null || v === "") continue;
-    // Strip platform-incompatible fields so saved config adheres to target platform rules
     if (
       isAndroid &&
       (k === "process_name" ||
@@ -631,13 +649,9 @@ function cleanRuleNode(
     ) {
       continue;
     }
-    if (
-      !isAndroid &&
-      (k === "package_name" || k === "package_name_regex")
-    ) {
+    if (!isAndroid && (k === "package_name" || k === "package_name_regex")) {
       continue;
     }
-    // Strip action fields on nested rules (depth > 0)
     if (
       depth > 0 &&
       [
@@ -707,7 +721,6 @@ function cleanRuleNode(
     delete out.rules;
   }
 
-  // Ensure action compatibility for top-level rules
   if (depth === 0) {
     const act = (out.action as string | undefined) || "route";
     if (act === "route") {
@@ -720,7 +733,6 @@ function cleanRuleNode(
       delete out.sniffer;
       delete out.override_address;
       delete out.override_port;
-      // Omit explicit "action": "route" if outbound or server is set, or keep if explicitly desired
       if (out.action === "route" && (out.outbound || out.server)) {
         delete out.action;
       }
@@ -808,7 +820,42 @@ function cleanObject(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
+ * Collects all `rule_set` tags referenced in `route.rules` and `dns.rules` (including nested logical rules)
+ * that are not yet defined in `route.rule_set`.
+ */
+export function collectMissingRuleSetTags(
+  state: SingBoxVisualConfig,
+): string[] {
+  const defined = new Set(
+    (state.route?.rule_set || []).map((rs) => rs.tag).filter(Boolean),
+  );
+  const missing = new Set<string>();
+
+  const walkRules = (rules?: NestedRuleItem[]) => {
+    if (!Array.isArray(rules)) return;
+    for (const r of rules) {
+      if (Array.isArray(r.rule_set)) {
+        for (const tag of r.rule_set) {
+          if (tag && !defined.has(tag)) {
+            missing.add(tag);
+          }
+        }
+      }
+      if (r.type === "logical" && Array.isArray(r.rules)) {
+        walkRules(r.rules);
+      }
+    }
+  };
+
+  walkRules(state.route?.rules);
+  walkRules(state.dns?.rules);
+
+  return Array.from(missing);
+}
+
+/**
  * Serializes SingBoxVisualConfig state into a clean, schema-compliant JSON object.
+ * Preserves empty sections as `{}` or `[]` when the config is an empty skeleton.
  */
 export function serializeVisualStateToConfig(
   state: SingBoxVisualConfig,
@@ -818,9 +865,9 @@ export function serializeVisualStateToConfig(
     $schema: state.$schema || "https://sing-box.sagernet.org/schema.json",
   };
 
-  if (state.log) {
-    result.log = cleanObject(state.log as Record<string, unknown>);
-  }
+  result.log = state.log
+    ? cleanObject(state.log as Record<string, unknown>)
+    : {};
 
   if (state.dns) {
     const { servers, rules, independent_cache: _ic, ...dnsRest } = state.dns;
@@ -836,44 +883,58 @@ export function serializeVisualStateToConfig(
       );
     }
     result.dns = dnsOut;
+  } else {
+    result.dns = {};
   }
 
-  if (state.ntp && Object.keys(cleanObject(state.ntp)).length > 0) {
-    result.ntp = cleanObject(state.ntp);
+  const cleanedNtp = state.ntp
+    ? cleanObject(state.ntp as Record<string, unknown>)
+    : {};
+  if ("ntp" in state || Object.keys(cleanedNtp).length > 0) {
+    result.ntp = cleanedNtp;
+  }
+
+  const cleanedCert = state.certificate
+    ? cleanObject(state.certificate as Record<string, unknown>)
+    : {};
+  if ("certificate" in state || Object.keys(cleanedCert).length > 0) {
+    result.certificate = cleanedCert;
+  }
+
+  if ("certificate_providers" in state) {
+    result.certificate_providers = Array.isArray(state.certificate_providers)
+      ? state.certificate_providers
+      : [];
   }
 
   if (
-    state.certificate &&
-    Object.keys(cleanObject(state.certificate)).length > 0
+    "http_clients" in state ||
+    (Array.isArray(state.http_clients) && state.http_clients.length > 0)
   ) {
-    result.certificate = cleanObject(state.certificate);
-  }
-
-  if (Array.isArray(state.http_clients) && state.http_clients.length > 0) {
-    result.http_clients = state.http_clients.map((c) =>
+    result.http_clients = (state.http_clients || []).map((c) =>
       cleanObject(c as Record<string, unknown>),
     );
   }
 
-  if (Array.isArray(state.inbounds)) {
-    result.inbounds = state.inbounds.map((inb) => {
-      const copy = { ...(inb as Record<string, unknown>) };
-      if (copy.type === "tun") {
-        delete copy.stack;
-      }
-      if (platform !== "android") {
-        delete copy.include_package;
-        delete copy.exclude_package;
-      }
-      return cleanObject(copy);
-    });
+  if ("endpoints" in state) {
+    result.endpoints = Array.isArray(state.endpoints) ? state.endpoints : [];
   }
 
-  if (Array.isArray(state.outbounds)) {
-    result.outbounds = state.outbounds.map((outb) =>
-      cleanObject(outb as Record<string, unknown>),
-    );
-  }
+  result.inbounds = (state.inbounds || []).map((inb) => {
+    const copy = { ...(inb as Record<string, unknown>) };
+    if (copy.type === "tun") {
+      delete copy.stack;
+    }
+    if (platform !== "android") {
+      delete copy.include_package;
+      delete copy.exclude_package;
+    }
+    return cleanObject(copy);
+  });
+
+  result.outbounds = (state.outbounds || []).map((outb) =>
+    cleanObject(outb as Record<string, unknown>),
+  );
 
   if (state.route) {
     const { rules, rule_set, ...routeRest } = state.route;
@@ -883,37 +944,23 @@ export function serializeVisualStateToConfig(
         cleanObject(rs as Record<string, unknown>),
       );
     }
-    routeOut.rules = Array.isArray(rules)
-      ? rules.map((r) =>
-          cleanRuleNode(r as Record<string, unknown>, platform, 0),
-        )
-      : [];
+    if (Array.isArray(rules) && rules.length > 0) {
+      routeOut.rules = rules.map((r) =>
+        cleanRuleNode(r as Record<string, unknown>, platform, 0),
+      );
+    }
     result.route = routeOut;
+  } else {
+    result.route = {};
   }
 
-  if (state.experimental) {
-    const expCleaned = cleanObject(
-      state.experimental as Record<string, unknown>,
-    );
-    if (Object.keys(expCleaned).length > 0) {
-      result.experimental = expCleaned;
-    }
+  if ("services" in state) {
+    result.services = Array.isArray(state.services) ? state.services : [];
   }
 
-  // Preserve any other valid top-level sections if present in original config
-  for (const extraKey of [
-    "certificate_providers",
-    "network_namespaces",
-    "endpoints",
-    "services",
-  ]) {
-    if (
-      Array.isArray(state[extraKey]) &&
-      (state[extraKey] as unknown[]).length > 0
-    ) {
-      result[extraKey] = state[extraKey];
-    }
-  }
+  result.experimental = state.experimental
+    ? cleanObject(state.experimental as Record<string, unknown>)
+    : {};
 
   return result;
 }

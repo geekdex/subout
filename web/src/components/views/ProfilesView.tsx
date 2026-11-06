@@ -66,83 +66,21 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
     }
     setCreating(true);
     try {
-      // Default sing-box 1.14 schema-compliant config
+      // Default empty sing-box 1.14 basic skeleton
       const defaultConfig = {
         $schema: "https://sing-box.sagernet.org/schema.json",
-        log: { level: "info", timestamp: true },
-        dns: {
-          servers: [
-            { tag: "local-dns", type: "udp", server: "223.5.5.5" },
-            {
-              tag: "remote-dns",
-              type: "https",
-              server: "1.1.1.1",
-              detour: "proxy",
-            },
-          ],
-          rules: [
-            {
-              rule_set: ["geosite-cn"],
-              server: "local-dns",
-            },
-          ],
-          final: "remote-dns",
-          strategy: "prefer_ipv4",
-        },
-        inbounds: [
-          newProfilePlatform === "android"
-            ? {
-                type: "mixed",
-                tag: "mixed-in",
-                listen: "127.0.0.1",
-                listen_port: 2080,
-              }
-            : {
-                type: "tun",
-                tag: "tun-in",
-                address: ["172.19.0.1/30"],
-                auto_route: true,
-                strict_route: true,
-              },
-        ],
-        outbounds: [
-          { type: "selector", tag: "proxy", outbounds: ["direct"] },
-          { type: "direct", tag: "direct" },
-        ],
-        route: {
-          rules: [
-            { action: "sniff" },
-            { protocol: ["dns"], action: "hijack-dns" },
-            { ip_is_private: true, outbound: "direct" },
-            { rule_set: ["geosite-cn", "geoip-cn"], outbound: "direct" },
-          ],
-          rule_set: [
-            {
-              type: "remote",
-              tag: "geosite-cn",
-              format: "binary",
-              url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-            },
-            {
-              type: "remote",
-              tag: "geoip-cn",
-              format: "binary",
-              url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-            },
-          ],
-          final: "proxy",
-          auto_detect_interface: true,
-          default_domain_resolver: "local-dns",
-        },
-        http_clients: [
-          { tag: "direct" },
-          { tag: "proxy", detour: "proxy" },
-        ],
-        experimental: {
-          cache_file: {
-            enabled: true,
-          },
-        },
+        log: {},
+        dns: {},
+        ntp: {},
+        certificate: {},
+        certificate_providers: [],
+        http_clients: [],
+        endpoints: [],
+        inbounds: [],
+        outbounds: [],
+        route: {},
+        services: [],
+        experimental: {},
       };
 
       await api.createConfig({

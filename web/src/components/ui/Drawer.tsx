@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { clsx } from "clsx";
@@ -13,7 +13,10 @@ export interface DrawerProps {
   footer?: React.ReactNode;
   className?: string;
   width?: "md" | "lg" | "xl" | "2xl" | "3xl" | "full";
+  isClosing?: boolean;
 }
+
+const EXIT_ANIMATION_MS = 200;
 
 export const Drawer: React.FC<DrawerProps> = ({
   open,
@@ -24,11 +27,51 @@ export const Drawer: React.FC<DrawerProps> = ({
   footer,
   className,
   width = "xl",
+  isClosing: externalClosing = false,
 }) => {
+  const [shouldRender, setShouldRender] = useState(open);
+  const [internalClosing, setInternalClosing] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isClosing = externalClosing || internalClosing;
+
+  useEffect(() => {
+    if (open) {
+      setShouldRender(true);
+      setInternalClosing(false);
+    } else if (shouldRender) {
+      setInternalClosing(true);
+      const timer = setTimeout(() => {
+        setShouldRender(false);
+        setInternalClosing(false);
+      }, EXIT_ANIMATION_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [open, shouldRender]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const triggerSmoothClose = useCallback(() => {
+    if (internalClosing || externalClosing) return;
+    setInternalClosing(true);
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+    }
+    closeTimerRef.current = setTimeout(() => {
+      onClose();
+    }, EXIT_ANIMATION_MS);
+  }, [internalClosing, externalClosing, onClose]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && open) {
-        onClose();
+      if (e.key === "Escape" && open && !isClosing) {
+        triggerSmoothClose();
       }
     };
     if (open) {
@@ -39,9 +82,9 @@ export const Drawer: React.FC<DrawerProps> = ({
       document.body.style.overflow = "unset";
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open, onClose]);
+  }, [open, isClosing, triggerSmoothClose]);
 
-  if (!open) return null;
+  if (!shouldRender && !open) return null;
 
   const widthClasses = {
     md: "max-w-md",
@@ -53,18 +96,25 @@ export const Drawer: React.FC<DrawerProps> = ({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
-      {/* Backdrop */}
+    <div
+      className="fixed inset-0 z-50 overflow-hidden flex justify-end"
+      data-state={isClosing ? "closing" : "open"}
+    >
+      {/* Backdrop with smooth fade in/out */}
       <div
-        className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
-        onClick={onClose}
+        className={clsx(
+          "fixed inset-0 bg-slate-950/80 backdrop-blur-sm",
+          isClosing ? "animate-backdrop-out" : "animate-backdrop-in",
+        )}
+        onClick={triggerSmoothClose}
       />
 
-      {/* Drawer panel */}
+      {/* Drawer panel with smooth slide + scale in/out */}
       <div
         className={twMerge(
           clsx(
-            "relative w-full h-full bg-slate-900 border-l border-slate-800 shadow-2xl z-10 flex flex-col transform transition-transform duration-300 ease-in-out",
+            "relative w-full h-full bg-slate-900 border-l border-slate-800 shadow-2xl z-10 flex flex-col",
+            isClosing ? "animate-drawer-out" : "animate-drawer-in",
             widthClasses[width],
             className,
           ),
@@ -83,14 +133,17 @@ export const Drawer: React.FC<DrawerProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={triggerSmoothClose}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+            title="关闭编辑器"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">{children}</div>
+        <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
+          {children}
+        </div>
 
         {footer && (
           <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-end gap-3 shrink-0">

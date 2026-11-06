@@ -54,6 +54,11 @@ pub struct SyncConfigNodesRequest {
     pub content: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct EditorPreferencesPayload {
+    pub show_json_preview: bool,
+}
+
 #[derive(Serialize)]
 pub struct ConfigProfileResponse {
     pub id: i64,
@@ -133,13 +138,18 @@ pub async fn create_config(
     let content = payload.content.unwrap_or_else(|| {
         serde_json::json!({
             "$schema": "https://sing-box.sagernet.org/schema.json",
-            "log": { "level": "info", "timestamp": true },
+            "log": {},
             "dns": {},
+            "ntp": {},
+            "certificate": {},
+            "certificate_providers": [],
+            "http_clients": [],
+            "endpoints": [],
             "inbounds": [],
-            "outbounds": [
-                { "type": "direct", "tag": "direct" }
-            ],
-            "route": { "rules": [] }
+            "outbounds": [],
+            "route": {},
+            "services": [],
+            "experimental": {}
         })
         .to_string()
     });
@@ -438,4 +448,53 @@ pub async fn preview_sync_nodes(
         "outbounds": synced_val.get("outbounds").cloned().unwrap_or(serde_json::json!([])),
         "report": report
     })))
+}
+
+const EDITOR_JSON_PREVIEW_SETTING_KEY: &str = "profile_editor_json_preview";
+
+pub async fn get_editor_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<EditorPreferencesPayload>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+
+    let setting_val = db::get_setting(&conn, EDITOR_JSON_PREVIEW_SETTING_KEY).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("读取偏好失败: {e}"),
+        )
+    })?;
+    let show_json_preview = !matches!(setting_val.as_deref(), Some("false"));
+
+    Ok(Json(EditorPreferencesPayload { show_json_preview }))
+}
+
+pub async fn save_editor_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<EditorPreferencesPayload>,
+) -> Result<Json<EditorPreferencesPayload>, (StatusCode, String)> {
+    check_auth(&state, &headers)
+        .await
+        .map_err(|s| (s, "未授权".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+
+    let val_str = if payload.show_json_preview {
+        "true"
+    } else {
+        "false"
+    };
+    db::update_setting(&conn, EDITOR_JSON_PREVIEW_SETTING_KEY, val_str).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("保存偏好失败: {e}"),
+        )
+    })?;
+
+    Ok(Json(EditorPreferencesPayload {
+        show_json_preview: payload.show_json_preview,
+    }))
 }

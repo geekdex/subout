@@ -374,6 +374,17 @@ export const api = {
       body: JSON.stringify({ content }),
     });
   },
+  async getEditorPreferences(): Promise<{ show_json_preview: boolean }> {
+    return request<{ show_json_preview: boolean }>("/api/configs/preferences");
+  },
+  async saveEditorPreferences(payload: {
+    show_json_preview: boolean;
+  }): Promise<{ show_json_preview: boolean }> {
+    return request<{ show_json_preview: boolean }>("/api/configs/preferences", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
 
   // Simple Config
   async getSimpleConfig(): Promise<SimpleConfig> {

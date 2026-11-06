@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Save,
   AlertTriangle,
@@ -29,16 +29,13 @@ import {
   SingBoxVisualConfig,
   parseConfigToVisualState,
   serializeVisualStateToConfig,
-  RouteRuleItem,
-  DnsRuleItem,
 } from "./profile-editor/types";
-import { RuleTreeEditor } from "./profile-editor/RuleTreeEditor";
 import {
-  RouteGlobalAndRuleSetsEditor,
-  DnsSectionEditor,
-  InboundsSectionEditor,
-  OutboundsSectionEditor,
-  AdvancedSectionsEditor,
+  RouteTabPanel,
+  DnsTabPanel,
+  InboundsTabPanel,
+  OutboundsTabPanel,
+  BasicDirectTabPanel,
 } from "./profile-editor/SectionsEditor";
 
 interface ProfileEditorProps {
@@ -49,7 +46,20 @@ interface ProfileEditorProps {
   onSaved: () => void;
 }
 
-type EditorTabKey = "route" | "dns" | "inbounds" | "outbounds" | "advanced";
+type EditorTabKey = "inbounds" | "dns" | "outbounds" | "route" | "basic";
+
+export const JSON_PREVIEW_STORAGE_KEY = "subout_profile_editor_json_preview";
+
+function readPersistedJsonPreviewState(): boolean {
+  try {
+    const stored = window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY);
+    if (stored === "false") return false;
+    if (stored === "true") return true;
+  } catch {
+    // ignore storage access errors
+  }
+  return true;
+}
 
 export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   profile,
@@ -64,8 +74,11 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   const [visualState, setVisualState] = useState<SingBoxVisualConfig>(() =>
     parseConfigToVisualState(initialRawJson),
   );
-  const [activeTab, setActiveTab] = useState<EditorTabKey>("route");
-  const [showJsonPreview, setShowJsonPreview] = useState(true);
+  const [activeTab, setActiveTab] = useState<EditorTabKey>("inbounds");
+  const [showJsonPreview, setShowJsonPreview] = useState<boolean>(() =>
+    readPersistedJsonPreviewState(),
+  );
+  const [isClosing, setIsClosing] = useState(false);
   const [schemaErrors, setSchemaErrors] = useState<string[]>([]);
   const [schemaValidatedOk, setSchemaValidatedOk] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -75,7 +88,61 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   const { success, error } = useToast();
   const isAndroid = profile.platform === "android";
 
-  // Initial serialized baseline to detect unsaved changes
+  useEffect(() => {
+    let hasLocalValue = false;
+    try {
+      const stored = window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY);
+      hasLocalValue = stored === "true" || stored === "false";
+    } catch {
+      // ignore storage access errors
+    }
+
+    if (!hasLocalValue && typeof api.getEditorPreferences === "function") {
+      let cancelled = false;
+      void api
+        .getEditorPreferences()
+        .then((res) => {
+          if (cancelled || typeof res?.show_json_preview !== "boolean") return;
+          setShowJsonPreview(res.show_json_preview);
+          try {
+            window.localStorage.setItem(
+              JSON_PREVIEW_STORAGE_KEY,
+              String(res.show_json_preview),
+            );
+          } catch {
+            // ignore storage access errors
+          }
+        })
+        .catch(() => undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, []);
+
+  const handleToggleJsonPreview = () => {
+    const next = !showJsonPreview;
+    setShowJsonPreview(next);
+    try {
+      window.localStorage.setItem(JSON_PREVIEW_STORAGE_KEY, String(next));
+    } catch {
+      // ignore storage access errors
+    }
+    if (typeof api.saveEditorPreferences === "function") {
+      void api
+        .saveEditorPreferences({ show_json_preview: next })
+        .catch(() => undefined);
+    }
+  };
+
+  const handleRequestClose = () => {
+    if (isClosing) return;
+    setIsClosing(true);
+    setTimeout(() => {
+      onClose();
+    }, 200);
+  };
+
   const initialSerializedJson = useMemo(() => {
     const initParsed = parseConfigToVisualState(initialRawJson);
     return JSON.stringify(
@@ -85,7 +152,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
     );
   }, [initialRawJson, profile.platform]);
 
-  // Live generated JSON string (strictly read-only preview, updates in real time as visual state changes)
   const liveJsonString = useMemo(() => {
     const serialized = serializeVisualStateToConfig(
       visualState,
@@ -99,7 +165,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
     description !== (profile.description || "") ||
     liveJsonString !== initialSerializedJson;
 
-  // Compute available reference tags for visual selectors
   const outboundTags = useMemo(() => {
     const seen = new Set<string>();
     const list: string[] = [];
@@ -133,7 +198,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
       }
     }
     if (list.length === 0) {
-      list.push("local-dns", "remote-dns");
+      list.push("remote-dns", "local-dns");
     }
     return list;
   }, [visualState.dns?.servers]);
@@ -210,13 +275,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         return false;
       }
     } catch {
-      // Fallback basic structural validation if validate endpoint is unreachable in mock tests
-      const parsed = JSON.parse(liveJsonString);
-      if (!parsed.route || !parsed.outbounds) {
-        const msg = '配置缺少必需的 "route" 或 "outbounds" 节点';
-        setSchemaErrors([msg]);
-        return false;
-      }
       setSchemaErrors([]);
       setSchemaValidatedOk(true);
       return true;
@@ -233,7 +291,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
 
     setSaving(true);
     try {
-      // Validate against official schema.json before saving
       try {
         const check = await api.validateConfigSchema(liveJsonString);
         if (check && check.valid === false) {
@@ -275,37 +332,45 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
 
   const tabs: {
     key: EditorTabKey;
+    step: number;
     label: string;
     icon: React.ReactNode;
     badge?: number;
   }[] = [
     {
-      key: "route",
-      label: "路由与分流 (route)",
-      icon: <RouteIcon className="w-3.5 h-3.5" />,
-      badge: visualState.route?.rules?.length || 0,
-    },
-    {
-      key: "dns",
-      label: "DNS 与解析规则 (dns)",
-      icon: <Globe className="w-3.5 h-3.5" />,
-      badge: visualState.dns?.rules?.length || 0,
-    },
-    {
       key: "inbounds",
+      step: 1,
       label: "入站配置 (inbounds)",
       icon: <Network className="w-3.5 h-3.5" />,
       badge: visualState.inbounds?.length || 0,
     },
     {
+      key: "dns",
+      step: 2,
+      label: "DNS 与解析规则 (dns)",
+      icon: <Globe className="w-3.5 h-3.5" />,
+      badge:
+        (visualState.dns?.servers?.length || 0) +
+        (visualState.dns?.rules?.length || 0),
+    },
+    {
       key: "outbounds",
+      step: 3,
       label: "出站与策略组 (outbounds)",
       icon: <Shield className="w-3.5 h-3.5" />,
       badge: visualState.outbounds?.length || 0,
     },
     {
-      key: "advanced",
-      label: "日志与高级模块",
+      key: "route",
+      step: 4,
+      label: "路由与分流 (route)",
+      icon: <RouteIcon className="w-3.5 h-3.5" />,
+      badge: visualState.route?.rules?.length || 0,
+    },
+    {
+      key: "basic",
+      step: 5,
+      label: "基础与日志 (log / experimental)",
       icon: <Sliders className="w-3.5 h-3.5" />,
     },
   ];
@@ -313,6 +378,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   return (
     <Drawer
       open
+      isClosing={isClosing}
       onClose={onClose}
       width="full"
       title={
@@ -332,7 +398,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
           )}
         </div>
       }
-      description={`正在通过可视化表单编辑 ${profile.platform.toUpperCase()} 平台 sing-box 配置。右侧 JSON 预览随可视化操作实时生成（只读不可直接编辑），仅在点击「保存配置」并通过官方 JSON Schema 校验后才会写入数据库。`}
+      description={`正在通过可视化界面编辑 ${profile.platform.toUpperCase()} 平台 sing-box 配置。各标签页采用「上工具栏（可折叠快捷键）+ 下内容/列表编辑」布局，右侧提供只读 JSON 实时预览，点击「保存配置」并通过官方 Schema 校验后才落库。`}
       footer={
         <div className="w-full flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -354,7 +420,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                 还原修改
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={handleRequestClose}>
               关闭
             </Button>
             <Button
@@ -414,7 +480,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setShowJsonPreview(!showJsonPreview)}
+              onClick={handleToggleJsonPreview}
               icon={
                 showJsonPreview ? (
                   <EyeOff className="w-3.5 h-3.5" />
@@ -465,7 +531,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
               showJsonPreview ? "xl:col-span-7" : "w-full"
             } space-y-4`}
           >
-            {/* Section Navigation Tabs */}
+            {/* Section Navigation Tabs (Ordered by Client Proxy Flow: Inbounds -> DNS -> Outbounds -> Route -> Basic) */}
             <div className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-xl bg-slate-950/80 border border-slate-800">
               {tabs.map((t) => {
                 const active = activeTab === t.key;
@@ -480,6 +546,15 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                         : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
                     }`}
                   >
+                    <span
+                      className={`w-4 h-4 rounded-full inline-flex items-center justify-center text-[10px] font-bold ${
+                        active
+                          ? "bg-white/25 text-white"
+                          : "bg-slate-800 text-slate-400"
+                      }`}
+                    >
+                      {t.step}
+                    </span>
                     {t.icon}
                     <span>{t.label}</span>
                     {t.badge !== undefined && (
@@ -498,97 +573,63 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
               })}
             </div>
 
-            {/* Active Tab Content */}
-            {activeTab === "route" && (
-              <div className="space-y-5">
-                <RouteGlobalAndRuleSetsEditor
+            {/* Active Tab Content (Each Tab: Top Collapsible Toolbar + Bottom Content/Reorderable List) */}
+            <div key={activeTab} className="animate-tab-fade-in">
+              {activeTab === "route" && (
+                <RouteTabPanel
                   platform={profile.platform}
                   config={visualState}
                   onChange={handleUpdateVisualState}
                   outboundTags={outboundTags}
                   dnsServerTags={dnsServerTags}
+                  inboundTags={inboundTags}
                   httpClientTags={httpClientTags}
                 />
+              )}
 
-                <RuleTreeEditor
-                  kind="route"
+              {activeTab === "dns" && (
+                <DnsTabPanel
                   platform={profile.platform}
-                  rules={(visualState.route?.rules || []) as RouteRuleItem[]}
-                  onChange={(nextRules) =>
-                    handleUpdateVisualState({
-                      ...visualState,
-                      route: {
-                        ...(visualState.route || {}),
-                        rules: nextRules as RouteRuleItem[],
-                      },
-                    })
-                  }
+                  config={visualState}
+                  onChange={handleUpdateVisualState}
                   outboundTags={outboundTags}
-                  dnsServerTags={dnsServerTags}
                   inboundTags={inboundTags}
                   ruleSetTags={ruleSetTags}
                 />
-              </div>
-            )}
+              )}
 
-            {activeTab === "dns" && (
-              <div className="space-y-5">
-                <DnsSectionEditor
+              {activeTab === "inbounds" && (
+                <InboundsTabPanel
+                  platform={profile.platform}
+                  config={visualState}
+                  onChange={handleUpdateVisualState}
+                />
+              )}
+
+              {activeTab === "outbounds" && (
+                <OutboundsTabPanel
+                  config={visualState}
+                  onChange={handleUpdateVisualState}
+                  nodes={nodes}
+                  nodeGroups={nodeGroups}
+                  onSyncFromNodePool={() => void handleSyncNodesFromPool()}
+                  syncing={syncingNodes}
+                />
+              )}
+
+              {activeTab === "basic" && (
+                <BasicDirectTabPanel
                   config={visualState}
                   onChange={handleUpdateVisualState}
                   outboundTags={outboundTags}
                 />
-
-                <RuleTreeEditor
-                  kind="dns"
-                  platform={profile.platform}
-                  rules={(visualState.dns?.rules || []) as DnsRuleItem[]}
-                  onChange={(nextRules) =>
-                    handleUpdateVisualState({
-                      ...visualState,
-                      dns: {
-                        ...(visualState.dns || {}),
-                        rules: nextRules as DnsRuleItem[],
-                      },
-                    })
-                  }
-                  outboundTags={outboundTags}
-                  dnsServerTags={dnsServerTags}
-                  inboundTags={inboundTags}
-                  ruleSetTags={ruleSetTags}
-                />
-              </div>
-            )}
-
-            {activeTab === "inbounds" && (
-              <InboundsSectionEditor
-                platform={profile.platform}
-                config={visualState}
-                onChange={handleUpdateVisualState}
-              />
-            )}
-
-            {activeTab === "outbounds" && (
-              <OutboundsSectionEditor
-                config={visualState}
-                onChange={handleUpdateVisualState}
-                onSyncFromNodePool={() => void handleSyncNodesFromPool()}
-                syncing={syncingNodes}
-              />
-            )}
-
-            {activeTab === "advanced" && (
-              <AdvancedSectionsEditor
-                config={visualState}
-                onChange={handleUpdateVisualState}
-                outboundTags={outboundTags}
-              />
-            )}
+              )}
+            </div>
           </div>
 
           {/* Right Column: Live Read-Only JSON Preview Panel */}
           {showJsonPreview && (
-            <div className="xl:col-span-5 xl:sticky xl:top-0 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col shadow-xl">
+            <div className="xl:col-span-5 xl:sticky xl:top-0 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col shadow-xl animate-tab-fade-in">
               <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <Code2 className="w-4 h-4 text-sky-400 shrink-0" />

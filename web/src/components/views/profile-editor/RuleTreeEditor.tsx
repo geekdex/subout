@@ -4,11 +4,12 @@ import {
   Trash2,
   ArrowUp,
   ArrowDown,
+  ChevronsUp,
+  ChevronsDown,
   ChevronDown,
   ChevronRight,
   GitBranch,
   Filter,
-  Sparkles,
   Copy,
   Smartphone,
   Monitor,
@@ -75,11 +76,17 @@ function summarizeCondition(rule: NestedRuleItem): string {
 
   const parts: string[] = [];
   if (rule.rule_set?.length)
-    parts.push(`rule_set(${rule.rule_set.slice(0, 3).join(", ")}${rule.rule_set.length > 3 ? "..." : ""})`);
+    parts.push(
+      `rule_set(${rule.rule_set.slice(0, 3).join(", ")}${rule.rule_set.length > 3 ? "..." : ""})`,
+    );
   if (rule.domain?.length)
-    parts.push(`domain(${rule.domain.slice(0, 2).join(", ")}${rule.domain.length > 2 ? "..." : ""})`);
+    parts.push(
+      `domain(${rule.domain.slice(0, 2).join(", ")}${rule.domain.length > 2 ? "..." : ""})`,
+    );
   if (rule.domain_suffix?.length)
-    parts.push(`suffix(${rule.domain_suffix.slice(0, 3).join(", ")}${rule.domain_suffix.length > 3 ? "..." : ""})`);
+    parts.push(
+      `suffix(${rule.domain_suffix.slice(0, 3).join(", ")}${rule.domain_suffix.length > 3 ? "..." : ""})`,
+    );
   if (rule.domain_keyword?.length)
     parts.push(`keyword(${rule.domain_keyword.slice(0, 2).join(", ")})`);
   if (rule.domain_regex?.length)
@@ -112,7 +119,10 @@ function summarizeCondition(rule: NestedRuleItem): string {
 function summarizeAction(
   rule: RouteRuleItem | DnsRuleItem,
   kind: "route" | "dns",
-): { text: string; variant: "info" | "success" | "warning" | "danger" | "neutral" } {
+): {
+  text: string;
+  variant: "info" | "success" | "warning" | "danger" | "neutral";
+} {
   const act = rule.action || "route";
   if (kind === "route") {
     const r = rule as RouteRuleItem;
@@ -528,7 +538,6 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
     "0": true,
   });
 
-  // Merge user's rule_set tags with official presets for quick selection
   const ruleSetSuggestions = React.useMemo(() => {
     const seen = new Set<string>();
     const list: { value: string; label?: string }[] = [];
@@ -551,94 +560,18 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
     setExpandedMap((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const expandAll = (expand: boolean) => {
+    const next: Record<string, boolean> = {};
+    rules.forEach((_, idx) => {
+      next[String(idx)] = expand;
+    });
+    setExpandedMap(next);
+  };
+
   const defaultTargetTag =
     kind === "route"
       ? outboundTags[0] || "proxy"
       : dnsServerTags[0] || "remote-dns";
-
-  const addTopLevelNormalRule = () => {
-    const newRule: RouteRuleItem | DnsRuleItem =
-      kind === "route"
-        ? { domain_suffix: [".example.com"], outbound: defaultTargetTag }
-        : { domain_suffix: [".cn"], server: defaultTargetTag };
-    const nextIdx = rules.length;
-    onChange([...rules, newRule]);
-    setExpandedMap((prev) => ({ ...prev, [String(nextIdx)]: true }));
-  };
-
-  const addTopLevelLogicalRule = () => {
-    const newRule: RouteRuleItem | DnsRuleItem =
-      kind === "route"
-        ? {
-            type: "logical",
-            mode: "and",
-            outbound: defaultTargetTag,
-            rules: [
-              { network: ["tcp", "udp"] },
-              {
-                type: "logical",
-                mode: "or",
-                rules: [
-                  { rule_set: ["geosite-google", "geosite-github"] },
-                  { domain_suffix: [".io", ".dev", ".ai"] },
-                ],
-              },
-            ],
-          }
-        : {
-            server: dnsServerTags[0] || "remote-dns",
-            type: "logical",
-            mode: "and",
-            rules: [
-              {
-                query_type: ["A", "AAAA", "CNAME"],
-              },
-              {
-                type: "logical",
-                mode: "or",
-                rules: [
-                  {
-                    rule_set: [
-                      "geosite-google",
-                      "geosite-youtube",
-                      "geosite-twitter",
-                      "geosite-facebook",
-                      "geosite-instagram",
-                      "geosite-telegram",
-                      "geosite-netflix",
-                      "geosite-github",
-                      "geosite-openai",
-                      "geosite-apple",
-                      "geosite-jetbrains",
-                    ],
-                  },
-                  {
-                    domain_suffix: [
-                      ".io",
-                      ".google",
-                      ".org",
-                      ".dev",
-                      ".ai",
-                      ".app",
-                    ],
-                  },
-                  {
-                    domain: ["claude.ai"],
-                  },
-                ],
-              },
-            ],
-          };
-    const nextIdx = rules.length;
-    onChange([...rules, newRule]);
-    setExpandedMap((prev) => ({ ...prev, [String(nextIdx)]: true }));
-  };
-
-  const insertPresetRule = (presetRule: RouteRuleItem | DnsRuleItem) => {
-    const nextIdx = rules.length;
-    onChange([...rules, presetRule]);
-    setExpandedMap((prev) => ({ ...prev, [String(nextIdx)]: true }));
-  };
 
   const updateTopRule = (idx: number, nextRule: RouteRuleItem | DnsRuleItem) => {
     const next = [...rules];
@@ -646,13 +579,13 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
     onChange(next);
   };
 
-  const moveTopRule = (idx: number, dir: -1 | 1) => {
-    const target = idx + dir;
-    if (target < 0 || target >= rules.length) return;
+  const moveTopRuleTo = (fromIdx: number, toIdx: number) => {
+    if (toIdx < 0 || toIdx >= rules.length || fromIdx === toIdx) return;
     const next = [...rules];
-    const [removed] = next.splice(idx, 1);
-    next.splice(target, 0, removed);
+    const [removed] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, removed);
     onChange(next);
+    setExpandedMap((prev) => ({ ...prev, [String(toIdx)]: true }));
   };
 
   const duplicateTopRule = (idx: number) => {
@@ -668,7 +601,6 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
     onChange(rules.filter((_, i) => i !== idx));
   };
 
-  // Renders nested child rules at depth 1 or depth 2 (supports up to 2 levels of nesting)
   const renderNestedRulesList = (
     parentRule: NestedRuleItem,
     onUpdateParent: (nextParent: NestedRuleItem) => void,
@@ -690,20 +622,16 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
       });
     };
 
-    const moveChildAt = (cIdx: number, dir: -1 | 1) => {
-      const target = cIdx + dir;
-      if (target < 0 || target >= children.length) return;
+    const moveChildTo = (fromIdx: number, toIdx: number) => {
+      if (toIdx < 0 || toIdx >= children.length || fromIdx === toIdx) return;
       const nextChildren = [...children];
-      const [removed] = nextChildren.splice(cIdx, 1);
-      nextChildren.splice(target, 0, removed);
+      const [removed] = nextChildren.splice(fromIdx, 1);
+      nextChildren.splice(toIdx, 0, removed);
       onUpdateParent({ ...parentRule, rules: nextChildren });
     };
 
     const addLeafChild = () => {
-      const leaf: NestedRuleItem =
-        kind === "dns"
-          ? { domain_suffix: [".example.com"] }
-          : { domain_suffix: [".example.com"] };
+      const leaf: NestedRuleItem = { domain_suffix: [".example.com"] };
       onUpdateParent({ ...parentRule, rules: [...children, leaf] });
     };
 
@@ -789,7 +717,6 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                   : "bg-slate-900/70 border-slate-800"
               }`}
             >
-              {/* Sub-rule header */}
               <div className="px-3 py-2 flex items-center justify-between gap-2 border-b border-slate-800/70">
                 <button
                   type="button"
@@ -836,7 +763,6 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                         }
                       }}
                       className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-                      title="切换普通条件子规则与二级逻辑组"
                     >
                       {isChildLogical ? "转为普通子规则" : "转为二级逻辑组"}
                     </button>
@@ -844,20 +770,38 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                   <button
                     type="button"
                     disabled={cIdx === 0}
-                    onClick={() => moveChildAt(cIdx, -1)}
+                    onClick={() => moveChildTo(cIdx, 0)}
                     className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                    title="上移"
+                    title="置顶子规则"
+                  >
+                    <ChevronsUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cIdx === 0}
+                    onClick={() => moveChildTo(cIdx, cIdx - 1)}
+                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                    title="上移子规则"
                   >
                     <ArrowUp className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
                     disabled={cIdx === children.length - 1}
-                    onClick={() => moveChildAt(cIdx, 1)}
+                    onClick={() => moveChildTo(cIdx, cIdx + 1)}
                     className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                    title="下移"
+                    title="下移子规则"
                   >
                     <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cIdx === children.length - 1}
+                    onClick={() => moveChildTo(cIdx, children.length - 1)}
+                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                    title="置底子规则"
+                  >
+                    <ChevronsDown className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
@@ -870,7 +814,6 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                 </div>
               </div>
 
-              {/* Sub-rule body */}
               {isChildExpanded && (
                 <div className="p-3 space-y-3">
                   {isChildLogical ? (
@@ -941,173 +884,57 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      {/* Top Toolbar & Quick Templates */}
-      <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-              <Filter className="w-3.5 h-3.5 text-sky-400" />
-              <span>
-                {kind === "route"
-                  ? "路由分流规则链 (route.rules)"
-                  : "DNS 分流规则链 (dns.rules)"}{" "}
-                — 共 {rules.length} 条规则
-              </span>
-            </h4>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              按自上而下顺序依次匹配，支持普通规则与最多 2 层嵌套的逻辑组合规则 (
-              <code className="text-sky-300">type: &quot;logical&quot;</code>,{" "}
-              <code className="text-sky-300">mode: &quot;and&quot; | &quot;or&quot;</code>)。
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={addTopLevelNormalRule}
-              icon={<Plus className="w-3.5 h-3.5" />}
-            >
-              新增普通规则
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={addTopLevelLogicalRule}
-              icon={<GitBranch className="w-3.5 h-3.5 text-sky-400" />}
-            >
-              新增双层嵌套逻辑规则
-            </Button>
-          </div>
-        </div>
-
-        {/* Quick Preset Templates Bar */}
-        <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-slate-400 flex items-center gap-1 mr-1">
-            <Sparkles className="w-3 h-3 text-amber-400" />
-            快捷插入常用规则模板:
+    <div className="space-y-3">
+      {/* List Header with Count & Batch Expand/Collapse/Clear */}
+      <div className="px-4 py-2.5 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Filter className="w-3.5 h-3.5 text-sky-400" />
+          <span className="text-xs font-bold text-slate-200">
+            {kind === "route"
+              ? "路由分流规则列表 (route.rules)"
+              : "DNS 分流规则列表 (dns.rules)"}
           </span>
-
-          {kind === "route" ? (
-            <>
-              <button
-                type="button"
-                onClick={() => insertPresetRule({ action: "sniff" })}
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + 协议嗅探 (sniff)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  insertPresetRule({
-                    protocol: ["dns"],
-                    action: "hijack-dns",
-                  })
-                }
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + DNS 流量劫持 (hijack-dns)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  insertPresetRule({
-                    rule_set: ["geosite-category-ads-all"],
-                    action: "reject",
-                  })
-                }
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + 广告拦截 (reject)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  insertPresetRule({
-                    ip_is_private: true,
-                    outbound: "direct",
-                  })
-                }
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + 局域网私有 IP 直连
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  insertPresetRule({
-                    rule_set: ["geosite-cn", "geoip-cn"],
-                    outbound: "direct",
-                  })
-                }
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + 国内域名/IP 直连 (geosite-cn + geoip-cn)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  insertPresetRule({
-                    rule_set: ["geosite-geolocation-!cn"],
-                    outbound: defaultTargetTag,
-                  })
-                }
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + 非中国大陆走代理 (!cn)
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={addTopLevelLogicalRule}
-                className="px-2 py-1 rounded-md text-[11px] bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-500/40 transition-colors"
-              >
-                + 海外常见域名双层逻辑分流 (A/AAAA/CNAME + OR 规则组 → remote-dns)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  insertPresetRule({
-                    rule_set: ["geosite-cn"],
-                    server:
-                      dnsServerTags.find((t) => t.includes("local") || t.includes("cn")) ||
-                      dnsServerTags[0] ||
-                      "local-dns",
-                  })
-                }
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + 国内域名直连解析 (geosite-cn)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  insertPresetRule({
-                    rule_set: ["geosite-category-ads-all"],
-                    action: "reject",
-                  })
-                }
-                className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
-              >
-                + 广告域名拒绝解析 (reject)
-              </button>
-            </>
-          )}
+          <Badge variant="info" size="sm">
+            {rules.length} 条规则 (按优先级从上到下匹配)
+          </Badge>
         </div>
+
+        {rules.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => expandAll(true)}
+              className="px-2 py-1 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            >
+              全部展开
+            </button>
+            <button
+              type="button"
+              onClick={() => expandAll(false)}
+              className="px-2 py-1 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            >
+              全部折叠
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 transition-colors"
+            >
+              清空规则列表
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Empty State */}
       {rules.length === 0 && (
         <div className="p-8 rounded-xl bg-slate-950/50 border border-dashed border-slate-800 text-center space-y-2">
           <p className="text-xs text-slate-400">
-            当前暂无{kind === "route" ? "路由" : "DNS"}分流规则。
+            当前{kind === "route" ? "路由" : "DNS"}分流规则列表为空 (
+            <code className="text-sky-300">[]</code>)。
           </p>
           <p className="text-[11px] text-slate-500">
-            点击上方「新增普通规则」、「新增双层嵌套逻辑规则」或快捷模板即可开始可视化编排。
+            请使用上方「快捷工具栏」一键添加普通规则、单层/双层嵌套逻辑规则或常用分流预设。
           </p>
         </div>
       )}
@@ -1117,7 +944,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
         {rules.map((rule, idx) => {
           const isLogical = rule.type === "logical";
           const key = String(idx);
-          const isExpanded = expandedMap[key] ?? false;
+          const isExpanded = expandedMap[key] ?? true;
           const actionSummary = summarizeAction(rule, kind);
 
           return (
@@ -1141,7 +968,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                   ) : (
                     <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
                   )}
-                  <span className="text-xs font-mono font-bold text-slate-400 shrink-0">
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] font-mono font-bold text-sky-300 shrink-0">
                     #{idx + 1}
                   </span>
                   {isLogical ? (
@@ -1161,6 +988,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                   </Badge>
                 </button>
 
+                {/* Position & Action Controls */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
@@ -1206,23 +1034,42 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                   >
                     {isLogical ? "转为普通规则" : "转为逻辑组合"}
                   </button>
+
                   <button
                     type="button"
                     disabled={idx === 0}
-                    onClick={() => moveTopRule(idx, -1)}
+                    onClick={() => moveTopRuleTo(idx, 0)}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
-                    title="上移规则"
+                    title="置顶规则 (移至第 1 位)"
+                  >
+                    <ChevronsUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    onClick={() => moveTopRuleTo(idx, idx - 1)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
+                    title="上移一位"
                   >
                     <ArrowUp className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
                     disabled={idx === rules.length - 1}
-                    onClick={() => moveTopRule(idx, 1)}
+                    onClick={() => moveTopRuleTo(idx, idx + 1)}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
-                    title="下移规则"
+                    title="下移一位"
                   >
                     <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === rules.length - 1}
+                    onClick={() => moveTopRuleTo(idx, rules.length - 1)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
+                    title="置底规则 (移至最后)"
+                  >
+                    <ChevronsDown className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
