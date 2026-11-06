@@ -232,18 +232,53 @@ export interface AutoUpdateSettings {
   interval?: string;
   daily_time?: string;
   enabled?: boolean;
+  last_run?: number | null;
+  next_run?: number | null;
+  last_status?: string | null;
+  last_log?: string | null;
+  current_version_code?: number | null;
 }
 
 export interface AutoUpdateSnapshot {
   id: number;
   config_id: number | null;
+  config_name?: string | null;
   change_type?: string;
   action?: string;
+  status?: string;
   detail?: string;
   description?: string;
+  has_content?: boolean;
+  content?: string | null;
+  log?: string | null;
+  version_code?: number | null;
   created_at: string;
   updated_at?: string;
   config_json?: string;
+}
+
+export interface AutoUpdateHistoryResponse {
+  items: AutoUpdateSnapshot[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface AutoUpdateStatusResponse {
+  is_running: boolean;
+  current_log?: string;
+  last_status?: string;
+  start_time?: number | null;
+  version_code?: number | null;
+}
+
+export interface AutoUpdateProgressEvent {
+  event_type: "status" | "start" | "log" | "done" | "error";
+  message?: string;
+  status?: "running" | "success" | "failed" | "idle";
+  version_code?: number | null;
+  timestamp?: string;
 }
 
 export interface SystemInfo {

@@ -11,6 +11,9 @@ import {
   SimpleConfig,
   AutoUpdateSettings,
   AutoUpdateSnapshot,
+  AutoUpdateHistoryResponse,
+  AutoUpdateStatusResponse,
+  AutoUpdateProgressEvent,
   SystemInfo,
   SpeedTestEndpoint,
   NodePingProgressEvent,
@@ -663,14 +666,85 @@ export const api = {
     });
   },
   async triggerAutoUpdate(): Promise<{
-    success: boolean;
+    status: string;
     message: string;
-    version_code: string;
   }> {
     return request("/api/auto-update/trigger", { method: "POST" });
   },
-  async listAutoUpdateSnapshots(): Promise<AutoUpdateSnapshot[]> {
-    return request<AutoUpdateSnapshot[]>("/api/auto-update/history");
+  async getAutoUpdateStatus(): Promise<AutoUpdateStatusResponse> {
+    return request<AutoUpdateStatusResponse>("/api/auto-update/status");
+  },
+  async streamAutoUpdate(
+    onEvent: (event: AutoUpdateProgressEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const token = localStorage.getItem("subout_token");
+    const headers: Record<string, string> = {
+      Accept: "text/event-stream",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await fetch("/api/auto-update/stream", {
+      method: "GET",
+      headers,
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`连接自动更新流失败: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("无法读取服务器流式响应");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data:")) {
+          const jsonStr = trimmed.slice(5).trim();
+          if (jsonStr) {
+            try {
+              const eventData: AutoUpdateProgressEvent = JSON.parse(jsonStr);
+              onEvent(eventData);
+            } catch {
+              // Ignore invalid line
+            }
+          }
+        }
+      }
+    }
+  },
+  async listAutoUpdateSnapshots(params?: {
+    page?: number;
+    page_size?: number;
+  }): Promise<AutoUpdateHistoryResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set("page", String(params.page));
+    if (params?.page_size)
+      searchParams.set("page_size", String(params.page_size));
+    const qs = searchParams.toString();
+    return request<AutoUpdateHistoryResponse>(
+      `/api/auto-update/history${qs ? `?${qs}` : ""}`,
+    );
+  },
+  async getAutoUpdateSnapshotDetail(
+    id: number,
+  ): Promise<AutoUpdateSnapshot> {
+    return request<AutoUpdateSnapshot>(`/api/auto-update/history/${id}`);
   },
   async rollbackAutoUpdateSnapshot(
     id: number,

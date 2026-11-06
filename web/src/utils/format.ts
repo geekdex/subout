@@ -26,14 +26,18 @@ export function formatDuration(seconds: number): string {
   return parts.join(" ");
 }
 
-export function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return "-";
+export function formatDate(
+  dateVal: string | number | null | undefined,
+): string {
+  if (!dateVal) return "-";
   try {
-    const normalized = dateStr.includes("T")
-      ? dateStr
-      : dateStr.replace(" ", "T");
-    const d = new Date(normalized);
-    if (isNaN(d.getTime())) return dateStr;
+    const d =
+      typeof dateVal === "number"
+        ? new Date(dateVal > 1e11 ? dateVal : dateVal * 1000)
+        : new Date(
+            dateVal.includes("T") ? dateVal : dateVal.replace(" ", "T"),
+          );
+    if (isNaN(d.getTime())) return String(dateVal);
     return d.toLocaleString("zh-CN", {
       hour12: false,
       year: "numeric",
@@ -44,7 +48,7 @@ export function formatDate(dateStr: string | null | undefined): string {
       second: "2-digit",
     });
   } catch {
-    return dateStr;
+    return String(dateVal);
   }
 }
 

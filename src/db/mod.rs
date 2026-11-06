@@ -146,7 +146,10 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
             detail TEXT NOT NULL,
             content TEXT,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            updated_at TEXT
+            updated_at TEXT,
+            status TEXT,
+            log TEXT,
+            version_code INTEGER
         )",
         [],
     )?;
@@ -162,6 +165,45 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
     if has_config_id_col == 0 {
         let _ = conn.execute(
             "ALTER TABLE config_history ADD COLUMN config_id INTEGER",
+            [],
+        );
+    }
+
+    // Migration: check if config_history has status column
+    let has_status_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('config_history') WHERE name='status'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_status_col == 0 {
+        let _ = conn.execute("ALTER TABLE config_history ADD COLUMN status TEXT", []);
+    }
+
+    // Migration: check if config_history has log column
+    let has_log_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('config_history') WHERE name='log'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_log_col == 0 {
+        let _ = conn.execute("ALTER TABLE config_history ADD COLUMN log TEXT", []);
+    }
+
+    // Migration: check if config_history has version_code column
+    let has_version_code_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('config_history') WHERE name='version_code'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_version_code_col == 0 {
+        let _ = conn.execute(
+            "ALTER TABLE config_history ADD COLUMN version_code INTEGER",
             [],
         );
     }
@@ -1406,9 +1448,69 @@ pub fn log_history_with_config_id(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn log_history_full(
+    conn: &Connection,
+    config_id: Option<i64>,
+    change_type: &str,
+    action: &str,
+    detail: &str,
+    content: Option<&str>,
+    status: Option<&str>,
+    log: Option<&str>,
+    version_code: Option<i64>,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO config_history (config_id, change_type, action, detail, content, status, log, version_code, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))",
+        params![config_id, change_type, action, detail, content, status, log, version_code],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn update_config_history_final(
+    conn: &Connection,
+    id: i64,
+    status: &str,
+    log: &str,
+    detail: Option<&str>,
+    version_code: Option<i64>,
+) -> Result<()> {
+    match (detail, version_code) {
+        (Some(d), Some(vc)) => {
+            conn.execute(
+                "UPDATE config_history SET status = ?, log = ?, detail = ?, version_code = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                params![status, log, d, vc, id],
+            )?;
+        }
+        (Some(d), None) => {
+            conn.execute(
+                "UPDATE config_history SET status = ?, log = ?, detail = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                params![status, log, d, id],
+            )?;
+        }
+        (None, Some(vc)) => {
+            conn.execute(
+                "UPDATE config_history SET status = ?, log = ?, version_code = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                params![status, log, vc, id],
+            )?;
+        }
+        (None, None) => {
+            conn.execute(
+                "UPDATE config_history SET status = ?, log = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                params![status, log, id],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 pub fn get_config_history(conn: &Connection) -> Result<Vec<ConfigHistory>> {
     let mut stmt = conn.prepare(
-        "SELECT id, config_id, change_type, action, detail, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE change_type IN ('配置列表', '模板配置', 'auto_update', '自动更新') ORDER BY id DESC",
+        "SELECT id, config_id, change_type, action, detail, created_at, COALESCE(updated_at, created_at) as updated_at, status, log, version_code 
+         FROM config_history 
+         WHERE change_type IN ('配置列表', '模板配置', 'auto_update', '自动更新', 'manual_update', '手动更新', 'manual_rollback') 
+         ORDER BY id DESC",
     )?;
     let history = stmt
         .query_map([], |row| {
@@ -1421,15 +1523,75 @@ pub fn get_config_history(conn: &Connection) -> Result<Vec<ConfigHistory>> {
                 content: None,
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
+                config_name: None,
+                status: row.get(7)?,
+                log: row.get(8)?,
+                version_code: row.get(9)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(history)
 }
 
+pub fn get_config_history_paged(
+    conn: &Connection,
+    page: usize,
+    page_size: usize,
+) -> Result<(Vec<ConfigHistory>, i64)> {
+    let offset = (page.saturating_sub(1)) * page_size;
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM config_history 
+         WHERE change_type IN ('auto_update', '自动更新', 'manual_update', '手动更新', 'manual_rollback', '配置列表', '模板配置')",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT h.id, h.config_id, h.change_type, h.action, h.detail, 
+                h.created_at, COALESCE(h.updated_at, h.created_at) as updated_at,
+                c.name as config_name, h.status, h.log, h.version_code,
+                CASE WHEN h.content IS NOT NULL AND length(h.content) > 0 THEN 1 ELSE 0 END as has_content
+         FROM config_history h
+         LEFT JOIN configs c ON h.config_id = c.id
+         WHERE h.change_type IN ('auto_update', '自动更新', 'manual_update', '手动更新', 'manual_rollback', '配置列表', '模板配置')
+         ORDER BY h.id DESC
+         LIMIT ? OFFSET ?",
+    )?;
+
+    let rows = stmt.query_map(params![page_size as i64, offset as i64], |row| {
+        let has_content: i64 = row.get(11)?;
+        Ok(ConfigHistory {
+            id: row.get(0)?,
+            config_id: row.get(1)?,
+            change_type: row.get(2)?,
+            action: row.get(3)?,
+            detail: row.get(4)?,
+            content: if has_content > 0 {
+                Some(String::new())
+            } else {
+                None
+            },
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+            config_name: row.get(7)?,
+            status: row.get(8)?,
+            log: row.get(9)?,
+            version_code: row.get(10)?,
+        })
+    })?;
+
+    let items = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok((items, total))
+}
+
 pub fn get_config_history_detail(conn: &Connection, id: i64) -> Result<Option<ConfigHistory>> {
     let mut stmt = conn.prepare(
-        "SELECT id, config_id, change_type, action, detail, content, created_at, COALESCE(updated_at, created_at) as updated_at FROM config_history WHERE id = ?"
+        "SELECT h.id, h.config_id, h.change_type, h.action, h.detail, h.content,
+                h.created_at, COALESCE(h.updated_at, h.created_at) as updated_at,
+                c.name as config_name, h.status, h.log, h.version_code
+         FROM config_history h
+         LEFT JOIN configs c ON h.config_id = c.id
+         WHERE h.id = ?",
     )?;
     let mut rows = stmt.query([id])?;
     if let Some(row) = rows.next()? {
@@ -1442,6 +1604,10 @@ pub fn get_config_history_detail(conn: &Connection, id: i64) -> Result<Option<Co
             content: row.get(5)?,
             created_at: row.get(6)?,
             updated_at: row.get(7)?,
+            config_name: row.get(8)?,
+            status: row.get(9)?,
+            log: row.get(10)?,
+            version_code: row.get(11)?,
         }))
     } else {
         Ok(None)

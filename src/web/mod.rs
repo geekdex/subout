@@ -35,6 +35,8 @@ pub struct AppState {
     pub kernel_download_status: Arc<RwLock<crate::kernel::KernelDownloadStatus>>,
     pub kernel_download_cancel: Arc<std::sync::atomic::AtomicBool>,
     pub service_manager: Arc<crate::service::SingBoxServiceManager>,
+    pub auto_update_status: Arc<tokio::sync::RwLock<crate::auto_update::AutoUpdateLiveState>>,
+    pub auto_update_tx: tokio::sync::broadcast::Sender<crate::auto_update::AutoUpdateProgressEvent>,
 }
 
 pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error::Error>> {
@@ -65,6 +67,11 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
     service_manager.set_db_path(&db_path).await;
     service_manager.load_saved_sudo_pass().await;
 
+    let (auto_update_tx, _) = tokio::sync::broadcast::channel(256);
+    let auto_update_status = Arc::new(tokio::sync::RwLock::new(
+        crate::auto_update::AutoUpdateLiveState::default(),
+    ));
+
     let state = AppState {
         db_path: db_path.clone(),
         session_token: Arc::new(RwLock::new(None)),
@@ -73,6 +80,8 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         )),
         kernel_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         service_manager,
+        auto_update_status,
+        auto_update_tx,
     };
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -137,6 +146,11 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             "/api/auto-update/settings",
             get(auto_update_api::get_settings).post(auto_update_api::save_settings),
         )
+        .route("/api/auto-update/status", get(auto_update_api::get_status))
+        .route(
+            "/api/auto-update/stream",
+            get(auto_update_api::stream_auto_update),
+        )
         .route(
             "/api/auto-update/trigger",
             post(auto_update_api::trigger_auto_update),
@@ -144,6 +158,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route(
             "/api/auto-update/history",
             get(auto_update_api::get_history_snapshots),
+        )
+        .route(
+            "/api/auto-update/history/:id",
+            get(auto_update_api::get_history_snapshot_detail),
         )
         .route(
             "/api/auto-update/history/:id/rollback",

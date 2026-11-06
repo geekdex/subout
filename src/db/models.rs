@@ -97,6 +97,14 @@ pub struct ConfigHistory {
     pub created_at: String,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default)]
+    pub config_name: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub log: Option<String>,
+    #[serde(default)]
+    pub version_code: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

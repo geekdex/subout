@@ -382,29 +382,23 @@ pub fn sync_config_with_latest_resources(
         .map(std::string::String::as_str)
         .collect();
 
-    // 1. Collect non-group non-proxy system outbounds and custom nodes
+    // 1. Collect non-group non-proxy system outbounds.
+    // 按照规范：把旧配置里所有之前的出站代理节点和策略组清空，重新根据数据库生成上去。
     let mut system_outbounds = Vec::new();
-    let mut template_custom_nodes = Vec::new();
 
     if let Some(orig_outbounds) = base_config.get("outbounds").and_then(|o| o.as_array()) {
         for o in orig_outbounds {
             let o_type = o.get("type").and_then(|t| t.as_str()).unwrap_or_default();
-            let o_tag = o.get("tag").and_then(|t| t.as_str()).unwrap_or_default();
 
             if matches!(
                 o_type,
                 "selector" | "urltest" | "url-test" | "fallback" | "loadbalance"
-            ) {
-                // Outbound groups will be refreshed from database
+            ) || proxy_types.contains(&o_type)
+            {
+                // 旧的出站组和代理节点全部清空，稍后从最新数据库资源重新生成
                 continue;
             }
-            if proxy_types.contains(&o_type) {
-                if !deleted_set.contains(o_tag) {
-                    template_custom_nodes.push(o.clone());
-                }
-            } else {
-                system_outbounds.push(o.clone());
-            }
+            system_outbounds.push(o.clone());
         }
     }
 
@@ -440,17 +434,7 @@ pub fn sync_config_with_latest_resources(
         }
     }
 
-    // Preserve any custom node from template that is not in DB and not deleted
-    for custom_node in template_custom_nodes {
-        if let Some(tag) = custom_node.get("tag").and_then(|t| t.as_str())
-            && !nodes_map.contains_key(tag)
-            && !deleted_set.contains(tag)
-        {
-            nodes_map.insert(tag.to_string(), custom_node);
-        }
-    }
-
-    // 4. Construct strategy groups list
+    // 4. Construct strategy groups list and detect empty groups
     let mut final_groups = Vec::new();
     let mut seen_group_tags = HashSet::new();
 
@@ -490,15 +474,11 @@ pub fn sync_config_with_latest_resources(
         }
     }
 
-    // 5. Filter group member lists to ensure every referenced tag exists
+    // 5. Filter group member lists to ensure every referenced tag exists in enabled nodes/system outbounds.
+    // 同时识别出变空的节点组合（包含0个有效代理节点）
     let mut all_valid_tags = HashSet::new();
     for s in &system_outbounds {
         if let Some(t) = s.get("tag").and_then(|t| t.as_str()) {
-            all_valid_tags.insert(t.to_string());
-        }
-    }
-    for g in &final_groups {
-        if let Some(t) = g.get("tag").and_then(|t| t.as_str()) {
             all_valid_tags.insert(t.to_string());
         }
     }
@@ -506,15 +486,37 @@ pub fn sync_config_with_latest_resources(
         all_valid_tags.insert(t.clone());
     }
 
+    let mut empty_group_tags = HashSet::new();
+
     for g in &mut final_groups {
+        let g_tag = g
+            .get("tag")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string();
         if let Some(member_arr) = g.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
             member_arr.retain(|m| {
                 let m_str = m.as_str().unwrap_or_default();
                 all_valid_tags.contains(m_str) && !deleted_set.contains(m_str)
             });
+            // 过滤后若无有效代理节点（或仅剩自身/空），视为变空的节点组合
+            let has_proxy_nodes = member_arr
+                .iter()
+                .any(|m| m.as_str().is_some_and(|s| s != "direct" && s != "block"));
+            if !has_proxy_nodes {
+                empty_group_tags.insert(g_tag);
+            }
+            // sing-box 策略组要求 outbounds 数组不能空，必须至少有一项
             if member_arr.is_empty() && all_valid_tags.contains("direct") {
                 member_arr.push(json!("direct"));
             }
+        }
+    }
+
+    // 将非空的节点组合 tag 加入 all_valid_tags
+    for g in &final_groups {
+        if let Some(t) = g.get("tag").and_then(|t| t.as_str()) {
+            all_valid_tags.insert(t.to_string());
         }
     }
 
@@ -531,7 +533,7 @@ pub fn sync_config_with_latest_resources(
         sanitize_outbound_value(o);
     }
 
-    // Rebuild all_valid_tags
+    // Rebuild all_valid_tags with all assembled outbounds
     all_valid_tags.clear();
     for o in &outbounds_list {
         if let Some(t) = o.get("tag").and_then(|t| t.as_str()) {
@@ -539,7 +541,8 @@ pub fn sync_config_with_latest_resources(
         }
     }
 
-    // 7. Repair route and DNS rules referencing missing tags
+    // 7. Repair route and DNS rules:
+    // 如果 route 里有引用但是节点已经没了，或者节点组合变空了，那么对应的条目重置为 direct。
     let mut updated_config = base_config.clone();
     let mut repaired_tags = Vec::new();
 
@@ -548,11 +551,18 @@ pub fn sync_config_with_latest_resources(
 
         // Repair route
         if let Some(route_obj) = obj.get_mut("route").and_then(|r| r.as_object_mut()) {
-            if let Some(final_tag) = route_obj.get("final").and_then(|f| f.as_str())
-                && !all_valid_tags.contains(final_tag)
-            {
-                repaired_tags.push(format!("route.final ({final_tag} -> direct)"));
-                route_obj.insert("final".to_string(), json!("direct"));
+            if let Some(final_tag) = route_obj.get("final").and_then(|f| f.as_str()) {
+                if !all_valid_tags.contains(final_tag) {
+                    repaired_tags.push(format!(
+                        "route.final (节点 '{final_tag}' 不存在 -> 重置为 direct)"
+                    ));
+                    route_obj.insert("final".to_string(), json!("direct"));
+                } else if empty_group_tags.contains(final_tag) {
+                    repaired_tags.push(format!(
+                        "route.final (节点组合 '{final_tag}' 变空 -> 重置为 direct)"
+                    ));
+                    route_obj.insert("final".to_string(), json!("direct"));
+                }
             }
             if let Some(rules) = route_obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
                 for (idx, rule) in rules.iter_mut().enumerate() {
@@ -568,15 +578,20 @@ pub fn sync_config_with_latest_resources(
                         ));
                         continue;
                     }
-                    if let Some(ob) = rule_obj.get("outbound").and_then(|o| o.as_str())
-                        && !all_valid_tags.contains(ob)
-                    {
-                        repaired_tags.push(format!(
-                            "route.rules[{}].outbound ({} -> direct)",
-                            idx + 1,
-                            ob
-                        ));
-                        rule_obj.insert("outbound".to_string(), json!("direct"));
+                    if let Some(ob) = rule_obj.get("outbound").and_then(|o| o.as_str()) {
+                        if !all_valid_tags.contains(ob) {
+                            repaired_tags.push(format!(
+                                "route.rules[{}].outbound (节点 '{ob}' 不存在 -> 重置为 direct)",
+                                idx + 1
+                            ));
+                            rule_obj.insert("outbound".to_string(), json!("direct"));
+                        } else if empty_group_tags.contains(ob) {
+                            repaired_tags.push(format!(
+                                "route.rules[{}].outbound (节点组合 '{ob}' 变空 -> 重置为 direct)",
+                                idx + 1
+                            ));
+                            rule_obj.insert("outbound".to_string(), json!("direct"));
+                        }
                     }
                 }
             }
@@ -589,14 +604,20 @@ pub fn sync_config_with_latest_resources(
             for (idx, server) in servers.iter_mut().enumerate() {
                 if let Some(srv_obj) = server.as_object_mut()
                     && let Some(detour) = srv_obj.get("detour").and_then(|d| d.as_str())
-                    && !all_valid_tags.contains(detour)
                 {
-                    repaired_tags.push(format!(
-                        "dns.servers[{}].detour ({} -> direct)",
-                        idx + 1,
-                        detour
-                    ));
-                    srv_obj.insert("detour".to_string(), json!("direct"));
+                    if !all_valid_tags.contains(detour) {
+                        repaired_tags.push(format!(
+                            "dns.servers[{}].detour (节点 '{detour}' 不存在 -> 重置为 direct)",
+                            idx + 1
+                        ));
+                        srv_obj.insert("detour".to_string(), json!("direct"));
+                    } else if empty_group_tags.contains(detour) {
+                        repaired_tags.push(format!(
+                            "dns.servers[{}].detour (节点组合 '{detour}' 变空 -> 重置为 direct)",
+                            idx + 1
+                        ));
+                        srv_obj.insert("detour".to_string(), json!("direct"));
+                    }
                 }
             }
         }
@@ -871,6 +892,131 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(servers[0].get("detour").unwrap().as_str(), Some("direct"));
+    }
+
+    #[test]
+    fn test_sync_config_with_empty_group_and_cleared_stale_nodes() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+
+        // 1. Add node hk-01
+        let sub_id =
+            crate::db::add_subscription(&conn, "http://example.com/sub", "sub1", "[]", true)
+                .unwrap();
+        crate::db::save_node(
+            &conn,
+            Some(sub_id),
+            "hk-01",
+            "vless",
+            "hk.example.com",
+            443,
+            "{\"server\":\"hk.example.com\",\"server_port\":443,\"type\":\"vless\",\"uuid\":\"abc\"}",
+            true,
+            false,
+        ).unwrap();
+
+        // 2. Add an empty group (static group referencing ghost-node that does not exist in DB)
+        crate::db::save_outbound_group(
+            &conn,
+            "Empty-Group",
+            "selector",
+            Some("static"),
+            None,
+            None,
+            None,
+            Some("[\"ghost-node\"]"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // 3. Add a valid group referencing hk-01
+        crate::db::save_outbound_group(
+            &conn,
+            "Valid-Group",
+            "selector",
+            Some("static"),
+            None,
+            None,
+            None,
+            Some("[\"hk-01\"]"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // 4. Base config contains old stale proxy node "old-stale-node" that is no longer in DB
+        let base_config = json!({
+            "outbounds": [
+                { "type": "vless", "tag": "old-stale-node", "server": "old.com", "server_port": 443 }
+            ],
+            "route": {
+                "final": "Empty-Group",
+                "rules": [
+                    { "domain": ["valid.com"], "outbound": "Valid-Group" },
+                    { "domain": ["empty.com"], "outbound": "Empty-Group" },
+                    { "domain": ["stale.com"], "outbound": "old-stale-node" }
+                ]
+            }
+        });
+
+        let (updated, repaired) =
+            sync_config_with_latest_resources(&conn, &base_config, &[]).unwrap();
+
+        let outbounds = updated.get("outbounds").unwrap().as_array().unwrap();
+
+        // Old stale node must be cleared out!
+        assert!(
+            !outbounds
+                .iter()
+                .any(|o| o.get("tag").unwrap().as_str() == Some("old-stale-node"))
+        );
+
+        // Valid node hk-01 must be present
+        assert!(
+            outbounds
+                .iter()
+                .any(|o| o.get("tag").unwrap().as_str() == Some("hk-01"))
+        );
+
+        // Empty-Group outbounds should have ["direct"] for sing-box validity
+        let empty_g = outbounds
+            .iter()
+            .find(|o| o.get("tag").unwrap().as_str() == Some("Empty-Group"))
+            .unwrap();
+        assert_eq!(
+            empty_g.get("outbounds").unwrap().as_array().unwrap(),
+            &vec![json!("direct")]
+        );
+
+        // Route rules:
+        let route_obj = updated.get("route").unwrap();
+        // route.final pointed to Empty-Group which is empty -> reset to direct!
+        assert_eq!(route_obj.get("final").unwrap().as_str(), Some("direct"));
+
+        let rules = route_obj.get("rules").unwrap().as_array().unwrap();
+        assert_eq!(
+            rules[0].get("outbound").unwrap().as_str(),
+            Some("Valid-Group")
+        );
+        // rule 1 pointed to Empty-Group (empty) -> reset to direct!
+        assert_eq!(rules[1].get("outbound").unwrap().as_str(), Some("direct"));
+        // rule 2 pointed to old-stale-node (deleted/not in DB) -> reset to direct!
+        assert_eq!(rules[2].get("outbound").unwrap().as_str(), Some("direct"));
+
+        assert!(
+            repaired
+                .iter()
+                .any(|r| r.contains("Empty-Group") && r.contains("变空"))
+        );
+        assert!(
+            repaired
+                .iter()
+                .any(|r| r.contains("old-stale-node") && r.contains("不存在"))
+        );
     }
 
     #[test]
