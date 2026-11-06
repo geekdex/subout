@@ -27,7 +27,7 @@ describe("SimpleModeView Component", () => {
     render(
       <ToastProvider>
         <SimpleModeView nodes={[]} />
-      </ToastProvider>
+      </ToastProvider>,
     );
 
     // Initial loading or loaded content

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { Tooltip } from "../ui/Tooltip";
+import { ThemeSwitcher } from "../ui/ThemeSwitcher";
 import { KernelDownloadStatus } from "../../types/api";
 
 export type NavTab =
@@ -216,7 +217,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const deltaY = touch.clientY - touchStart.y;
 
     // Detect horizontal swipe intent (not vertical scroll)
-    if (isDragging || (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 8)) {
+    if (
+      isDragging ||
+      (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 8)
+    ) {
       if (deltaX < 0) {
         // Dragging left (towards close)
         setIsDragging(true);
@@ -278,7 +282,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             S
           </div>
           <div>
-            <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
+            <h1 className="text-sm font-bold tracking-tight text-slate-100 flex items-center gap-1.5">
               <span>Subout</span>
               <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-400">
                 v0.3
@@ -293,7 +297,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onCloseMobile}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 active:scale-90 transition-all shrink-0 border border-slate-800"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 active:scale-90 transition-all shrink-0 border border-slate-800"
             aria-label="关闭导航菜单"
           >
             <X className="w-4 h-4" />
@@ -303,35 +307,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto p-3 space-y-1 overscroll-contain">
-        {/* Mobile-only Mode Switcher */}
-        {isMobileView && onSwitchMode && (
-          <div className="mb-3 p-1 bg-slate-950/80 rounded-xl border border-slate-800/90 grid grid-cols-2 gap-1 text-xs shadow-inner">
-            <button
-              type="button"
-              onClick={() => onSwitchMode("simple")}
-              className={clsx(
-                "flex items-center justify-center gap-1.5 py-2 rounded-lg transition-all font-medium active:scale-[0.98]",
-                appMode === "simple"
-                  ? "bg-sky-500 text-white shadow-sm shadow-sky-500/20"
-                  : "text-slate-400 hover:text-slate-200",
-              )}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>小白模式</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onSwitchMode("expert")}
-              className={clsx(
-                "flex items-center justify-center gap-1.5 py-2 rounded-lg transition-all font-medium active:scale-[0.98]",
-                appMode === "expert"
-                  ? "bg-sky-500 text-white shadow-sm shadow-sky-500/20"
-                  : "text-slate-400 hover:text-slate-200",
-              )}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>专业模式</span>
-            </button>
+        {/* Mobile-only Mode & Theme Switcher */}
+        {isMobileView && (
+          <div className="mb-3 space-y-2">
+            {onSwitchMode && (
+              <div className="p-1 bg-slate-950/80 rounded-xl border border-slate-800/90 grid grid-cols-2 gap-1 text-xs shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => onSwitchMode("simple")}
+                  className={clsx(
+                    "flex items-center justify-center gap-1.5 py-2 rounded-lg transition-all font-medium active:scale-[0.98]",
+                    appMode === "simple"
+                      ? "bg-sky-500 text-white shadow-sm shadow-sky-500/20"
+                      : "text-slate-400 hover:text-slate-200",
+                  )}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>小白模式</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSwitchMode("expert")}
+                  className={clsx(
+                    "flex items-center justify-center gap-1.5 py-2 rounded-lg transition-all font-medium active:scale-[0.98]",
+                    appMode === "expert"
+                      ? "bg-sky-500 text-white shadow-sm shadow-sky-500/20"
+                      : "text-slate-400 hover:text-slate-200",
+                  )}
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>专业模式</span>
+                </button>
+              </div>
+            )}
+            <ThemeSwitcher variant="full" />
           </div>
         )}
 
@@ -358,7 +367,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ? "bg-sky-500 text-white shadow-md shadow-sky-500/20 font-semibold"
                   : isLocked
                     ? "text-slate-600 cursor-not-allowed opacity-60"
-                    : "text-slate-300 hover:text-white hover:bg-slate-800/60 active:scale-[0.98] active:bg-slate-800/80",
+                    : "text-slate-300 hover:text-slate-100 hover:bg-slate-800/60 active:scale-[0.98] active:bg-slate-800/80",
               )}
             >
               <div className="flex items-center gap-3">
@@ -495,7 +504,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* Backdrop with smooth opacity transition */}
             <div
               className={clsx(
-                "fixed inset-0 bg-slate-950/75 backdrop-blur-sm transition-opacity duration-300 ease-out",
+                "fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-out",
                 isVisible && !isDragging
                   ? "opacity-100"
                   : isDragging

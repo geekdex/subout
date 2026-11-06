@@ -17,6 +17,7 @@ import {
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Badge } from "../ui/Badge";
+import { ThemeSwitcher } from "../ui/ThemeSwitcher";
 import { SystemInfo } from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
@@ -36,9 +37,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingWebPassword, setSavingWebPassword] = useState(false);
 
-  // Preference states
-  const [logInterval, setLogInterval] = useState("3000");
-  const [testTimeout, setTestTimeout] = useState("3000");
+  // Preference states persisted in localStorage
+  const [logInterval, setLogInterval] = useState(() => {
+    try {
+      return window.localStorage.getItem("subout_log_interval") || "3000";
+    } catch {
+      return "3000";
+    }
+  });
+  const [testTimeout, setTestTimeout] = useState(() => {
+    try {
+      return window.localStorage.getItem("subout_test_timeout") || "3000";
+    } catch {
+      return "3000";
+    }
+  });
+
+  const handleLogIntervalChange = (val: string) => {
+    setLogInterval(val);
+    try {
+      window.localStorage.setItem("subout_log_interval", val);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleTestTimeoutChange = (val: string) => {
+    setTestTimeout(val);
+    try {
+      window.localStorage.setItem("subout_test_timeout", val);
+    } catch {
+      // ignore
+    }
+  };
 
   const { success, error } = useToast();
 
@@ -107,12 +138,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* Top Banner */}
       <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Settings className="w-5 h-5 text-sky-400" />
             <span>系统与安全设置</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            管理面板访问口令与查看宿主环境运行状态。系统提权权限 (Sudo) 可直接在顶部导航栏随时点击管理。
+            管理面板访问口令与查看宿主环境运行状态。系统提权权限 (Sudo)
+            可直接在顶部导航栏随时点击管理。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -138,7 +170,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Key className="w-4 h-4 text-purple-400" />
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-slate-100">
                   修改面板管理员密码
                 </h3>
               </div>
@@ -217,7 +249,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-sky-400" />
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-slate-100">
                   控制台偏好设置
                 </h3>
               </div>
@@ -226,7 +258,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </Badge>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div>
+                  <span className="text-xs font-medium text-slate-200 block">
+                    全局界面主题 (Theme)
+                  </span>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    支持自动跟随系统、亮色与暗色三种主题模式，默认根据系统主题自动显示
+                  </p>
+                </div>
+                <ThemeSwitcher variant="cards" />
+              </div>
+
               <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/40 border border-slate-800">
                 <div>
                   <span className="text-xs font-medium text-slate-200 block">
@@ -238,7 +282,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <select
                   value={logInterval}
-                  onChange={(e) => setLogInterval(e.target.value)}
+                  onChange={(e) => handleLogIntervalChange(e.target.value)}
                   className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1 focus:outline-none focus:border-sky-500"
                 >
                   <option value="1000">1 秒 (高频实时)</option>
@@ -258,7 +302,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <select
                   value={testTimeout}
-                  onChange={(e) => setTestTimeout(e.target.value)}
+                  onChange={(e) => handleTestTimeoutChange(e.target.value)}
                   className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1 focus:outline-none focus:border-sky-500"
                 >
                   <option value="2000">2000 ms (激进)</option>
@@ -274,7 +318,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Database className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-slate-100">
                   维护与诊断工具
                 </h3>
               </div>
@@ -309,7 +353,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <HardDrive className="w-4 h-4 text-slate-400" />
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-slate-100">
                   主机环境状态
                 </h3>
               </div>
@@ -326,14 +370,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-500 block text-[11px]">宿主系统</span>
+                <span className="text-slate-500 block text-[11px]">
+                  宿主系统
+                </span>
                 <span className="font-semibold text-slate-200 uppercase mt-1 block">
                   {systemInfo?.host_os} ({systemInfo?.host_arch})
                 </span>
               </div>
 
               <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-500 block text-[11px]">权限运行状态</span>
+                <span className="text-slate-500 block text-[11px]">
+                  权限运行状态
+                </span>
                 <span
                   className={`font-semibold mt-1 block ${
                     isRoot || sudoConfigured
@@ -375,7 +423,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="glass-panel p-5 space-y-4">
             <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
               <Shield className="w-4 h-4 text-sky-400" />
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-semibold text-slate-100">
                 系统特权与 Sudo 策略
               </h3>
             </div>
@@ -399,7 +447,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  在 Linux 与 macOS 宿主中，启动 TUN 虚拟网卡设备或配置全局系统代理均需系统管理员权限。
+                  在 Linux 与 macOS 宿主中，启动 TUN
+                  虚拟网卡设备或配置全局系统代理均需系统管理员权限。
                   您可随时在顶部控制栏点击特权按钮进行配置或临时授权。
                 </p>
               </div>
@@ -410,7 +459,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="glass-panel p-5 space-y-3">
             <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
               <Info className="w-4 h-4 text-slate-400" />
-              <h3 className="text-sm font-semibold text-white">关于 Subout</h3>
+              <h3 className="text-sm font-semibold text-slate-100">
+                关于 Subout
+              </h3>
             </div>
 
             <div className="space-y-2 text-xs text-slate-400">

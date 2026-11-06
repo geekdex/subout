@@ -58,7 +58,12 @@ const baseLinuxProfile: ConfigProfile = {
     log: { level: "info", timestamp: true },
     dns: {
       servers: [
-        { tag: "remote-dns", type: "https", server: "1.1.1.1", detour: "proxy" },
+        {
+          tag: "remote-dns",
+          type: "https",
+          server: "1.1.1.1",
+          detour: "proxy",
+        },
       ],
       rules: [],
       final: "remote-dns",
@@ -111,9 +116,7 @@ describe("ProfileEditor Visual Configuration Component", () => {
     );
 
     // Header & visual tabs exist
-    expect(
-      screen.getByText(/可视化配置编辑器: Linux 主力配置/),
-    ).toBeDefined();
+    expect(screen.getByText(/可视化配置编辑器: Linux 主力配置/)).toBeDefined();
     expect(screen.getByText("路由与分流 (route)")).toBeDefined();
     expect(screen.getByText("DNS 与解析规则 (dns)")).toBeDefined();
     expect(screen.getByText("入站配置 (inbounds)")).toBeDefined();
@@ -226,9 +229,7 @@ describe("ProfileEditor Visual Configuration Component", () => {
     expect(topLogicalRule.rules[1].rules[2].domain).toEqual(["claude.ai"]);
 
     // Verify unsaved badge is shown and api.updateConfig has NOT been called yet
-    expect(
-      screen.getByText("有未保存的更改 (点击保存后生效)"),
-    ).toBeDefined();
+    expect(screen.getByText("有未保存的更改 (点击保存后生效)")).toBeDefined();
     expect(api.updateConfig).not.toHaveBeenCalled();
 
     // Now click Save

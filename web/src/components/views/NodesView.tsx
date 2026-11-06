@@ -53,7 +53,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
   }, [nodes]);
 
   const [search, setSearch] = useState("");
-  const [selectedSubscription, setSelectedSubscription] = useState<string>("all");
+  const [selectedSubscription, setSelectedSubscription] =
+    useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   // Pagination states: default 20, supports 50, 100, 200
@@ -573,7 +574,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
             ? node.last_web_latency
             : node.last_web_latency === -1 || node.last_tcp_latency === -1
               ? -1
-              : node.last_tcp_latency ?? node.latency_ms;
+              : (node.last_tcp_latency ?? node.latency_ms);
         const { text, color } = formatLatency(primaryLatency);
         const endpointName = getTestEndpointName(node.last_target_url);
 
@@ -679,7 +680,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       {/* Top action header */}
       <div className="glass-panel p-5 sm:p-6 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
         <div className="space-y-1">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Server className="w-5 h-5 text-sky-400" />
             <span>节点池管理 (Node Pool)</span>
             <Badge variant="info" size="sm">
@@ -778,9 +779,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
 
       {/* Global Batch Speed Test Progress Banner */}
       {testingBatchActive && (
-        <div className="glass-panel p-4 border border-sky-500/30 bg-sky-950/20 rounded-xl space-y-2 animate-in fade-in duration-300">
+        <div className="glass-panel p-4 border border-sky-500/30 bg-sky-500/10 rounded-xl space-y-2 animate-in fade-in duration-300">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-white font-medium flex items-center gap-2">
+            <span className="text-slate-100 font-medium flex items-center gap-2">
               <Activity className="w-4 h-4 text-sky-400 animate-spin" />
               正在测试节点连通性及延迟 · 目标:{" "}
               <span className="text-sky-300 font-semibold">
@@ -1046,7 +1047,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
               <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
-                    <span className="text-[11px] text-slate-500">节点标识 (Tag)</span>
+                    <span className="text-[11px] text-slate-500">
+                      节点标识 (Tag)
+                    </span>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-semibold text-slate-100 truncate">
                         {detailNode.tag}
@@ -1056,7 +1059,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
                   </div>
 
                   <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
-                    <span className="text-[11px] text-slate-500">所属订阅 / 来源</span>
+                    <span className="text-[11px] text-slate-500">
+                      所属订阅 / 来源
+                    </span>
                     <div>
                       {detailNode.is_custom ? (
                         <Badge variant="warning" size="sm">
@@ -1071,7 +1076,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
                   </div>
 
                   <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
-                    <span className="text-[11px] text-slate-500">服务器与端口</span>
+                    <span className="text-[11px] text-slate-500">
+                      服务器与端口
+                    </span>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-slate-200">
                         {detailNode.server}:{detailNode.port}
@@ -1093,7 +1100,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
                   </div>
 
                   <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
-                    <span className="text-[11px] text-slate-500">最新测速结果</span>
+                    <span className="text-[11px] text-slate-500">
+                      最新测速结果
+                    </span>
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-slate-100">
                         Web 延迟:{" "}
@@ -1114,7 +1123,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
                   </div>
 
                   <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1">
-                    <span className="text-[11px] text-slate-500">测试点 & 时间</span>
+                    <span className="text-[11px] text-slate-500">
+                      测试点 & 时间
+                    </span>
                     <div
                       className="text-slate-300 truncate"
                       title={detailNode.last_target_url || ""}

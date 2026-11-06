@@ -3,8 +3,39 @@
 @tailwind utilities;
 
 @layer base {
+  :root,
+  html.dark {
+    --slate-50: 248 250 252;
+    --slate-100: 241 245 249;
+    --slate-200: 226 232 240;
+    --slate-300: 203 213 225;
+    --slate-400: 148 163 184;
+    --slate-500: 100 116 139;
+    --slate-600: 71 85 105;
+    --slate-700: 51 65 85;
+    --slate-800: 30 41 59;
+    --slate-900: 15 23 42;
+    --slate-950: 2 6 23;
+    color-scheme: dark;
+  }
+
+  html.light {
+    --slate-50: 2 6 23;
+    --slate-100: 15 23 42;
+    --slate-200: 30 41 59;
+    --slate-300: 51 65 85;
+    --slate-400: 71 85 105;
+    --slate-500: 100 116 139;
+    --slate-600: 148 163 184;
+    --slate-700: 203 213 225;
+    --slate-800: 226 232 240;
+    --slate-900: 255 255 255;
+    --slate-950: 241 245 249;
+    color-scheme: light;
+  }
+
   body {
-    @apply bg-slate-950 text-slate-100 font-sans antialiased min-h-screen selection:bg-sky-500 selection:text-white;
+    @apply bg-slate-950 text-slate-100 font-sans antialiased min-h-screen selection:bg-sky-500 selection:text-white transition-colors duration-200;
   }
 
   /* Custom scrollbar */
@@ -26,6 +57,82 @@
 
 .glass-card {
   @apply bg-slate-900/60 backdrop-blur-sm border border-slate-800 rounded-lg hover:border-slate-700 transition-all;
+}
+
+html.light .glass-panel {
+  background-color: rgba(255, 255, 255, 0.94);
+  border-color: rgb(226 232 240);
+  box-shadow:
+    0 1px 3px 0 rgba(15, 23, 42, 0.05),
+    0 4px 14px -2px rgba(15, 23, 42, 0.04);
+}
+
+html.light .glass-card {
+  background-color: rgba(255, 255, 255, 0.88);
+  border-color: rgb(226 232 240);
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+}
+
+/* High-contrast semantic accent text overrides in Light Mode */
+html.light .text-sky-400 {
+  color: #0284c7;
+}
+html.light .text-sky-300,
+html.light .text-sky-200 {
+  color: #0369a1;
+}
+
+html.light .text-emerald-400 {
+  color: #059669;
+}
+html.light .text-emerald-300,
+html.light .text-emerald-200,
+html.light .text-emerald-300\/80 {
+  color: #047857;
+}
+
+html.light .text-amber-400,
+html.light .text-amber-400\/90 {
+  color: #d97706;
+}
+html.light .text-amber-300,
+html.light .text-amber-200,
+html.light .text-amber-300\/80,
+html.light .text-amber-300\/90 {
+  color: #b45309;
+}
+
+html.light .text-rose-400 {
+  color: #e11d48;
+}
+html.light .text-rose-300,
+html.light .text-rose-200,
+html.light .text-rose-300\/90 {
+  color: #be123c;
+}
+
+html.light .text-purple-400 {
+  color: #9333ea;
+}
+html.light .text-purple-300,
+html.light .text-purple-200 {
+  color: #7e22ce;
+}
+
+html.light .text-indigo-400 {
+  color: #4f46e5;
+}
+html.light .text-indigo-300,
+html.light .text-indigo-200 {
+  color: #4338ca;
+}
+
+html.light .text-cyan-400 {
+  color: #0891b2;
+}
+html.light .text-cyan-300,
+html.light .text-cyan-200 {
+  color: #0e7490;
 }
 
 @keyframes pulse-subtle {

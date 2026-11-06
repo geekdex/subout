@@ -12,7 +12,16 @@ export const ServiceLogsView: React.FC = () => {
 
   useEffect(() => {
     fetchLogs();
-    const timer = setInterval(fetchLogs, 3000);
+    let intervalMs = 3000;
+    try {
+      const saved = Number(window.localStorage.getItem("subout_log_interval"));
+      if (saved >= 500 && saved <= 60000) {
+        intervalMs = saved;
+      }
+    } catch {
+      // ignore
+    }
+    const timer = setInterval(fetchLogs, intervalMs);
     return () => clearInterval(timer);
   }, []);
 
@@ -71,7 +80,9 @@ export const ServiceLogsView: React.FC = () => {
       <div className="glass-panel p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-sky-400" />
-          <h2 className="text-base font-bold text-white">内核进程实时日志</h2>
+          <h2 className="text-base font-bold text-slate-100">
+            内核进程实时日志
+          </h2>
           <span className="text-xs text-slate-500 font-mono">
             ({filteredLogs.length} 条)
           </span>

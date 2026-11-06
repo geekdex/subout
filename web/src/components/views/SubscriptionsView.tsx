@@ -196,7 +196,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
       {/* Top action header */}
       <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Rss className="w-5 h-5 text-indigo-400" />
             <span>订阅管理 (Subscription Sources)</span>
           </h2>
@@ -242,7 +242,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1 min-w-0">
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2 flex-wrap">
                       <span className="truncate max-w-[200px] sm:max-w-xs">
                         {subTitle}
                       </span>

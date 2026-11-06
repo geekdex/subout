@@ -49,7 +49,8 @@ export const SudoModal: React.FC<SudoModalProps> = ({
     onSubmit(password.trim());
   };
 
-  const pidStr = conflictPids.length > 0 ? `PID: ${conflictPids.join(", ")}` : "";
+  const pidStr =
+    conflictPids.length > 0 ? `PID: ${conflictPids.join(", ")}` : "";
 
   return (
     <Dialog
@@ -92,7 +93,9 @@ export const SudoModal: React.FC<SudoModalProps> = ({
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         {description ? (
-          <div className="text-xs text-slate-300 leading-relaxed">{description}</div>
+          <div className="text-xs text-slate-300 leading-relaxed">
+            {description}
+          </div>
         ) : (
           <p className="text-xs text-slate-300 leading-relaxed">
             检测到外部冲突服务{" "}
@@ -102,7 +105,8 @@ export const SudoModal: React.FC<SudoModalProps> = ({
               </span>
             )}{" "}
             {conflictName ? `(${conflictName})` : ""}
-            属于系统守护进程或以 Root 权限运行，普通用户无权终止。请输入您的系统 Sudo 密码以执行临时授权接管并释放网络端口。
+            属于系统守护进程或以 Root 权限运行，普通用户无权终止。请输入您的系统
+            Sudo 密码以执行临时授权接管并释放网络端口。
           </p>
         )}
 

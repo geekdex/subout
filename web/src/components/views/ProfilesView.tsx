@@ -103,7 +103,10 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   const handleResetToken = async (id: number) => {
     try {
       const res = await api.resetConfigToken(id);
-      success("Token 重置成功", `新 Token: ${String(res.token || "").slice(0, 8)}...`);
+      success(
+        "Token 重置成功",
+        `新 Token: ${String(res.token || "").slice(0, 8)}...`,
+      );
       onRefresh();
     } catch (err: unknown) {
       error("重置 Token 失败", getErrorMessage(err));
@@ -164,7 +167,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       {/* Top action header */}
       <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Layers className="w-5 h-5 text-sky-400" />
             <span>配置中心 (Profiles & Subscription Hosting)</span>
           </h2>
@@ -207,7 +210,9 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       {getPlatformIcon(p.platform)}
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-white">{p.name}</h3>
+                      <h3 className="text-sm font-bold text-slate-100">
+                        {p.name}
+                      </h3>
                       <span className="text-[11px] text-slate-400 font-mono">
                         v{p.version_code}
                       </span>
@@ -240,7 +245,8 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
 
                 <div className="text-[11px] text-slate-400 flex items-center justify-between">
                   <span>
-                    更新时间: {p.updated_at ? String(p.updated_at).slice(0, 16) : "-"}
+                    更新时间:{" "}
+                    {p.updated_at ? String(p.updated_at).slice(0, 16) : "-"}
                   </span>
                   <span className="font-mono text-slate-500">
                     Token: {String(p.token || "").slice(0, 8)}...

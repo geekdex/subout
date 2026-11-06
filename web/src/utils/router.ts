@@ -19,7 +19,9 @@ export interface RouteState {
 
 export function parseRoute(
   hash: string = typeof window !== "undefined" ? window.location.hash : "",
-  pathname: string = typeof window !== "undefined" ? window.location.pathname : "",
+  pathname: string = typeof window !== "undefined"
+    ? window.location.pathname
+    : "",
 ): RouteState {
   let cleanHash = hash.replace(/^[#/]+/, "");
   let queryString = "";
@@ -45,7 +47,10 @@ export function parseRoute(
   if (matchedPathTab) {
     return {
       tab: matchedPathTab,
-      params: typeof window !== "undefined" ? parseQueryParams(window.location.search.replace(/^\?/, "")) : {},
+      params:
+        typeof window !== "undefined"
+          ? parseQueryParams(window.location.search.replace(/^\?/, ""))
+          : {},
     };
   }
 
@@ -71,7 +76,10 @@ function parseQueryParams(queryString: string): Record<string, string> {
   return params;
 }
 
-export function formatRoute(tab: NavTab, params?: Record<string, string | number>): string {
+export function formatRoute(
+  tab: NavTab,
+  params?: Record<string, string | number>,
+): string {
   let result = `#/${tab}`;
   if (params && Object.keys(params).length > 0) {
     const searchParams = new URLSearchParams();

@@ -1,11 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import React from 'react';
-import { Sidebar } from './Sidebar';
-import { Header } from './Header';
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import React from "react";
+import { Sidebar } from "./Sidebar";
+import { Header } from "./Header";
 
-describe('Sidebar & Header with numeric version_code', () => {
-  it('Sidebar renders without crashing when versionCode is a number or numeric string', () => {
+describe("Sidebar & Header with numeric version_code", () => {
+  it("Sidebar renders without crashing when versionCode is a number or numeric string", () => {
     render(
       <Sidebar
         currentTab="dashboard"
@@ -14,24 +14,24 @@ describe('Sidebar & Header with numeric version_code', () => {
         appMode="expert"
         versionCode={20261103212000 as unknown as string}
         nodeCount={5}
-      />
+      />,
     );
 
     // Should display slice of versionCode
-    expect(screen.getByText('节点组合')).toBeDefined();
-    expect(screen.getByText('v2000')).toBeDefined();
+    expect(screen.getByText("节点组合")).toBeDefined();
+    expect(screen.getByText("v2000")).toBeDefined();
   });
 
-  it('Header renders without crashing when runningProfile.version_code is a number', () => {
+  it("Header renders without crashing when runningProfile.version_code is a number", () => {
     render(
       <Header
         systemInfo={{
-          host_os: 'macos',
-          host_arch: 'arm64',
-          default_tun_stack: 'system',
+          host_os: "macos",
+          host_arch: "arm64",
+          default_tun_stack: "system",
           sudo_configured: true,
           portable_mode: false,
-          app_mode: 'expert',
+          app_mode: "expert",
           running_config_id: 1,
         }}
         serviceStatus={{
@@ -41,20 +41,20 @@ describe('Sidebar & Header with numeric version_code', () => {
           uptime_secs: 100,
           mixed_port: 7890,
           is_tun: true,
-          tun_interface: 'utun3',
+          tun_interface: "utun3",
           cpu_usage: 1.2,
           memory_bytes: 10485760,
           last_error: null,
-          active_mode: 'expert',
+          active_mode: "expert",
           running_config_id: 1,
         }}
         runningProfile={{
           id: 1,
-          name: '默认配置',
-          platform: 'macos',
-          token: '550e8400-e29b-41d4-a716-446655440000',
+          name: "默认配置",
+          platform: "macos",
+          token: "550e8400-e29b-41d4-a716-446655440000",
           version_code: 20261103212000 as unknown as string,
-          content: '{}',
+          content: "{}",
         }}
         actionLoading={false}
         onStartService={vi.fn()}
@@ -63,24 +63,24 @@ describe('Sidebar & Header with numeric version_code', () => {
         onToggleSystemProxy={vi.fn()}
         onSwitchMode={vi.fn()}
         onLogout={vi.fn()}
-      />
+      />,
     );
 
-    expect(screen.getByText('默认配置')).toBeDefined();
-    expect(screen.getByText('(212000)')).toBeDefined();
+    expect(screen.getByText("默认配置")).toBeDefined();
+    expect(screen.getByText("(212000)")).toBeDefined();
   });
 
-  it('Header renders Cockpit-style sudo administrative access button and triggers onOpenSudoSettings', () => {
+  it("Header renders Cockpit-style sudo administrative access button and triggers onOpenSudoSettings", () => {
     const onOpenSudo = vi.fn();
     const { rerender } = render(
       <Header
         systemInfo={{
-          host_os: 'linux',
-          host_arch: 'x86_64',
-          default_tun_stack: 'system',
+          host_os: "linux",
+          host_arch: "x86_64",
+          default_tun_stack: "system",
           sudo_configured: false,
           is_root: false,
-          app_mode: 'simple',
+          app_mode: "simple",
           running_config_id: null,
         }}
         serviceStatus={null}
@@ -93,13 +93,13 @@ describe('Sidebar & Header with numeric version_code', () => {
         onSwitchMode={vi.fn()}
         onLogout={vi.fn()}
         onOpenSudoSettings={onOpenSudo}
-      />
+      />,
     );
 
     // When not root and not configured -> Limited access
-    const limitedBtn = screen.getByText('功能受限');
+    const limitedBtn = screen.getByText("功能受限");
     expect(limitedBtn).toBeDefined();
-    expect(screen.getByText('点击提权')).toBeDefined();
+    expect(screen.getByText("点击提权")).toBeDefined();
 
     limitedBtn.click();
     expect(onOpenSudo).toHaveBeenCalledTimes(1);
@@ -108,12 +108,12 @@ describe('Sidebar & Header with numeric version_code', () => {
     rerender(
       <Header
         systemInfo={{
-          host_os: 'linux',
-          host_arch: 'x86_64',
-          default_tun_stack: 'system',
+          host_os: "linux",
+          host_arch: "x86_64",
+          default_tun_stack: "system",
           sudo_configured: true,
           is_root: false,
-          app_mode: 'simple',
+          app_mode: "simple",
           running_config_id: null,
         }}
         serviceStatus={null}
@@ -126,13 +126,13 @@ describe('Sidebar & Header with numeric version_code', () => {
         onSwitchMode={vi.fn()}
         onLogout={vi.fn()}
         onOpenSudoSettings={onOpenSudo}
-      />
+      />,
     );
-    expect(screen.getByText('管理员权限')).toBeDefined();
-    expect(screen.getByText('永久有效')).toBeDefined();
+    expect(screen.getByText("管理员权限")).toBeDefined();
+    expect(screen.getByText("永久有效")).toBeDefined();
   });
 
-  it('Sidebar renders mobile drawer when mobileOpen is true and handles onCloseMobile', () => {
+  it("Sidebar renders mobile drawer when mobileOpen is true and handles onCloseMobile", () => {
     const onCloseMobile = vi.fn();
     const onSelectTab = vi.fn();
 
@@ -144,11 +144,11 @@ describe('Sidebar & Header with numeric version_code', () => {
         appMode="simple"
         mobileOpen={false}
         onCloseMobile={onCloseMobile}
-      />
+      />,
     );
 
     // When false, close button is not in DOM
-    expect(screen.queryByLabelText('关闭导航菜单')).toBeNull();
+    expect(screen.queryByLabelText("关闭导航菜单")).toBeNull();
 
     // When true, close button is in DOM
     rerender(
@@ -159,16 +159,16 @@ describe('Sidebar & Header with numeric version_code', () => {
         appMode="simple"
         mobileOpen={true}
         onCloseMobile={onCloseMobile}
-      />
+      />,
     );
 
-    const closeBtn = screen.getByLabelText('关闭导航菜单');
+    const closeBtn = screen.getByLabelText("关闭导航菜单");
     expect(closeBtn).toBeDefined();
     closeBtn.click();
     expect(onCloseMobile).toHaveBeenCalledTimes(1);
   });
 
-  it('Header triggers onToggleMobileMenu when mobile menu button is clicked', () => {
+  it("Header triggers onToggleMobileMenu when mobile menu button is clicked", () => {
     const onToggle = vi.fn();
     render(
       <Header
@@ -183,17 +183,17 @@ describe('Sidebar & Header with numeric version_code', () => {
         onSwitchMode={vi.fn()}
         onLogout={vi.fn()}
         onToggleMobileMenu={onToggle}
-      />
+      />,
     );
 
-    const menuBtn = screen.getByLabelText('打开菜单');
+    const menuBtn = screen.getByLabelText("打开菜单");
     expect(menuBtn).toBeDefined();
-    expect(menuBtn.getAttribute('aria-expanded')).toBe('false');
+    expect(menuBtn.getAttribute("aria-expanded")).toBe("false");
     menuBtn.click();
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it('Header reflects isMobileMenuOpen with aria-expanded and active styling', () => {
+  it("Header reflects isMobileMenuOpen with aria-expanded and active styling", () => {
     render(
       <Header
         systemInfo={null}
@@ -208,15 +208,15 @@ describe('Sidebar & Header with numeric version_code', () => {
         onLogout={vi.fn()}
         onToggleMobileMenu={vi.fn()}
         isMobileMenuOpen={true}
-      />
+      />,
     );
 
-    const menuBtn = screen.getByLabelText('打开菜单');
-    expect(menuBtn.getAttribute('aria-expanded')).toBe('true');
-    expect(menuBtn.getAttribute('title')).toBe('关闭菜单');
+    const menuBtn = screen.getByLabelText("打开菜单");
+    expect(menuBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(menuBtn.getAttribute("title")).toBe("关闭菜单");
   });
 
-  it('Sidebar locks body scroll when open and handles Escape key to close', () => {
+  it("Sidebar locks body scroll when open and handles Escape key to close", () => {
     const onCloseMobile = vi.fn();
     const { unmount } = render(
       <Sidebar
@@ -226,21 +226,21 @@ describe('Sidebar & Header with numeric version_code', () => {
         appMode="simple"
         mobileOpen={true}
         onCloseMobile={onCloseMobile}
-      />
+      />,
     );
 
-    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.body.style.overflow).toBe("hidden");
 
     // Trigger Escape
-    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.keyDown(window, { key: "Escape" });
     expect(onCloseMobile).toHaveBeenCalledTimes(1);
 
     // Body overflow restored on unmount
     unmount();
-    expect(document.body.style.overflow).toBe('');
+    expect(document.body.style.overflow).toBe("");
   });
 
-  it('Sidebar triggers onCloseMobile on swipe-left touch gesture', () => {
+  it("Sidebar triggers onCloseMobile on swipe-left touch gesture", () => {
     const onCloseMobile = vi.fn();
     render(
       <Sidebar
@@ -250,10 +250,10 @@ describe('Sidebar & Header with numeric version_code', () => {
         appMode="simple"
         mobileOpen={true}
         onCloseMobile={onCloseMobile}
-      />
+      />,
     );
 
-    const drawerDialog = screen.getByRole('dialog', { name: '导航菜单' });
+    const drawerDialog = screen.getByRole("dialog", { name: "导航菜单" });
     expect(drawerDialog).toBeDefined();
 
     // The drawer panel is the second child inside the dialog

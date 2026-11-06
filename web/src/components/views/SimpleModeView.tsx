@@ -54,7 +54,9 @@ const defaultSimpleConfig: SimpleConfig = {
   },
 };
 
-export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) => {
+export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
+  nodes = [],
+}) => {
   const [config, setConfig] = useState<SimpleConfig>(defaultSimpleConfig);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -209,7 +211,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
       <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-amber-400" />
               <span>小白极简模式 (Simple Mode)</span>
             </h2>
@@ -218,7 +220,8 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
             </Badge>
           </div>
           <p className="text-xs text-slate-400 mt-1.5 max-w-2xl leading-relaxed">
-            开箱即用，免除繁杂配置。选择 4 种智能分流策略之一，系统自动完成网卡适配与规则前置注入。
+            开箱即用，免除繁杂配置。选择 4
+            种智能分流策略之一，系统自动完成网卡适配与规则前置注入。
           </p>
         </div>
         <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
@@ -297,13 +300,15 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
                         >
                           {m.icon}
                         </div>
-                        <h4 className="text-sm font-bold text-white">
+                        <h4 className="text-sm font-bold text-slate-100">
                           {m.title}
                         </h4>
                       </div>
                       {m.badge && (
                         <Badge
-                          variant={isSelected ? "info" : (m.badgeVariant || "neutral")}
+                          variant={
+                            isSelected ? "info" : m.badgeVariant || "neutral"
+                          }
                           size="sm"
                         >
                           {m.badge}
@@ -326,7 +331,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
                   <Server className="w-4 h-4 text-sky-400" />
-                  <h3 className="text-sm font-semibold text-white">
+                  <h3 className="text-sm font-semibold text-slate-100">
                     出口节点选择策略
                   </h3>
                 </div>
@@ -371,7 +376,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-sm font-semibold text-white">
+                  <h3 className="text-sm font-semibold text-slate-100">
                     内置顶级优先级安全防护
                   </h3>
                 </div>
@@ -434,7 +439,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Activity className="w-4 h-4 text-sky-400" />
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-slate-100">
                   实时流量分流拓扑
                 </h3>
               </div>
@@ -534,7 +539,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Globe2 className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-slate-100">
                   网络连通性一键测速
                 </h3>
               </div>
@@ -567,7 +572,9 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
                       {latency === undefined || latency === null ? (
                         <span className="text-slate-500">未测试</span>
                       ) : latency === 0 ? (
-                        <span className="text-rose-400 font-medium">超时/阻断</span>
+                        <span className="text-rose-400 font-medium">
+                          超时/阻断
+                        </span>
                       ) : (
                         <span
                           className={`font-semibold ${
@@ -595,31 +602,41 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({ nodes = [] }) =>
           <div className="glass-panel p-5 space-y-3">
             <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
               <ShieldCheck className="w-4 h-4 text-purple-400" />
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-semibold text-slate-100">
                 DNS 与内核规约
               </h3>
             </div>
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="p-2.5 rounded bg-slate-950/40 border border-slate-800">
-                <span className="text-[11px] text-slate-500 block">DNS 解析</span>
+                <span className="text-[11px] text-slate-500 block">
+                  DNS 解析
+                </span>
                 <span className="text-slate-200 font-mono font-medium">
                   FakeIP 防污染
                 </span>
               </div>
               <div className="p-2.5 rounded bg-slate-950/40 border border-slate-800">
-                <span className="text-[11px] text-slate-500 block">国内 DNS</span>
+                <span className="text-[11px] text-slate-500 block">
+                  国内 DNS
+                </span>
                 <span className="text-slate-200 font-mono font-medium">
                   {config.dns.domestic_dns || "223.5.5.5"}
                 </span>
               </div>
               <div className="p-2.5 rounded bg-slate-950/40 border border-slate-800">
-                <span className="text-[11px] text-slate-500 block">接入网卡</span>
+                <span className="text-[11px] text-slate-500 block">
+                  接入模式
+                </span>
                 <span className="text-sky-400 font-mono font-medium">
-                  TUN 虚拟网卡
+                  {config.inbound.inbound_type === "mixed"
+                    ? `Mixed (:${config.inbound.mixed_port || 2080})`
+                    : "TUN 虚拟网卡"}
                 </span>
               </div>
               <div className="p-2.5 rounded bg-slate-950/40 border border-slate-800">
-                <span className="text-[11px] text-slate-500 block">路由内核</span>
+                <span className="text-[11px] text-slate-500 block">
+                  路由内核
+                </span>
                 <span className="text-slate-200 font-mono font-medium">
                   sing-box 1.14+
                 </span>

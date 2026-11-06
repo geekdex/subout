@@ -777,9 +777,7 @@ export const api = {
       `/api/auto-update/history${qs ? `?${qs}` : ""}`,
     );
   },
-  async getAutoUpdateSnapshotDetail(
-    id: number,
-  ): Promise<AutoUpdateSnapshot> {
+  async getAutoUpdateSnapshotDetail(id: number): Promise<AutoUpdateSnapshot> {
     return request<AutoUpdateSnapshot>(`/api/auto-update/history/${id}`);
   },
   async rollbackAutoUpdateSnapshot(

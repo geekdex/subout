@@ -174,6 +174,40 @@ pub async fn save_settings(
         let _ = db::update_setting(&conn, "auto_update_reload_service", val);
     }
 
+    // Recalculate auto_update_next_run when schedule settings change
+    let eff_interval = db::get_setting(&conn, "auto_update_interval")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "12h".to_string());
+    let next_run_ts = if eff_interval == "daily" {
+        let daily_time = db::get_setting(&conn, "auto_update_daily_time")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "04:00".to_string());
+        crate::auto_update::calculate_next_daily_run(&daily_time)
+    } else {
+        let interval_secs: u64 = match eff_interval.as_str() {
+            "1h" => 3600,
+            "6h" => 6 * 3600,
+            "24h" => 24 * 3600,
+            "48h" => 48 * 3600,
+            _ => 12 * 3600,
+        };
+        let last_run: u64 = db::get_setting(&conn, "auto_update_last_run")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let now_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let base_ts = if last_run > 0 { last_run } else { now_ts };
+        Some(base_ts + interval_secs)
+    };
+    if let Some(next_ts) = next_run_ts {
+        let _ = db::update_setting(&conn, "auto_update_next_run", &next_ts.to_string());
+    }
+
     Ok(Json(serde_json::json!({
         "status": "success",
         "message": "自动更新设置已保存"

@@ -9,7 +9,7 @@ const renderModal = (props: React.ComponentProps<typeof SudoSettingsModal>) => {
   return render(
     <ToastProvider>
       <SudoSettingsModal {...props} />
-    </ToastProvider>
+    </ToastProvider>,
   );
 };
 
@@ -47,7 +47,7 @@ describe("SudoSettingsModal Component", () => {
     expect(screen.getByText("功能受限")).toBeDefined();
     expect(screen.getByText("验证并开启管理员权限")).toBeDefined();
     expect(
-      screen.getByPlaceholderText("输入当前操作系统的 Sudo 密码...")
+      screen.getByPlaceholderText("输入当前操作系统的 Sudo 密码..."),
     ).toBeDefined();
   });
 
@@ -74,10 +74,10 @@ describe("SudoSettingsModal Component", () => {
 
     expect(screen.getByText("管理员权限 (Root 运行)")).toBeDefined();
     expect(
-      screen.getByText("程序直接以系统最高管理员 (Root) 用户运行")
+      screen.getByText("程序直接以系统最高管理员 (Root) 用户运行"),
     ).toBeDefined();
     expect(
-      screen.queryByPlaceholderText("输入当前操作系统的 Sudo 密码...")
+      screen.queryByPlaceholderText("输入当前操作系统的 Sudo 密码..."),
     ).toBeNull();
   });
 });

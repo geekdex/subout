@@ -11,6 +11,7 @@ import {
   ExternalLink,
   ChevronRight,
   Sparkles,
+  X,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
@@ -44,7 +45,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [siteResults, setSiteResults] = useState<{
     [site: string]: number | null;
   }>({});
+  const [hideConflictTip, setHideConflictTip] = useState<boolean>(() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      return (
+        window.localStorage.getItem("subout_hide_conflict_tip_date") === today
+      );
+    } catch {
+      return false;
+    }
+  });
   const { success, error } = useToast();
+
+  const handleDismissConflictTipToday = () => {
+    setHideConflictTip(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      window.localStorage.setItem("subout_hide_conflict_tip_date", today);
+    } catch {
+      // ignore
+    }
+  };
 
   const isRunning = serviceStatus?.running ?? false;
   const hostOs = systemInfo?.host_os ?? "unknown";
@@ -98,15 +119,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6">
       {/* Safe conflict reminder */}
-      <div className="bg-sky-500/10 border border-sky-500/20 rounded-xl p-4 flex items-center justify-between text-xs text-sky-300">
-        <div className="flex items-center gap-2.5">
-          <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0" />
-          <span>
-            安全提示：启动 TUN 或系统代理前，请先退出 Clash、v2rayN、Surge
-            等其他客户端，以避免 TUN 网卡互斥或端口占用冲突。
-          </span>
+      {!hideConflictTip && (
+        <div className="bg-sky-500/10 border border-sky-500/20 rounded-xl p-4 flex items-center justify-between gap-3 text-xs text-sky-300">
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0" />
+            <span>
+              安全提示：启动 TUN 或系统代理前，请先退出 Clash、v2rayN、Surge
+              等其他客户端，以避免 TUN 网卡互斥或端口占用冲突。
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleDismissConflictTipToday}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-sky-400 hover:bg-sky-500/15 transition-colors shrink-0 whitespace-nowrap"
+            title="今日不再提示此提醒"
+          >
+            <span>今日不再提示</span>
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
-      </div>
+      )}
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -117,7 +149,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Activity className="w-4 h-4 text-sky-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold text-white">
+            <span className="text-xl font-bold text-slate-100">
               {isRunning
                 ? serviceStatus?.ready
                   ? "正常运行"
@@ -145,7 +177,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Network className="w-4 h-4 text-indigo-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold text-white">
+            <span className="text-xl font-bold text-slate-100">
               {serviceStatus?.is_tun ? "TUN 虚拟网卡" : "Mixed 混合代理"}
             </span>
           </div>
@@ -166,7 +198,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Cpu className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold text-white">
+            <span className="text-xl font-bold text-slate-100">
               {(serviceStatus?.cpu_usage ?? 0).toFixed(1)}%
             </span>
           </div>
@@ -187,7 +219,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <HardDrive className="w-4 h-4 text-purple-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold text-white">
+            <span className="text-xl font-bold text-slate-100">
               {formatBytes(serviceStatus?.memory_bytes ?? 0)}
             </span>
           </div>
@@ -205,7 +237,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <>
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div>
-                  <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     <span>小白极简运行模式</span>
                   </h3>
@@ -229,13 +261,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <span className="text-xs font-medium text-slate-400">分流与出口状态</span>
-                  <div className="text-sm font-semibold text-white flex items-center gap-2">
+                  <span className="text-xs font-medium text-slate-400">
+                    分流与出口状态
+                  </span>
+                  <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     <span>开箱即用 · 智能分流与自动测速</span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    国内网站与 IP 自动直连，国外受限网站通过最优节点代理加速，自动拦截恶意广告。
+                    国内网站与 IP
+                    自动直连，国外受限网站通过最优节点代理加速，自动拦截恶意广告。
                   </p>
                 </div>
                 <Button
@@ -251,7 +286,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <>
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div>
-                  <h3 className="text-base font-semibold text-white">
+                  <h3 className="text-base font-semibold text-slate-100">
                     本机运行配置绑定
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
@@ -280,7 +315,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </span>
                     <div className="w-full sm:w-72">
                       <Select
-                        value={runningProfile ? runningProfile.id.toString() : ""}
+                        value={
+                          runningProfile ? runningProfile.id.toString() : ""
+                        }
                         disabled={switchingConfig}
                         onChange={handleSelectRunningConfig}
                         options={eligibleConfigs.map((c) => ({
@@ -299,7 +336,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         当前运行: {runningProfile.name}
                       </Badge>
                       <span className="text-[11px] text-slate-500 font-mono">
-                        Token: {String(runningProfile.token || "").slice(0, 8)}...
+                        Token: {String(runningProfile.token || "").slice(0, 8)}
+                        ...
                       </span>
                     </div>
                   )}
@@ -328,7 +366,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <Radio className="w-4 h-4 text-sky-400" />
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-semibold text-slate-100">
                 网络连通性探针
               </h3>
             </div>

@@ -157,17 +157,18 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
     );
   };
 
-  const sudoModalElement = onCloseSudoModal && onSubmitSudo ? (
-    <SudoModal
-      open={isSudoModalOpen}
-      onClose={onCloseSudoModal}
-      onSubmit={onSubmitSudo}
-      loading={sudoActionLoading}
-      error={sudoError}
-      conflictPids={takeoverDiagnose?.pids}
-      conflictName={takeoverDiagnose?.conflict_name}
-    />
-  ) : null;
+  const sudoModalElement =
+    onCloseSudoModal && onSubmitSudo ? (
+      <SudoModal
+        open={isSudoModalOpen}
+        onClose={onCloseSudoModal}
+        onSubmit={onSubmitSudo}
+        loading={sudoActionLoading}
+        error={sudoError}
+        conflictPids={takeoverDiagnose?.pids}
+        conflictName={takeoverDiagnose?.conflict_name}
+      />
+    ) : null;
 
   // When initial data is still loading or kernelInfo is not yet resolved,
   // do NOT flash the scary "kernel not found / blocked" warning!
@@ -219,7 +220,7 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
             <p className="max-w-3xl break-words break-all">
               Subout 当前运行在强门禁保护状态。由于 sing-box 1.14
               大版本更新了配置规范并移除了 legacy 出站， 系统限制仅支持稳定版{" "}
-              <span className="font-semibold text-white">
+              <span className="font-semibold text-slate-100">
                 {kernelInfo?.pinned_version || "1.14.4"}
               </span>{" "}
               内核。
@@ -233,7 +234,8 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
                 </code>
                 {isVersionSatisfies ? (
                   <span className="text-amber-200 ml-1">
-                    （版本号已满足 1.14.* 规范，但内核进程未就绪，请重新下载或排查冲突）。
+                    （版本号已满足 1.14.*
+                    规范，但内核进程未就绪，请重新下载或排查冲突）。
                   </span>
                 ) : (
                   <span className="text-rose-400 ml-1">
@@ -250,7 +252,9 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
             {kernelInfo?.binary_path && (
               <div className="mt-2 text-xs text-slate-400 font-mono flex items-center gap-1.5 break-all">
                 <Cpu className="w-3.5 h-3.5 shrink-0" />
-                <span className="break-all">路径: {kernelInfo.binary_path}</span>
+                <span className="break-all">
+                  路径: {kernelInfo.binary_path}
+                </span>
               </div>
             )}
           </div>
@@ -287,18 +291,19 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
                       : `${(downloadStatus?.progress ?? 0).toFixed(1)}%`}
                   </span>
 
-                  {onCancelDownload && downloadStatus?.status !== "extracting" && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      loading={cancelling}
-                      onClick={onCancelDownload}
-                      icon={<XCircle className="w-3.5 h-3.5" />}
-                      className="text-xs text-rose-300 hover:text-rose-200 border-rose-500/40 hover:border-rose-500/60 hover:bg-rose-500/10"
-                    >
-                      取消下载
-                    </Button>
-                  )}
+                  {onCancelDownload &&
+                    downloadStatus?.status !== "extracting" && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        loading={cancelling}
+                        onClick={onCancelDownload}
+                        icon={<XCircle className="w-3.5 h-3.5" />}
+                        className="text-xs text-rose-300 hover:text-rose-200 border-rose-500/40 hover:border-rose-500/60 hover:bg-rose-500/10"
+                      >
+                        取消下载
+                      </Button>
+                    )}
                 </div>
               </div>
 
@@ -330,7 +335,8 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
                     <strong className="text-slate-200 font-medium">
                       {formatBytes(downloadStatus?.downloaded_bytes ?? 0)}
                     </strong>
-                    {downloadStatus?.total_bytes && downloadStatus.total_bytes > 0
+                    {downloadStatus?.total_bytes &&
+                    downloadStatus.total_bytes > 0
                       ? ` / ${formatBytes(downloadStatus.total_bytes)}`
                       : ""}
                   </span>
@@ -338,14 +344,16 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
                     <span>
                       速度:{" "}
                       <strong className="text-amber-300 font-medium">
-                        {formatBytes(downloadStatus?.speed_bytes_per_sec ?? 0)}/s
+                        {formatBytes(downloadStatus?.speed_bytes_per_sec ?? 0)}
+                        /s
                       </strong>
                     </span>
                   )}
                 </div>
                 <div>
                   <span>
-                    系统构件: {kernelInfo?.os || "linux"}-{kernelInfo?.arch || "amd64"}
+                    系统构件: {kernelInfo?.os || "linux"}-
+                    {kernelInfo?.arch || "amd64"}
                   </span>
                 </div>
               </div>
@@ -353,28 +361,28 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
           )}
 
           {/* Download Error Banner */}
-          {!downloading &&
-            downloadStatus?.status === "error" && (
-              <div className="mt-2 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span className="break-words">
-                    {downloadStatus.error || "下载或安装内核失败，请检查网络或切换加速镜像"}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => onDownloadKernel({ mirror: useMirror })}
-                    icon={<Download className="w-3.5 h-3.5" />}
-                    className="text-xs text-rose-200 border-rose-500/40 hover:bg-rose-500/20"
-                  >
-                    重试下载
-                  </Button>
-                </div>
+          {!downloading && downloadStatus?.status === "error" && (
+            <div className="mt-2 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="break-words">
+                  {downloadStatus.error ||
+                    "下载或安装内核失败，请检查网络或切换加速镜像"}
+                </span>
               </div>
-            )}
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onDownloadKernel({ mirror: useMirror })}
+                  icon={<Download className="w-3.5 h-3.5" />}
+                  className="text-xs text-rose-200 border-rose-500/40 hover:bg-rose-500/20"
+                >
+                  重试下载
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Action Row: Shown when not currently downloading */}
           {!downloading &&

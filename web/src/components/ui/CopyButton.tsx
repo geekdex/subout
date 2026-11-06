@@ -53,9 +53,9 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
   const variantClasses = {
     ghost: "text-slate-400 hover:text-slate-100 hover:bg-slate-800/80",
     secondary:
-      "bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700",
+      "bg-slate-800 text-slate-300 hover:text-slate-100 hover:bg-slate-700 border border-slate-700",
     outline:
-      "border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800",
+      "border border-slate-700 text-slate-300 hover:text-slate-100 hover:bg-slate-800",
   };
 
   return (

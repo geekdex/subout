@@ -342,10 +342,10 @@ impl AppPaths {
     /// 5. Standard system directories (`/usr/bin/sing-box`, `/bin/sing-box`, `/usr/sbin/sing-box`)
     /// 6. Local / Dev candidate directory (`./runtime/data/bin/sing-box`, `./bin/sing-box`, `./sing-box`)
     ///
-    /// Prioritizes candidates whose version is >= `min_version` (default 1.12.0).
+    /// Prioritizes candidates whose version is >= `min_version` (default 1.14.0).
     pub fn find_singbox_executable(&self) -> Option<PathBuf> {
         let min_version =
-            std::env::var("SUBOUT_MIN_SINGBOX_VERSION").unwrap_or_else(|_| "1.12.0".to_string());
+            std::env::var("SUBOUT_MIN_SINGBOX_VERSION").unwrap_or_else(|_| "1.14.0".to_string());
 
         let binary_name = crate::platform::current_platform().kernel_binary_name();
 
@@ -356,14 +356,14 @@ impl AppPaths {
             candidates.push(custom.clone());
         }
 
-        // 2. System PATH check
+        // 2. Application data kernel path (<data_dir>/bin/sing-box or <data_dir>/sing-box/sing-box)
+        candidates.push(self.kernel_binary_path());
+        candidates.push(self.data_dir.join("sing-box").join(binary_name));
+
+        // 3. System PATH check
         if let Some(path) = find_in_path(binary_name) {
             candidates.push(path);
         }
-
-        // 3. Application data kernel path (<data_dir>/bin/sing-box or <data_dir>/sing-box/sing-box)
-        candidates.push(self.kernel_binary_path());
-        candidates.push(self.data_dir.join("sing-box").join(binary_name));
 
         // 4. Common standard system paths from platform strategy
         candidates

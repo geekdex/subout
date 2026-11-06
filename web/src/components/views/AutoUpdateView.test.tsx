@@ -82,14 +82,18 @@ describe("AutoUpdateView Component", () => {
     vi.clearAllMocks();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     vi.mocked(api.getAutoUpdateSettings).mockResolvedValue(mockSettings);
-    vi.mocked(api.listAutoUpdateSnapshots).mockResolvedValue(mockHistoryResponse);
+    vi.mocked(api.listAutoUpdateSnapshots).mockResolvedValue(
+      mockHistoryResponse,
+    );
   });
 
   it("renders settings and history snapshots with pagination", async () => {
     renderWithToast(<AutoUpdateView />);
 
     await waitFor(() => {
-      expect(screen.getByText("自动更新中心 (Auto Update Center)")).toBeDefined();
+      expect(
+        screen.getByText("自动更新中心 (Auto Update Center)"),
+      ).toBeDefined();
     });
 
     // Check settings rendered

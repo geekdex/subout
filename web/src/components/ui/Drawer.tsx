@@ -103,7 +103,7 @@ export const Drawer: React.FC<DrawerProps> = ({
       {/* Backdrop with smooth fade in/out */}
       <div
         className={clsx(
-          "fixed inset-0 bg-slate-950/80 backdrop-blur-sm",
+          "fixed inset-0 bg-black/60 backdrop-blur-sm",
           isClosing ? "animate-backdrop-out" : "animate-backdrop-in",
         )}
         onClick={triggerSmoothClose}

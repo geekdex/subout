@@ -96,7 +96,8 @@ export interface DnsRuleItem extends NestedRuleItem {
   method?: "" | "default" | "drop" | "reply";
   no_drop?: boolean;
   // predefined
-  rcode?: "NOERROR" | "FORMERR" | "SERVFAIL" | "NXDOMAIN" | "NOTIMP" | "REFUSED";
+  rcode?:
+    "NOERROR" | "FORMERR" | "SERVFAIL" | "NXDOMAIN" | "NOTIMP" | "REFUSED";
   answer?: string[];
   ns?: string[];
   extra?: string[];
@@ -203,14 +204,7 @@ export interface SingBoxVisualConfig {
   log?: {
     disabled?: boolean;
     level?:
-      | ""
-      | "trace"
-      | "debug"
-      | "info"
-      | "warn"
-      | "error"
-      | "fatal"
-      | "panic";
+      "" | "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic";
     output?: string;
     timestamp?: boolean;
   };

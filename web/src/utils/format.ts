@@ -34,9 +34,7 @@ export function formatDate(
     const d =
       typeof dateVal === "number"
         ? new Date(dateVal > 1e11 ? dateVal : dateVal * 1000)
-        : new Date(
-            dateVal.includes("T") ? dateVal : dateVal.replace(" ", "T"),
-          );
+        : new Date(dateVal.includes("T") ? dateVal : dateVal.replace(" ", "T"));
     if (isNaN(d.getTime())) return String(dateVal);
     return d.toLocaleString("zh-CN", {
       hour12: false,

@@ -15,6 +15,7 @@ import {
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { Switch } from "../ui/Switch";
+import { ThemeSwitcher } from "../ui/ThemeSwitcher";
 import { ServiceStatus, SystemInfo, ConfigProfile } from "../../types/api";
 
 interface HeaderProps {
@@ -69,7 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
               "lg:hidden w-9 h-9 -ml-1 flex items-center justify-center rounded-xl border transition-all active:scale-90 shrink-0",
               isMobileMenuOpen
                 ? "bg-sky-500/20 text-sky-400 border-sky-500/40 shadow-sm shadow-sky-500/10"
-                : "bg-slate-800/60 text-slate-300 hover:text-white hover:bg-slate-800 border-slate-700/60",
+                : "bg-slate-800/60 text-slate-300 hover:text-slate-100 hover:bg-slate-800 border-slate-700/60",
             )}
             aria-label="打开菜单"
             aria-expanded={isMobileMenuOpen ?? false}
@@ -80,7 +81,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         {/* Brand name for mobile */}
-        <span className="lg:hidden font-bold text-sm text-white tracking-tight shrink-0">
+        <span className="lg:hidden font-bold text-sm text-slate-100 tracking-tight shrink-0">
           Subout
         </span>
 
@@ -181,6 +182,9 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Quick Controls */}
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {/* Global Theme Switcher (Auto / Light / Dark) */}
+        <ThemeSwitcher variant="compact" className="hidden sm:inline-flex" />
+
         {/* Mode Switcher (Visible on desktop) */}
         <div className="hidden lg:flex items-center gap-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700/60 text-xs shrink-0">
           <button

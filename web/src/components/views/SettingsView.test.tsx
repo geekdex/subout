@@ -23,7 +23,7 @@ const renderWithToast = (ui: React.ReactElement) => {
 describe("SettingsView Component", () => {
   it("does not render client operation mode switch card", () => {
     renderWithToast(
-      <SettingsView systemInfo={baseInfo} onRefreshSystemInfo={vi.fn()} />
+      <SettingsView systemInfo={baseInfo} onRefreshSystemInfo={vi.fn()} />,
     );
 
     // Mode switch card should be removed
@@ -33,12 +33,14 @@ describe("SettingsView Component", () => {
 
   it("does not render sudo password card in settings view (migrated to top header)", () => {
     renderWithToast(
-      <SettingsView systemInfo={baseInfo} onRefreshSystemInfo={vi.fn()} />
+      <SettingsView systemInfo={baseInfo} onRefreshSystemInfo={vi.fn()} />,
     );
 
     // Sudo password settings moved to header, not duplicated in settings view
     expect(screen.queryByText("系统提权密码 (Sudo)")).toBeNull();
-    expect(screen.queryByPlaceholderText("输入当前主机 Sudo 提权密码...")).toBeNull();
+    expect(
+      screen.queryByPlaceholderText("输入当前主机 Sudo 提权密码..."),
+    ).toBeNull();
   });
 
   it("renders admin web password change card and host environment status", () => {
@@ -46,7 +48,7 @@ describe("SettingsView Component", () => {
       <SettingsView
         systemInfo={{ ...baseInfo, sudo_configured: true }}
         onRefreshSystemInfo={vi.fn()}
-      />
+      />,
     );
 
     expect(screen.getByText("修改面板管理员密码")).toBeDefined();

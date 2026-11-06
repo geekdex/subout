@@ -27,13 +27,15 @@ export class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-white">
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-slate-100">
           <div className="max-w-lg w-full bg-slate-900 border border-rose-500/30 rounded-2xl p-8 shadow-2xl space-y-4">
             <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
               <AlertTriangle className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">页面渲染遇到错误</h2>
+              <h2 className="text-lg font-bold text-slate-100">
+                页面渲染遇到错误
+              </h2>
               <p className="text-xs text-slate-400 mt-1">
                 前端发生未捕获的渲染异常。请点击下方按钮重新加载。
               </p>

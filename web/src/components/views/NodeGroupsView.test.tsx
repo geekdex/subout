@@ -136,14 +136,10 @@ describe("NodeGroupsView Component", () => {
     expect(screen.getByRole("heading", { name: "新建节点组合" })).toBeDefined();
 
     // Default match type is auto, shows live preview
-    expect(
-      screen.getByText("符合条件的节点列表 (弹框实时预览)"),
-    ).toBeDefined();
+    expect(screen.getByText("符合条件的节点列表 (弹框实时预览)")).toBeDefined();
 
     // Enter keyword "HK, JP" in keywords input
-    const keywordInput = screen.getByPlaceholderText(
-      /例如: 香港, HK/i,
-    );
+    const keywordInput = screen.getByPlaceholderText(/例如: 香港, HK/i);
     fireEvent.change(keywordInput, { target: { value: "HK, JP" } });
 
     // Live preview should now match HK-01-Fast and JP-03-Direct, but not SG-02-BGP

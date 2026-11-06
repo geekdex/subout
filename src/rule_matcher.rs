@@ -427,7 +427,14 @@ fn evaluate_rule(
     target_field: &str, // "server" for dns, "outbound" for route
 ) -> Option<(String, String)> {
     let rule_type = rule.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    let target_opt = rule.get(target_field).and_then(|v| v.as_str());
+    let action_opt = rule.get("action").and_then(|a| a.as_str());
+    let target_opt = rule.get(target_field).and_then(|v| v.as_str()).or_else(|| {
+        if action_opt == Some("reject") {
+            Some("reject")
+        } else {
+            None
+        }
+    });
 
     if rule_type == "logical" {
         let mode = rule.get("mode").and_then(|m| m.as_str()).unwrap_or("or");
@@ -471,6 +478,9 @@ fn evaluate_rule(
 
 /// Resolves descriptive details for a DNS server tag.
 pub fn format_dns_server(server_tag: &str, dns_val: &Value) -> String {
+    if server_tag == "reject" || server_tag == "block" {
+        return format!("{server_tag} (拒绝解析)");
+    }
     let servers = dns_val.get("servers").and_then(|s| s.as_array());
     if let Some(srv_arr) = servers {
         for s in srv_arr {
@@ -510,8 +520,8 @@ pub fn format_outbound(outbound_tag: &str, config_val: &Value) -> String {
     if outbound_tag == "direct" {
         return "direct (直连出站)".to_string();
     }
-    if outbound_tag == "block" {
-        return "block (拦截丢弃)".to_string();
+    if outbound_tag == "block" || outbound_tag == "reject" {
+        return format!("{outbound_tag} (拦截丢弃)");
     }
 
     let outbounds = config_val.get("outbounds").and_then(|o| o.as_array());

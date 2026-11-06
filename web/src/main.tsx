@@ -16,4 +16,3 @@ if (container) {
     </React.StrictMode>,
   );
 }
-

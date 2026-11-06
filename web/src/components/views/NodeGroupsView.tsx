@@ -125,10 +125,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const { success, error } = useToast();
-  const safeNodes = useMemo(
-    () => (Array.isArray(nodes) ? nodes : []),
-    [nodes],
-  );
+  const safeNodes = useMemo(() => (Array.isArray(nodes) ? nodes : []), [nodes]);
   const safeSubscriptions = useMemo(
     () => (Array.isArray(subscriptions) ? subscriptions : []),
     [subscriptions],
@@ -205,12 +202,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   const liveAutoMatchedNodes = useMemo(() => {
     if (matchType !== "auto") return [];
     return safeNodes.filter((n) =>
-      matchesGroupCriteria(
-        n,
-        selectedSubs,
-        includeKeywords,
-        excludeKeywords,
-      ),
+      matchesGroupCriteria(n, selectedSubs, includeKeywords, excludeKeywords),
     );
   }, [matchType, safeNodes, selectedSubs, includeKeywords, excludeKeywords]);
 
@@ -358,7 +350,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
       <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
               <FolderKanban className="w-5 h-5 text-sky-400" />
               <span>节点组合管理 (Node Groups)</span>
               <Badge variant="neutral" size="sm">
@@ -427,16 +419,13 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2 min-w-0">
                     <Layers className="w-4 h-4 text-sky-400 shrink-0" />
-                    <h3 className="text-sm font-bold text-white truncate">
+                    <h3 className="text-sm font-bold text-slate-100 truncate">
                       {g.tag}
                     </h3>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <Badge
-                      variant={isStatic ? "neutral" : "success"}
-                      size="sm"
-                    >
+                    <Badge variant={isStatic ? "neutral" : "success"} size="sm">
                       {isStatic ? "📌 静态节点" : "⚡ 自动匹配"}
                     </Badge>
                     <Badge
@@ -467,9 +456,13 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                 </div>
 
                 {/* Strategy details if urltest / fallback */}
-                {(g.group_type === "urltest" || g.group_type === "fallback") && (
+                {(g.group_type === "urltest" ||
+                  g.group_type === "fallback") && (
                   <div className="text-[11px] text-slate-400 bg-slate-900/60 p-2 rounded border border-slate-800 flex items-center justify-between">
-                    <span className="truncate max-w-[180px]" title={g.url || ""}>
+                    <span
+                      className="truncate max-w-[180px]"
+                      title={g.url || ""}
+                    >
                       {g.url || "默认测速目标"}
                     </span>
                     <span className="font-mono text-slate-500 shrink-0">
@@ -503,7 +496,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                             .map((k, i) => (
                               <span
                                 key={i}
-                                className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-950 text-sky-300 border border-sky-800/50"
+                                className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30"
                               >
                                 {k}
                               </span>
@@ -550,7 +543,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                       {parsedNodes.map((t, i) => (
                         <div
                           key={i}
-                          className="py-1 px-2 text-xs font-mono text-slate-200 hover:text-white hover:bg-slate-900/60 rounded flex items-center justify-between gap-2 transition-colors"
+                          className="py-1 px-2 text-xs font-mono text-slate-200 hover:text-slate-100 hover:bg-slate-900/60 rounded flex items-center justify-between gap-2 transition-colors"
                           title={t}
                         >
                           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -772,7 +765,9 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                             : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
                         }`}
                       >
-                        {isSelected && <Check className="w-3 h-3 text-sky-400" />}
+                        {isSelected && (
+                          <Check className="w-3 h-3 text-sky-400" />
+                        )}
                         <span>{sub.label || `订阅 #${sub.id}`}</span>
                         <span className="text-[10px] text-slate-500 font-mono">
                           ({nodeCount})
@@ -825,7 +820,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
               {/* LIVE MATCHED NODES PREVIEW */}
               <div className="space-y-2 pt-2 border-t border-slate-800">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-white flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-100 flex items-center gap-1.5">
                     <Globe className="w-3.5 h-3.5 text-emerald-400" />
                     <span>符合条件的节点列表 (弹框实时预览)</span>
                   </span>
@@ -862,7 +857,9 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                             <span className="font-mono text-[11px] text-slate-500 hidden sm:inline">
                               {n.server}:{n.port}
                             </span>
-                            <span className={`font-mono text-xs font-medium ${color}`}>
+                            <span
+                              className={`font-mono text-xs font-medium ${color}`}
+                            >
                               {text}
                             </span>
                           </div>
@@ -962,7 +959,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
               {/* Node candidates selection checklist */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-white">
+                  <span className="font-semibold text-slate-100">
                     点击勾选需要加入组合的节点
                   </span>
                   <span className="font-mono text-sky-400 font-semibold">
@@ -983,7 +980,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                           onClick={() => handleToggleStaticNode(n.tag)}
                           className={`flex items-center justify-between p-2 rounded cursor-pointer text-xs border transition-all ${
                             isSelected
-                              ? "bg-sky-950/40 border-sky-500/50 text-white"
+                              ? "bg-sky-500/15 border-sky-500/50 text-slate-100"
                               : "bg-slate-900/50 border-slate-800/60 hover:bg-slate-900 text-slate-300"
                           }`}
                         >
@@ -1009,7 +1006,9 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                             <span className="font-mono text-[11px] text-slate-500 hidden sm:inline">
                               {n.server}:{n.port}
                             </span>
-                            <span className={`font-mono text-xs font-medium ${color}`}>
+                            <span
+                              className={`font-mono text-xs font-medium ${color}`}
+                            >
                               {text}
                             </span>
                           </div>
@@ -1041,7 +1040,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
                     {selectedStaticTags.map((t) => (
                       <span
                         key={t}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-sky-950 text-sky-300 border border-sky-800/60"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30"
                       >
                         <span className="truncate max-w-[140px]">{t}</span>
                         <button

@@ -481,7 +481,16 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         if let Ok(hc) = serde_json::from_str::<serde_json::Value>(&http_clients_str) {
             root.insert("http_clients".to_string(), hc);
         }
-        let content_json = serde_json::to_string_pretty(&serde_json::Value::Object(root))?;
+        let base_val = serde_json::Value::Object(root);
+        let mut synced_val = if let Ok((synced, _)) =
+            crate::generator::sync_config_with_latest_resources(conn, &base_val, &[])
+        {
+            synced
+        } else {
+            base_val
+        };
+        crate::generator::sanitize_runtime_config(&mut synced_val);
+        let content_json = serde_json::to_string_pretty(&synced_val)?;
         let host_os = crate::platform::current_platform().os_name().to_string();
         let default_token = uuid::Uuid::new_v4().to_string();
 
@@ -1085,12 +1094,32 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
         })
         .unwrap_or_default();
 
+    let type_filter = group.node_types.as_deref().unwrap_or("all").trim();
+    let selected_types: Vec<String> =
+        if type_filter.is_empty() || type_filter.eq_ignore_ascii_case("all") {
+            Vec::new()
+        } else {
+            type_filter
+                .split([',', '，', ' ', '\n', '\t', '\r'])
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+
     let nodes = get_nodes(conn)?;
     let mut resolved_tags = Vec::new();
 
     for node in nodes {
         if !node.enabled {
             continue;
+        }
+
+        // Check node protocol type filter
+        if !selected_types.is_empty() {
+            let ntype = node.node_type.trim().to_lowercase();
+            if !selected_types.iter().any(|t| t == &ntype) {
+                continue;
+            }
         }
 
         // Check subscription filter

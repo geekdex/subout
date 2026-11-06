@@ -48,7 +48,7 @@ export const CollapsibleToolbar: React.FC<CollapsibleToolbarProps> = ({
           <button
             type="button"
             onClick={() => setOpen(!open)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/70 transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-300 hover:text-slate-100 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/70 transition-colors"
           >
             {open ? (
               <>

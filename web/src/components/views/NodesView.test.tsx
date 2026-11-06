@@ -309,7 +309,10 @@ describe("NodesView Component", () => {
       node_type: "vless",
       server: `node${i + 1}.example.com`,
       port: 443,
-      raw_json: JSON.stringify({ tag: `Node-${i + 1}`, server: `node${i + 1}.example.com` }),
+      raw_json: JSON.stringify({
+        tag: `Node-${i + 1}`,
+        server: `node${i + 1}.example.com`,
+      }),
       enabled: true,
       last_web_latency: 50 + i,
       last_tested_at: "2026-11-05 16:30:00",
@@ -383,7 +386,9 @@ describe("NodesView Component", () => {
     // Dialog title & structured content should appear
     expect(screen.getByText("节点配置详情")).toBeDefined();
     expect(screen.getAllByText("Special-Node-99").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("special.example.com:443").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("special.example.com:443").length,
+    ).toBeGreaterThan(0);
 
     // Switch to "原始 JSON 视图" tab
     const jsonTabBtn = screen.getByRole("button", { name: /原始 JSON 视图/i });

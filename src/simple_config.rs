@@ -598,7 +598,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }));
     }
 
-    let route_final = if is_direct_all {
+    let route_final = if is_direct_all || cfg.route.mode == "gfw" {
         "direct"
     } else {
         &target_proxy

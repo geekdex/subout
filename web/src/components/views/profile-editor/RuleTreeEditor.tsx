@@ -205,21 +205,21 @@ const ConditionFieldsEditor: React.FC<ConditionFieldsEditorProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(() =>
     Boolean(
       item.domain_regex?.length ||
-        item.source_ip_cidr?.length ||
-        item.source_ip_is_private ||
-        item.source_port?.length ||
-        item.source_port_range?.length ||
-        item.port_range?.length ||
-        item.inbound?.length ||
-        item.ip_version ||
-        item.clash_mode ||
-        item.process_path?.length ||
-        item.process_path_regex?.length ||
-        item.package_name_regex?.length ||
-        item.rule_set_ip_cidr_match_source ||
-        item.query_dnssec ||
-        item.match_response ||
-        item.response_rcode,
+      item.source_ip_cidr?.length ||
+      item.source_ip_is_private ||
+      item.source_port?.length ||
+      item.source_port_range?.length ||
+      item.port_range?.length ||
+      item.inbound?.length ||
+      item.ip_version ||
+      item.clash_mode ||
+      item.process_path?.length ||
+      item.process_path_regex?.length ||
+      item.package_name_regex?.length ||
+      item.rule_set_ip_cidr_match_source ||
+      item.query_dnssec ||
+      item.match_response ||
+      item.response_rcode,
     ),
   );
 
@@ -313,9 +313,7 @@ const ConditionFieldsEditor: React.FC<ConditionFieldsEditorProps> = ({
             ) : (
               <>
                 <Monitor className="w-3.5 h-3.5 text-sky-400" />
-                <span>
-                  桌面端 ({platform.toUpperCase()}) 专属进程分流规则
-                </span>
+                <span>桌面端 ({platform.toUpperCase()}) 专属进程分流规则</span>
               </>
             )}
           </div>
@@ -573,7 +571,10 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
       ? outboundTags[0] || "proxy"
       : dnsServerTags[0] || "remote-dns";
 
-  const updateTopRule = (idx: number, nextRule: RouteRuleItem | DnsRuleItem) => {
+  const updateTopRule = (
+    idx: number,
+    nextRule: RouteRuleItem | DnsRuleItem,
+  ) => {
     const next = [...rules];
     next[idx] = nextRule;
     onChange(next);
@@ -590,8 +591,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
 
   const duplicateTopRule = (idx: number) => {
     const copy = JSON.parse(JSON.stringify(rules[idx])) as
-      | RouteRuleItem
-      | DnsRuleItem;
+      RouteRuleItem | DnsRuleItem;
     const next = [...rules];
     next.splice(idx + 1, 0, copy);
     onChange(next);
@@ -670,7 +670,11 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
               <strong className="text-sky-300 font-mono">
                 {(parentRule.mode || "and").toUpperCase()}
               </strong>{" "}
-              ({parentRule.mode === "or" ? "满足任一子规则即可" : "需同时满足所有子规则"})
+              (
+              {parentRule.mode === "or"
+                ? "满足任一子规则即可"
+                : "需同时满足所有子规则"}
+              )
             </span>
           </div>
 
@@ -713,7 +717,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
               key={childKey}
               className={`rounded-xl border transition-all ${
                 isChildLogical
-                  ? "bg-indigo-950/20 border-indigo-500/30"
+                  ? "bg-indigo-500/10 border-indigo-500/30"
                   : "bg-slate-900/70 border-slate-800"
               }`}
             >
@@ -771,7 +775,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={cIdx === 0}
                     onClick={() => moveChildTo(cIdx, 0)}
-                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                    className="p-1 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                     title="置顶子规则"
                   >
                     <ChevronsUp className="w-3.5 h-3.5" />
@@ -780,7 +784,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={cIdx === 0}
                     onClick={() => moveChildTo(cIdx, cIdx - 1)}
-                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                    className="p-1 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                     title="上移子规则"
                   >
                     <ArrowUp className="w-3.5 h-3.5" />
@@ -789,7 +793,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={cIdx === children.length - 1}
                     onClick={() => moveChildTo(cIdx, cIdx + 1)}
-                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                    className="p-1 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                     title="下移子规则"
                   >
                     <ArrowDown className="w-3.5 h-3.5" />
@@ -798,7 +802,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={cIdx === children.length - 1}
                     onClick={() => moveChildTo(cIdx, children.length - 1)}
-                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                    className="p-1 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                     title="置底子规则"
                   >
                     <ChevronsDown className="w-3.5 h-3.5" />
@@ -994,12 +998,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     onClick={() => {
                       if (isLogical) {
-                        const {
-                          type: _t,
-                          mode: _m,
-                          rules: _r,
-                          ...rest
-                        } = rule;
+                        const { type: _t, mode: _m, rules: _r, ...rest } = rule;
                         updateTopRule(idx, {
                           ...rest,
                           domain_suffix: [".example.com"],
@@ -1039,7 +1038,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={idx === 0}
                     onClick={() => moveTopRuleTo(idx, 0)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
                     title="置顶规则 (移至第 1 位)"
                   >
                     <ChevronsUp className="w-3.5 h-3.5" />
@@ -1048,7 +1047,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={idx === 0}
                     onClick={() => moveTopRuleTo(idx, idx - 1)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
                     title="上移一位"
                   >
                     <ArrowUp className="w-3.5 h-3.5" />
@@ -1057,7 +1056,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={idx === rules.length - 1}
                     onClick={() => moveTopRuleTo(idx, idx + 1)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
                     title="下移一位"
                   >
                     <ArrowDown className="w-3.5 h-3.5" />
@@ -1066,7 +1065,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                     type="button"
                     disabled={idx === rules.length - 1}
                     onClick={() => moveTopRuleTo(idx, rules.length - 1)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
                     title="置底规则 (移至最后)"
                   >
                     <ChevronsDown className="w-3.5 h-3.5" />
@@ -1074,7 +1073,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                   <button
                     type="button"
                     onClick={() => duplicateTopRule(idx)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800"
                     title="克隆此规则"
                   >
                     <Copy className="w-3.5 h-3.5" />
@@ -1165,9 +1164,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                                 ...outboundTags.map((t) => ({
                                   value: t,
                                   label:
-                                    t === "direct"
-                                      ? "direct (直连出站)"
-                                      : t,
+                                    t === "direct" ? "direct (直连出站)" : t,
                                 })),
                                 ...(outboundTags.includes(
                                   (rule as RouteRuleItem).outbound || "",
@@ -1338,8 +1335,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                             <Select
                               label="目标 DNS 服务器 (server)"
                               value={
-                                (rule as DnsRuleItem).server ||
-                                defaultTargetTag
+                                (rule as DnsRuleItem).server || defaultTargetTag
                               }
                               onChange={(val) =>
                                 updateTopRule(idx, {
@@ -1426,7 +1422,10 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                               })
                             }
                             options={[
-                              { value: "NOERROR", label: "NOERROR (空成功响应)" },
+                              {
+                                value: "NOERROR",
+                                label: "NOERROR (空成功响应)",
+                              },
                               {
                                 value: "NXDOMAIN",
                                 label: "NXDOMAIN (域名不存在)",
@@ -1448,7 +1447,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
                   {/* Rule Matching Conditions or 2-Level Logical Tree */}
                   {isLogical ? (
                     <div className="space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-sky-950/20 border border-sky-500/30">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-sky-500/10 border border-sky-500/30">
                         <Select
                           label="顶层逻辑组合模式 (mode)"
                           value={rule.mode || "and"}

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Lock, ArrowRight } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
+import { ThemeSwitcher } from "../ui/ThemeSwitcher";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import { getErrorMessage } from "../../utils/format";
@@ -36,6 +37,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-4 bg-slate-950 relative overflow-hidden">
+      {/* Top-right Theme Switcher */}
+      <div className="fixed top-4 right-4 z-20">
+        <ThemeSwitcher variant="compact" />
+      </div>
+
       {/* Subtle background glow */}
       <div className="absolute w-[500px] h-[500px] bg-sky-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute w-[400px] h-[400px] bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none translate-x-32 translate-y-32" />
@@ -45,7 +51,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xl mb-3 shadow-lg shadow-sky-500/20">
             S
           </div>
-          <h1 className="text-xl font-bold text-white">Subout Panel</h1>
+          <h1 className="text-xl font-bold text-slate-100">Subout Panel</h1>
           <p className="text-xs text-slate-400 mt-1">
             sing-box 订阅与配置管理中台
           </p>

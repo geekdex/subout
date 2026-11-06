@@ -194,7 +194,9 @@ export const SudoSettingsModal: React.FC<SudoSettingsModalProps> = ({
                 程序直接以系统最高管理员 (Root) 用户运行
               </p>
               <p className="mt-1 text-emerald-300/80">
-                Subout 已拥有完整的系统级特权，创建 TUN 虚拟网卡、接管冲突守护进程和配置全局网络代理均可免密直接执行，无需配置任何 Sudo 提权密码。
+                Subout 已拥有完整的系统级特权，创建 TUN
+                虚拟网卡、接管冲突守护进程和配置全局网络代理均可免密直接执行，无需配置任何
+                Sudo 提权密码。
               </p>
             </div>
           </div>
@@ -206,7 +208,8 @@ export const SudoSettingsModal: React.FC<SudoSettingsModalProps> = ({
                 系统提权密码已配置，管理员权限永久有效
               </p>
               <p className="mt-1 text-emerald-300/80">
-                密码已加密持久化保存。程序在执行接管外部 sing-box 进程、切换 TUN 虚拟网卡、修改系统网络代理或重启服务时，将自动提权，永久免除反复弹窗授权。
+                密码已加密持久化保存。程序在执行接管外部 sing-box 进程、切换 TUN
+                虚拟网卡、修改系统网络代理或重启服务时，将自动提权，永久免除反复弹窗授权。
               </p>
             </div>
           </div>
@@ -218,10 +221,14 @@ export const SudoSettingsModal: React.FC<SudoSettingsModalProps> = ({
                 尚未配置系统提权密码（功能受限）
               </p>
               <p className="text-amber-300/80">
-                当前以非特权用户运行。当进行接管外部 sing-box 服务、开启系统代理或配置 TUN 网卡时，系统仅能通过弹窗索取<strong>临时授权</strong>（单次操作临时有效，不写入持久化存储）。
+                当前以非特权用户运行。当进行接管外部 sing-box
+                服务、开启系统代理或配置 TUN 网卡时，系统仅能通过弹窗索取
+                <strong>临时授权</strong>
+                （单次操作临时有效，不写入持久化存储）。
               </p>
               <p className="text-amber-200 font-medium">
-                输入当前主机的 Sudo 密码并验证保存后，将升级为“管理员权限（永久有效）”，永久免除操作弹窗提示。
+                输入当前主机的 Sudo
+                密码并验证保存后，将升级为“管理员权限（永久有效）”，永久免除操作弹窗提示。
               </p>
               {hasTempSudo && (
                 <p className="text-[11px] text-sky-400 pt-0.5">
@@ -281,7 +288,8 @@ export const SudoSettingsModal: React.FC<SudoSettingsModalProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              💡 提权密码经本地系统验证通过后，将持久化保存于本地配置中，用于后台自动化特权维护。
+              💡
+              提权密码经本地系统验证通过后，将持久化保存于本地配置中，用于后台自动化特权维护。
             </p>
           </form>
         )}

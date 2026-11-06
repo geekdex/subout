@@ -29,7 +29,11 @@ export function useRouter() {
   }, []);
 
   const navigate = useCallback(
-    (tab: NavTab, params?: Record<string, string | number>, replace = false) => {
+    (
+      tab: NavTab,
+      params?: Record<string, string | number>,
+      replace = false,
+    ) => {
       navigateTo(tab, params, replace);
       setRoute(parseRoute());
     },

@@ -340,7 +340,11 @@ export const AutoUpdateView: React.FC = () => {
         }
         if (isAuto) {
           return (
-            <Badge variant="neutral" size="sm" className="text-purple-400 border-purple-500/30 bg-purple-500/10">
+            <Badge
+              variant="neutral"
+              size="sm"
+              className="text-purple-400 border-purple-500/30 bg-purple-500/10"
+            >
               自动更新
             </Badge>
           );
@@ -431,7 +435,9 @@ export const AutoUpdateView: React.FC = () => {
             disabled={!s.has_content}
             onClick={() => setRollbackId(s.id)}
             icon={<RotateCcw className="w-3.5 h-3.5 text-amber-400" />}
-            title={s.has_content ? "一键回滚至该历史快照" : "此记录未包含配置快照"}
+            title={
+              s.has_content ? "一键回滚至该历史快照" : "此记录未包含配置快照"
+            }
           >
             回滚至此
           </Button>
@@ -445,13 +451,15 @@ export const AutoUpdateView: React.FC = () => {
       {/* Top Banner */}
       <div className="glass-panel p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <RefreshCw className="w-5 h-5 text-sky-400" />
             <span>自动更新中心 (Auto Update Center)</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1 leading-relaxed">
             全链路闭环流水线：拉取所有订阅源 ➔ 刷新节点池 ➔ 重新计算节点组合与
-            versionCode ➔ 同步当前运行配置 outbounds（清空旧节点重构，失效节点与空组合回退 direct）➔ 平滑重启 sing-box ➔ 备份历史快照与日志。
+            versionCode ➔ 同步当前运行配置
+            outbounds（清空旧节点重构，失效节点与空组合回退 direct）➔ 平滑重启
+            sing-box ➔ 备份历史快照与日志。
           </p>
         </div>
         <Button
@@ -473,7 +481,7 @@ export const AutoUpdateView: React.FC = () => {
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-sky-400" />
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-semibold text-slate-100">
                 定时自动更新调度策略
               </h3>
             </div>
@@ -576,7 +584,9 @@ export const AutoUpdateView: React.FC = () => {
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <CheckCircle className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-semibold text-white">更新联动选项</h3>
+              <h3 className="text-sm font-semibold text-slate-100">
+                更新联动选项
+              </h3>
             </div>
             {currentVersionCode && (
               <Badge variant="platform" size="sm" platform="linux">
@@ -592,7 +602,8 @@ export const AutoUpdateView: React.FC = () => {
                   自动同步至当前运行配置
                 </span>
                 <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                  将更新后的最新节点与节点组合重写注入本机活跃配置（清空旧出站，失效节点与变空组合自动回退 direct）。
+                  将更新后的最新节点与节点组合重写注入本机活跃配置（清空旧出站，失效节点与变空组合自动回退
+                  direct）。
                 </p>
               </div>
               <Switch
@@ -609,7 +620,8 @@ export const AutoUpdateView: React.FC = () => {
                   平滑热重载 sing-box 服务
                 </span>
                 <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                  更新完成之后，若 sing-box 属于运行状态，使用最新配置重启服务使其无缝生效。
+                  更新完成之后，若 sing-box
+                  属于运行状态，使用最新配置重启服务使其无缝生效。
                 </p>
               </div>
               <Switch
@@ -657,7 +669,7 @@ export const AutoUpdateView: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <History className="w-4 h-4 text-purple-400" />
-            <h3 className="text-sm font-semibold text-white">
+            <h3 className="text-sm font-semibold text-slate-100">
               历史备份快照与一键回滚列表
             </h3>
             <span className="text-xs text-slate-500">
@@ -669,7 +681,11 @@ export const AutoUpdateView: React.FC = () => {
             variant="ghost"
             size="sm"
             onClick={() => loadHistory(currentPage)}
-            icon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />}
+            icon={
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+              />
+            }
           >
             刷新列表
           </Button>
@@ -805,7 +821,8 @@ export const AutoUpdateView: React.FC = () => {
             <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2 text-xs text-emerald-400">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
               <span>
-                全流程更新完成！最新节点已同步至节点组合与运行配置，sing-box 服务已平滑重载。
+                全流程更新完成！最新节点已同步至节点组合与运行配置，sing-box
+                服务已平滑重载。
               </span>
             </div>
           ) : manualStatus === "failed" ? (
@@ -835,7 +852,9 @@ export const AutoUpdateView: React.FC = () => {
                 <div
                   key={index}
                   className={
-                    log.includes("失败") || log.includes("Error") || log.includes("错误")
+                    log.includes("失败") ||
+                    log.includes("Error") ||
+                    log.includes("错误")
                       ? "text-rose-400 font-medium"
                       : log.includes("成功") || log.includes("已更新")
                         ? "text-emerald-300"
@@ -872,10 +891,14 @@ export const AutoUpdateView: React.FC = () => {
             </span>
             {viewingLogSnapshot?.status && (
               <Badge
-                variant={viewingLogSnapshot.status === "success" ? "success" : "danger"}
+                variant={
+                  viewingLogSnapshot.status === "success" ? "success" : "danger"
+                }
                 size="sm"
               >
-                {viewingLogSnapshot.status === "success" ? "更新成功" : "更新失败"}
+                {viewingLogSnapshot.status === "success"
+                  ? "更新成功"
+                  : "更新失败"}
               </Badge>
             )}
           </div>
@@ -890,7 +913,11 @@ export const AutoUpdateView: React.FC = () => {
         footer={
           <div className="flex items-center justify-between w-full">
             <CopyButton
-              text={viewingLogSnapshot?.log || viewingLogSnapshot?.detail || "无日志"}
+              text={
+                viewingLogSnapshot?.log ||
+                viewingLogSnapshot?.detail ||
+                "无日志"
+              }
               label="复制完整日志"
               size="sm"
               variant="secondary"
@@ -944,7 +971,8 @@ export const AutoUpdateView: React.FC = () => {
               <span className="font-mono">执行阶段记录</span>
               <span className="text-[11px] text-slate-500">
                 {(() => {
-                  const raw = viewingLogSnapshot?.log || viewingLogSnapshot?.detail || "";
+                  const raw =
+                    viewingLogSnapshot?.log || viewingLogSnapshot?.detail || "";
                   const totalCount = raw
                     .split("\n")
                     .filter((l) => l.trim().length > 0).length;
@@ -964,7 +992,8 @@ export const AutoUpdateView: React.FC = () => {
             </div>
             <div className="p-3 font-mono text-[11px] leading-relaxed text-slate-300 max-h-96 overflow-y-auto space-y-1">
               {(() => {
-                const raw = viewingLogSnapshot?.log || viewingLogSnapshot?.detail || "";
+                const raw =
+                  viewingLogSnapshot?.log || viewingLogSnapshot?.detail || "";
                 const lines = raw
                   .split("\n")
                   .map((l) => l.trim())

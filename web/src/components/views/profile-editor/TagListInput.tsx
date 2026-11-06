@@ -66,11 +66,7 @@ export const TagListInput: React.FC<TagListInputProps> = ({
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       commitTokens(draft);
-    } else if (
-      e.key === "Backspace" &&
-      draft === "" &&
-      strValues.length > 0
-    ) {
+    } else if (e.key === "Backspace" && draft === "" && strValues.length > 0) {
       e.preventDefault();
       if (numeric && onChangeNumeric) {
         onChangeNumeric(

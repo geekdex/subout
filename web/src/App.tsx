@@ -5,6 +5,7 @@ import { GatekeeperModal } from "./components/layout/GatekeeperModal";
 import { SudoModal } from "./components/layout/SudoModal";
 import { SudoSettingsModal } from "./components/layout/SudoSettingsModal";
 import { ToastProvider } from "./components/ui/Toast";
+import { ThemeProvider } from "./hooks/useTheme";
 import { useToast } from "./hooks/useToast";
 import { useKernelGuard } from "./hooks/useKernelGuard";
 import { useServiceStatus } from "./hooks/useServiceStatus";
@@ -149,7 +150,10 @@ const AppContent: React.FC = () => {
         "已切换工作模式",
         `已切换至 ${mode === "simple" ? "小白模式" : "专业模式"}`,
       );
-      if (mode === "simple" && ["profiles", "groups", "auto-update"].includes(currentTab)) {
+      if (
+        mode === "simple" &&
+        ["profiles", "groups", "auto-update"].includes(currentTab)
+      ) {
         navigate("dashboard", undefined, true);
       } else if (mode === "expert" && currentTab === "simple") {
         navigate("dashboard", undefined, true);
@@ -370,8 +374,10 @@ const AppContent: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
+    </ThemeProvider>
   );
 };

@@ -343,6 +343,7 @@ pub async fn sync_group(
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let _ = db::refresh_node_group_version_code(&conn);
     group.static_nodes = Some(resolved_json.clone());
 
     let _ = db::log_history(
@@ -403,6 +404,8 @@ pub async fn batch_delete_groups(
         let _ = tx.execute("DELETE FROM outbound_groups WHERE id = ?", [id]);
     }
     tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let _ = db::refresh_node_group_version_code(&conn);
 
     let _ = db::log_history(
         &conn,

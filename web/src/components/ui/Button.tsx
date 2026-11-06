@@ -43,9 +43,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       danger:
         "bg-rose-500 hover:bg-rose-600 text-white shadow-sm shadow-rose-500/30 focus:ring-rose-500 border border-rose-400/30",
       ghost:
-        "bg-transparent hover:bg-slate-800/60 text-slate-300 hover:text-white focus:ring-slate-700",
+        "bg-transparent hover:bg-slate-800/60 text-slate-300 hover:text-slate-100 focus:ring-slate-700",
       outline:
-        "bg-transparent border border-slate-700 hover:border-slate-600 text-slate-300 hover:text-white focus:ring-slate-700",
+        "bg-transparent border border-slate-700 hover:border-slate-600 text-slate-300 hover:text-slate-100 focus:ring-slate-700",
     };
 
     return (

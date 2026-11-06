@@ -94,10 +94,7 @@ export function useKernelGuard() {
         const latestInfo = await fetchKernelInfo();
         const displayVersion =
           latestInfo?.pinned_version || latestInfo?.version || "1.14.4";
-        success(
-          "内核安装完成",
-          `sing-box ${displayVersion} 已成功安装并就绪`,
-        );
+        success("内核安装完成", `sing-box ${displayVersion} 已成功安装并就绪`);
       } else if (st.status === "error") {
         stopDownloadPolling();
         setIsStartingDownload(false);
@@ -221,7 +218,10 @@ export function useKernelGuard() {
     setTakingOver(true);
     try {
       const res = await api.takeoverService({ start_after_takeover: true });
-      success("服务接管成功", res.message || "已平滑接管外部服务并保持网络畅通");
+      success(
+        "服务接管成功",
+        res.message || "已平滑接管外部服务并保持网络畅通",
+      );
       await fetchKernelInfo();
     } catch (err: unknown) {
       const errMsg = getErrorMessage(err);
@@ -258,7 +258,10 @@ export function useKernelGuard() {
       });
       setIsSudoModalOpen(false);
       setSudoError(null);
-      success("服务接管成功", res.message || "已平滑接管外部服务并保持网络畅通");
+      success(
+        "服务接管成功",
+        res.message || "已平滑接管外部服务并保持网络畅通",
+      );
       await fetchKernelInfo();
     } catch (err: unknown) {
       const errMsg = getErrorMessage(err);

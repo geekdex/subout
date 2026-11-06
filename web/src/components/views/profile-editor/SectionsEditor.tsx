@@ -124,7 +124,10 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
     const nextRuleSets = [...ruleSets];
     const nextHttpClients = [...httpClients];
     if (!nextHttpClients.some((c) => c.tag === "proxy")) {
-      nextHttpClients.push({ tag: "direct" }, { tag: "proxy", detour: defaultTargetTag });
+      nextHttpClients.push(
+        { tag: "direct" },
+        { tag: "proxy", detour: defaultTargetTag },
+      );
     }
 
     for (const tag of missingRuleSetTags) {
@@ -445,7 +448,10 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
               type="button"
               onClick={() =>
                 appendRouteRule({
-                  package_name: ["org.telegram.messenger", "com.android.chrome"],
+                  package_name: [
+                    "org.telegram.messenger",
+                    "com.android.chrome",
+                  ],
                   outbound: defaultTargetTag,
                 })
               }
@@ -724,7 +730,7 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
                       type="button"
                       disabled={idx === 0}
                       onClick={() => moveRuleSetTo(idx, idx - 1)}
-                      className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                      className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                       title="上移"
                     >
                       <ArrowUp className="w-3.5 h-3.5" />
@@ -733,7 +739,7 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
                       type="button"
                       disabled={idx === ruleSets.length - 1}
                       onClick={() => moveRuleSetTo(idx, idx + 1)}
-                      className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                      className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                       title="下移"
                     >
                       <ArrowDown className="w-3.5 h-3.5" />
@@ -1282,7 +1288,8 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
 
           {servers.length === 0 ? (
             <div className="p-5 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
-              当前未配置任何 DNS 服务器。请使用上方「快捷工具栏」一键添加国内/海外 DNS 服务器。
+              当前未配置任何 DNS
+              服务器。请使用上方「快捷工具栏」一键添加国内/海外 DNS 服务器。
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -1323,9 +1330,14 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                             tag: srv.tag,
                           };
                           if (
-                            ["udp", "tcp", "tls", "https", "h3", "quic"].includes(
-                              nextType,
-                            )
+                            [
+                              "udp",
+                              "tcp",
+                              "tls",
+                              "https",
+                              "h3",
+                              "quic",
+                            ].includes(nextType)
                           ) {
                             copy.server = srv.server || "1.1.1.1";
                             if (srv.detour) copy.detour = srv.detour;
@@ -1427,7 +1439,7 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                         type="button"
                         disabled={idx === 0}
                         onClick={() => moveServerTo(idx, idx - 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                         title="上移"
                       >
                         <ArrowUp className="w-3.5 h-3.5" />
@@ -1436,7 +1448,7 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                         type="button"
                         disabled={idx === servers.length - 1}
                         onClick={() => moveServerTo(idx, idx + 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                         title="下移"
                       >
                         <ArrowDown className="w-3.5 h-3.5" />
@@ -1714,7 +1726,7 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                         type="button"
                         disabled={idx === 0}
                         onClick={() => moveInboundTo(idx, idx - 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                         title="上移"
                       >
                         <ArrowUp className="w-3.5 h-3.5" />
@@ -1723,7 +1735,7 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                         type="button"
                         disabled={idx === inbounds.length - 1}
                         onClick={() => moveInboundTo(idx, idx + 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                         title="下移"
                       >
                         <ArrowDown className="w-3.5 h-3.5" />
@@ -1763,7 +1775,10 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                       }}
                       options={[
                         { value: "tun", label: "TUN 虚拟网卡 (tun)" },
-                        { value: "mixed", label: "HTTP+SOCKS 混合代理 (mixed)" },
+                        {
+                          value: "mixed",
+                          label: "HTTP+SOCKS 混合代理 (mixed)",
+                        },
                         { value: "http", label: "HTTP 代理 (http)" },
                         { value: "socks", label: "SOCKS5 代理 (socks)" },
                         { value: "redirect", label: "透明重定向 (redirect)" },
@@ -2050,7 +2065,9 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
         const serverLower = (n.server || "").toLowerCase();
         if (
           incKws.length > 0 &&
-          !incKws.some((kw) => tagLower.includes(kw) || serverLower.includes(kw))
+          !incKws.some(
+            (kw) => tagLower.includes(kw) || serverLower.includes(kw),
+          )
         ) {
           return false;
         }
@@ -2318,7 +2335,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
   return (
     <div className="space-y-4">
       {/* PRIMARY SWITCH BAR: One-Switch Import of Node Groups & Nodes */}
-      <div className="p-4 rounded-xl bg-gradient-to-r from-sky-950/50 via-slate-900/90 to-indigo-950/40 border border-sky-500/30 space-y-3 shadow-sm">
+      <div className="p-4 rounded-xl bg-gradient-to-r from-sky-500/10 via-slate-900/90 to-indigo-500/10 border border-sky-500/30 space-y-3 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -2326,7 +2343,10 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
               <span className="text-xs font-bold text-slate-100">
                 一键导入资源库「节点组合」与「节点」开关
               </span>
-              <Badge variant={isAllResourcesImported ? "success" : "neutral"} size="sm">
+              <Badge
+                variant={isAllResourcesImported ? "success" : "neutral"}
+                size="sm"
+              >
                 {isAllResourcesImported
                   ? `已导入 (${importedGroupsCount} 组合 / ${importedNodesCount} 节点)`
                   : "默认空出站 (未开启导入)"}
@@ -2401,9 +2421,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                 if (checked) {
                   addOutbound({ type: "direct", tag: "direct" });
                 } else {
-                  updateOutbounds(
-                    outbounds.filter((o) => o.tag !== "direct"),
-                  );
+                  updateOutbounds(outbounds.filter((o) => o.tag !== "direct"));
                 }
               }}
             />
@@ -2544,7 +2562,8 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
             当前出站列表为空 (<code className="text-sky-300">[]</code>)
           </div>
           <p className="text-[11px] text-slate-500 max-w-xl mx-auto">
-            请打开上方「<span className="text-sky-300">开启导入节点与节点组合</span>
+            请打开上方「
+            <span className="text-sky-300">开启导入节点与节点组合</span>
             」开关，系统将直接把节点组合与节点导入到此处并完整展示出来供查看与调整。
           </p>
         </div>
@@ -2556,7 +2575,8 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
               <div className="flex items-center gap-2">
                 <Shield className="w-3.5 h-3.5 text-sky-400" />
                 <span className="text-xs font-bold text-slate-200">
-                  已导入节点组合 / 策略组与基础出站 (selector / urltest / direct)
+                  已导入节点组合 / 策略组与基础出站 (selector / urltest /
+                  direct)
                 </span>
                 <Badge variant="info" size="sm">
                   {strategyAndBasicOutbounds.length} 项
@@ -2617,7 +2637,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             type="button"
                             disabled={idx === 0}
                             onClick={() => moveOutboundTo(idx, 0)}
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="置顶"
                           >
                             <ChevronsUp className="w-3.5 h-3.5" />
@@ -2626,7 +2646,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             type="button"
                             disabled={idx === 0}
                             onClick={() => moveOutboundTo(idx, idx - 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="上移"
                           >
                             <ArrowUp className="w-3.5 h-3.5" />
@@ -2635,7 +2655,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             type="button"
                             disabled={idx === outbounds.length - 1}
                             onClick={() => moveOutboundTo(idx, idx + 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="下移"
                           >
                             <ArrowDown className="w-3.5 h-3.5" />
@@ -2646,7 +2666,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             onClick={() =>
                               moveOutboundTo(idx, outbounds.length - 1)
                             }
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="置底"
                           >
                             <ChevronsDown className="w-3.5 h-3.5" />
@@ -2869,7 +2889,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             type="button"
                             disabled={idx === 0}
                             onClick={() => moveOutboundTo(idx, 0)}
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="置顶"
                           >
                             <ChevronsUp className="w-3.5 h-3.5" />
@@ -2878,7 +2898,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             type="button"
                             disabled={idx === 0}
                             onClick={() => moveOutboundTo(idx, idx - 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="上移"
                           >
                             <ArrowUp className="w-3.5 h-3.5" />
@@ -2887,7 +2907,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             type="button"
                             disabled={idx === outbounds.length - 1}
                             onClick={() => moveOutboundTo(idx, idx + 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="下移"
                           >
                             <ArrowDown className="w-3.5 h-3.5" />
@@ -2898,7 +2918,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                             onClick={() =>
                               moveOutboundTo(idx, outbounds.length - 1)
                             }
-                            className="p-1.5 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
                             title="置底"
                           >
                             <ChevronsDown className="w-3.5 h-3.5" />
@@ -3112,9 +3132,7 @@ export const BasicDirectTabPanel: React.FC<BasicDirectTabPanelProps> = ({
           <Input
             label="日志文件路径 (log.output)"
             value={log.output || ""}
-            onChange={(e) =>
-              updateLog({ output: e.target.value || undefined })
-            }
+            onChange={(e) => updateLog({ output: e.target.value || undefined })}
             placeholder="留空输出到控制台"
           />
         </div>

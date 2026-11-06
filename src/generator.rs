@@ -106,6 +106,10 @@ pub fn sanitize_dns_value(dns: &mut Value) {
         {
             obj.insert("strategy".to_string(), json!("prefer_ipv4"));
         }
+        let is_ipv4_only = obj
+            .get("strategy")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s == "ipv4_only");
         if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for server in servers {
                 if let Some(srv_obj) = server.as_object_mut() {
@@ -117,7 +121,7 @@ pub fn sanitize_dns_value(dns: &mut Value) {
                         if !srv_obj.contains_key("inet4_range") {
                             srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
                         }
-                        if !srv_obj.contains_key("inet6_range") {
+                        if !is_ipv4_only && !srv_obj.contains_key("inet6_range") {
                             srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
                         }
                     }
@@ -299,6 +303,18 @@ pub fn sanitize_runtime_config(config: &mut Value) {
     }
     if let Some(http_clients) = root.get_mut("http_clients") {
         sanitize_http_clients_value(http_clients);
+    }
+
+    // sing-box 1.14 废弃了 experimental.cache_file.store_rdrc，改用 store_dns
+    if let Some(cache_file) = root
+        .get_mut("experimental")
+        .and_then(|e| e.get_mut("cache_file"))
+        .and_then(|c| c.as_object_mut())
+        && let Some(rdrc_val) = cache_file.remove("store_rdrc")
+        && rdrc_val.as_bool() == Some(true)
+        && !cache_file.contains_key("store_dns")
+    {
+        cache_file.insert("store_dns".to_string(), json!(true));
     }
 
     // sing-box 1.14 将 "missing route.default_domain_resolver" 从废弃警告升级为启动错误。
