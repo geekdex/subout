@@ -446,6 +446,14 @@ export const api = {
       body: JSON.stringify({ config: cfg, apply }),
     });
   },
+  async previewSimpleConfig(
+    cfg?: SimpleConfig,
+  ): Promise<Record<string, unknown>> {
+    return request<Record<string, unknown>>("/api/simple-config/preview", {
+      method: "POST",
+      body: cfg ? JSON.stringify(cfg) : "{}",
+    });
+  },
 
   // Node Groups
   async listNodeGroups(): Promise<NodeGroupsListResponse> {

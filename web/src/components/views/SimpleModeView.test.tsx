@@ -26,6 +26,12 @@ vi.mock("../../api/client", () => ({
       },
     }),
     saveSimpleConfig: vi.fn().mockResolvedValue({ success: true }),
+    previewSimpleConfig: vi.fn().mockResolvedValue({
+      log: { level: "info" },
+      inbounds: [{ type: "tun", interface_name: "tun0" }],
+      outbounds: [{ type: "urltest", tag: "AUTO-Test" }],
+      route: { rules: [] },
+    }),
   },
 }));
 
@@ -91,5 +97,28 @@ describe("SimpleModeView Component", () => {
     const autoRouteSwitch = switches.find((s) => s.getAttribute("disabled") !== null);
     expect(autoRouteSwitch).toBeDefined();
     expect(autoRouteSwitch?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("renders preview config button, opens modal dialog and displays formatted JSON configuration", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    render(
+      <ToastProvider>
+        <SimpleModeView nodes={[]} />
+      </ToastProvider>,
+    );
+
+    const previewBtn = await screen.findByRole("button", { name: "预览配置" });
+    expect(previewBtn).toBeDefined();
+
+    fireEvent.click(previewBtn);
+
+    expect(await screen.findByText("sing-box JSON 配置预览")).toBeDefined();
+    const previewEl = screen.getByTestId("simple-mode-json-preview");
+    expect(previewEl).toBeDefined();
+    expect(previewEl.textContent).toContain('"type": "tun"');
+    expect(previewEl.textContent).toContain('"tag": "AUTO-Test"');
+
+    const closeBtn = screen.getByRole("button", { name: "关闭" });
+    fireEvent.click(closeBtn);
   });
 });

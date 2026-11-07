@@ -196,6 +196,16 @@ pub struct ServiceStatusInfo {
     pub system_proxy_supported: bool,
     #[serde(default)]
     pub system_proxy_unsupported_reason: Option<String>,
+    #[serde(default)]
+    pub cpu_usage: f64,
+    #[serde(default)]
+    pub memory_bytes: u64,
+    #[serde(default)]
+    pub tun_interface: Option<String>,
+    #[serde(default)]
+    pub active_mode: Option<String>,
+    #[serde(default)]
+    pub running_config_id: Option<i64>,
 }
 
 pub struct SingBoxServiceManager {
@@ -633,6 +643,53 @@ impl SingBoxServiceManager {
         let system_proxy_supported = platform.is_system_proxy_supported();
         let system_proxy_unsupported_reason = platform.system_proxy_unsupported_reason();
 
+        let (cpu_usage, memory_bytes) = if is_run && let Some(p) = pid {
+            platform.get_process_resource_usage(p)
+        } else {
+            (0.0, 0)
+        };
+
+        let tun_interface = if is_tun {
+            config_json
+                .as_ref()
+                .and_then(|c| {
+                    c.get("inbounds")
+                        .and_then(|i| i.as_array())
+                        .and_then(|arr| {
+                            arr.iter()
+                                .find(|inb| inb.get("type").and_then(|t| t.as_str()) == Some("tun"))
+                        })
+                        .and_then(|tun| tun.get("interface_name"))
+                        .and_then(|n| n.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(ToString::to_string)
+                })
+                .or_else(|| {
+                    let name = platform.default_tun_interface_name();
+                    if name.is_empty() {
+                        None
+                    } else {
+                        Some(name.to_string())
+                    }
+                })
+        } else {
+            None
+        };
+
+        let (active_mode, running_config_id) = if let Some(ref path) = db_path_opt
+            && let Ok(conn) = rusqlite::Connection::open(path)
+        {
+            let mode = crate::db::get_setting(&conn, "app_mode")
+                .unwrap_or(None)
+                .unwrap_or_else(|| "simple".to_string());
+            let rc_id = crate::db::get_setting(&conn, "running_config_id")
+                .unwrap_or(None)
+                .and_then(|s| s.parse::<i64>().ok());
+            (Some(mode), rc_id)
+        } else {
+            (Some("simple".to_string()), None)
+        };
+
         ServiceStatusInfo {
             running: is_run,
             ready: is_ready,
@@ -653,6 +710,11 @@ impl SingBoxServiceManager {
             mixed_port,
             system_proxy_supported,
             system_proxy_unsupported_reason,
+            cpu_usage,
+            memory_bytes,
+            tun_interface,
+            active_mode,
+            running_config_id,
         }
     }
 
@@ -2007,9 +2069,18 @@ mod tests {
             mixed_port: Some(2080),
             system_proxy_supported: true,
             system_proxy_unsupported_reason: None,
+            cpu_usage: 1.5,
+            memory_bytes: 31_457_280,
+            tun_interface: Some("tun0".to_string()),
+            active_mode: Some("simple".to_string()),
+            running_config_id: None,
         };
 
         let json_val = serde_json::to_value(&status).unwrap();
+        assert_eq!(json_val["cpu_usage"], 1.5);
+        assert_eq!(json_val["memory_bytes"], 31_457_280);
+        assert_eq!(json_val["tun_interface"], "tun0");
+        assert_eq!(json_val["active_mode"], "simple");
         assert_eq!(json_val["conflicting_processes"][0]["pid"], 12345);
         assert_eq!(json_val["conflicting_processes"][0]["name"], "sing-box");
         assert_eq!(json_val["inbounds_summary"], "127.0.0.1:2080 (混合代理)");

@@ -682,6 +682,24 @@ impl PlatformStrategy for MacOsPlatform {
         })
     }
 
+    fn get_process_resource_usage(&self, pid: u32) -> (f64, u64) {
+        if pid == 0 {
+            return (0.0, 0);
+        }
+        #[cfg(unix)]
+        {
+            if let Ok(output) = std::process::Command::new("ps")
+                .args(["-eo", "pid,ppid,%cpu,rss"])
+                .output()
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return crate::platform::parse_ps_resource_output(&stdout, pid);
+            }
+        }
+        (0.0, 0)
+    }
+
     fn enable_system_proxy(&self, port: u16, sudo_pass: Option<&str>) {
         let services = get_macos_network_services();
         let port_str = port.to_string();

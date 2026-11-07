@@ -73,6 +73,57 @@ pub fn get_config_path_variants(running_config_path: &Path) -> Vec<String> {
     vars
 }
 
+/// Parse `ps -eo pid,ppid,%cpu,rss` output and calculate total CPU % and memory in bytes
+/// for `target_pid` and all its descendant processes (e.g., sudo -> sing-box tree).
+pub fn parse_ps_resource_output(stdout: &str, target_pid: u32) -> (f64, u64) {
+    if target_pid == 0 {
+        return (0.0, 0);
+    }
+    let mut procs = std::collections::HashMap::new();
+    let mut children_map: std::collections::HashMap<u32, Vec<u32>> =
+        std::collections::HashMap::new();
+
+    for line in stdout.lines().skip(1) {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 4
+            && let (Ok(pid), Ok(ppid)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+        {
+            let cpu = parts[2]
+                .replace(',', ".")
+                .parse::<f64>()
+                .unwrap_or(0.0)
+                .max(0.0);
+            let rss_kb = parts[3].parse::<u64>().unwrap_or(0);
+            procs.insert(pid, (cpu, rss_kb));
+            children_map.entry(ppid).or_default().push(pid);
+        }
+    }
+
+    if !procs.contains_key(&target_pid) {
+        return (0.0, 0);
+    }
+
+    let mut total_cpu = 0.0;
+    let mut total_rss_kb = 0u64;
+    let mut visited = std::collections::HashSet::new();
+    let mut queue = vec![target_pid];
+
+    while let Some(current) = queue.pop() {
+        if visited.insert(current) {
+            if let Some(&(cpu, rss)) = procs.get(&current) {
+                total_cpu += cpu;
+                total_rss_kb = total_rss_kb.saturating_add(rss);
+            }
+            if let Some(kids) = children_map.get(&current) {
+                queue.extend(kids);
+            }
+        }
+    }
+
+    (total_cpu, total_rss_kb.saturating_mul(1024))
+}
+
 /// Strategy pattern interface for platform-specific capabilities.
 ///
 /// Encapsulates all OS-dependent operations (privilege escalation, process lifecycle,
@@ -137,6 +188,8 @@ pub trait PlatformStrategy: Send + Sync {
         &self,
         managed_pid: Option<u32>,
     ) -> BoxFuture<'_, Result<TakeoverDiagnoseResult>>;
+    /// Collect CPU utilization percentage (0.0 - 100.0+) and resident memory in bytes for the given PID and any of its child processes.
+    fn get_process_resource_usage(&self, pid: u32) -> (f64, u64);
 
     // ------------------------------------------------------------------------
     // 4. System Proxy & DNS Integration
@@ -349,5 +402,30 @@ mod tests {
         } else if os == "windows" {
             assert!(platform.is_windows());
         }
+    }
+
+    #[test]
+    fn test_parse_ps_resource_output() {
+        let sample_ps = "  PID  PPID %CPU   RSS\n    1     0  0.0 15000\n  100     1  0.2  2048\n  101   100  1.5 30720\n  200     1  0.5  4096\n";
+
+        // Non-existent target
+        assert_eq!(parse_ps_resource_output(sample_ps, 999), (0.0, 0));
+        assert_eq!(parse_ps_resource_output(sample_ps, 0), (0.0, 0));
+
+        // Leaf process
+        let (cpu_leaf, mem_leaf) = parse_ps_resource_output(sample_ps, 101);
+        assert!((cpu_leaf - 1.5).abs() < 0.001);
+        assert_eq!(mem_leaf, 30720 * 1024);
+
+        // Process with child (PID 100 has child 101) -> sums both
+        let (cpu_tree, mem_tree) = parse_ps_resource_output(sample_ps, 100);
+        assert!((cpu_tree - 1.7).abs() < 0.001);
+        assert_eq!(mem_tree, (2048 + 30720) * 1024);
+
+        // Comma decimal handling
+        let sample_comma = "  PID  PPID %CPU   RSS\n  300     1  2,8  5120\n";
+        let (cpu_comma, mem_comma) = parse_ps_resource_output(sample_comma, 300);
+        assert!((cpu_comma - 2.8).abs() < 0.001);
+        assert_eq!(mem_comma, 5120 * 1024);
     }
 }

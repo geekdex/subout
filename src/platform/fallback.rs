@@ -80,6 +80,10 @@ impl PlatformStrategy for FallbackPlatform {
         Box::pin(async move { Ok(crate::platform::TakeoverDiagnoseResult::no_conflict()) })
     }
 
+    fn get_process_resource_usage(&self, _pid: u32) -> (f64, u64) {
+        (0.0, 0)
+    }
+
     fn is_system_proxy_supported(&self) -> bool {
         false
     }

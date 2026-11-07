@@ -16,12 +16,15 @@ import {
   Layers,
   Network,
   Info,
+  FileCode,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { Badge } from "../ui/Badge";
 import { Input } from "../ui/Input";
+import { Dialog } from "../ui/Dialog";
+import { CopyButton } from "../ui/CopyButton";
 import { SimpleConfig, NodeItem, SystemInfo } from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
@@ -139,6 +142,33 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
       error("保存配置失败", getErrorMessage(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewJson, setPreviewJson] = useState<string>("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const handlePreviewJson = async () => {
+    if (!config) return;
+    setPreviewLoading(true);
+    try {
+      const payloadConfig: SimpleConfig = {
+        ...config,
+        inbound: {
+          ...config.inbound,
+          tun_auto_route: isLinux
+            ? (config.inbound?.tun_auto_route ?? true)
+            : false,
+        },
+      };
+      const generated = await api.previewSimpleConfig(payloadConfig);
+      setPreviewJson(JSON.stringify(generated, null, 2));
+      setPreviewModalOpen(true);
+    } catch (err: unknown) {
+      error("获取配置预览失败", getErrorMessage(err));
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -269,6 +299,16 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
+          <Button
+            variant="outline"
+            size="md"
+            loading={previewLoading}
+            onClick={handlePreviewJson}
+            icon={<FileCode className="w-4 h-4" />}
+            className="flex-1 sm:flex-initial"
+          >
+            预览配置
+          </Button>
           <Button
             variant="secondary"
             size="md"
@@ -1150,6 +1190,49 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* JSON Preview Dialog */}
+      <Dialog
+        open={previewModalOpen}
+        onClose={() => setPreviewModalOpen(false)}
+        title={
+          <div className="flex items-center gap-2.5">
+            <FileCode className="w-5 h-5 text-sky-400" />
+            <span>sing-box JSON 配置预览</span>
+          </div>
+        }
+        description="基于当前小白模式策略与节点池实时生成的完整合规 sing-box 配置文件"
+        size="3xl"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <div className="text-xs text-slate-400 flex items-center gap-2">
+              <Badge variant="info" size="sm">
+                {modes.find((m) => m.id === currentMode)?.title || "小白模式"}
+              </Badge>
+              <span>{isDirectAll ? "全部直连模式" : `出口: ${currentOutbound}`}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CopyButton text={previewJson} />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setPreviewModalOpen(false)}
+              >
+                关闭
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="relative">
+          <pre
+            data-testid="simple-mode-json-preview"
+            className="p-4 bg-slate-950/80 rounded-lg text-xs font-mono text-slate-200 overflow-auto max-h-[60vh] border border-slate-800/80 select-text leading-relaxed scrollbar-thin"
+          >
+            <code>{previewJson}</code>
+          </pre>
+        </div>
+      </Dialog>
     </div>
   );
 };

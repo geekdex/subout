@@ -782,6 +782,42 @@ impl PlatformStrategy for LinuxPlatform {
         })
     }
 
+    fn get_process_resource_usage(&self, pid: u32) -> (f64, u64) {
+        if pid == 0 {
+            return (0.0, 0);
+        }
+        #[cfg(unix)]
+        {
+            if let Ok(output) = std::process::Command::new("ps")
+                .args(["-eo", "pid,ppid,%cpu,rss"])
+                .output()
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let (cpu, mem) = crate::platform::parse_ps_resource_output(&stdout, pid);
+                if mem > 0 || cpu > 0.0 {
+                    return (cpu, mem);
+                }
+            }
+
+            // Fallback: read /proc/<pid>/status for VmRSS
+            let status_path = format!("/proc/{pid}/status");
+            if let Ok(content) = std::fs::read_to_string(status_path) {
+                for line in content.lines() {
+                    if let Some(rest) = line.strip_prefix("VmRSS:") {
+                        let parts: Vec<&str> = rest.split_whitespace().collect();
+                        if let Some(kb_str) = parts.first()
+                            && let Ok(kb) = kb_str.parse::<u64>()
+                        {
+                            return (0.0, kb.saturating_mul(1024));
+                        }
+                    }
+                }
+            }
+        }
+        (0.0, 0)
+    }
+
     fn is_system_proxy_supported(&self) -> bool {
         #[cfg(unix)]
         {

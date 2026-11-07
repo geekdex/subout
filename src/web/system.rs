@@ -425,13 +425,12 @@ pub async fn probe_site_connectivity(
     }
 
     let timeout_duration =
-        std::time::Duration::from_millis(payload.timeout_ms.unwrap_or(4000).clamp(500, 10000));
+        std::time::Duration::from_millis(payload.timeout_ms.unwrap_or(5000).clamp(1000, 10000));
+    let direct_timeout = std::time::Duration::from_millis(1500);
     let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     let service_status = state.service_manager.get_status().await;
-    let is_running = service_status.running;
     let mixed_port = service_status.mixed_port.unwrap_or(2080);
-    let is_tun = service_status.is_tun;
 
     // Detect if the local mixed port is actually listening
     let is_local_mixed_port_open = std::net::TcpStream::connect_timeout(
@@ -441,22 +440,12 @@ pub async fn probe_site_connectivity(
     .is_ok();
 
     // 1. Direct / system routing attempt
-    // If local proxy port is NOT open, bypass any stale env proxy (e.g. all_proxy=127.0.0.1:2080 in shell env)
-    // so that direct connectivity (like baidu) doesn't fail due to dead proxy.
-    let try_direct_client = if is_local_mixed_port_open {
-        reqwest::Client::builder()
-            .user_agent(user_agent)
-            .redirect(reqwest::redirect::Policy::limited(10))
-            .timeout(timeout_duration)
-            .build()
-    } else {
-        reqwest::Client::builder()
-            .no_proxy()
-            .user_agent(user_agent)
-            .redirect(reqwest::redirect::Policy::limited(10))
-            .timeout(timeout_duration)
-            .build()
-    };
+    let try_direct_client = reqwest::Client::builder()
+        .no_proxy()
+        .user_agent(user_agent)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .timeout(direct_timeout)
+        .build();
 
     let start = std::time::Instant::now();
     let mut last_err = None;
@@ -480,12 +469,13 @@ pub async fn probe_site_connectivity(
         }
     }
 
-    // 2. If direct attempt failed and sing-box is running in mixed mode (mixed port is open),
+    // 2. If direct attempt failed and local mixed proxy is open,
     // probe via the active local mixed proxy
-    if is_running && !is_tun && is_local_mixed_port_open {
+    if is_local_mixed_port_open {
         let proxy_url = format!("http://127.0.0.1:{mixed_port}");
         if let Ok(proxy) = reqwest::Proxy::all(&proxy_url)
             && let Ok(client) = reqwest::Client::builder()
+                .no_proxy()
                 .proxy(proxy)
                 .user_agent(user_agent)
                 .redirect(reqwest::redirect::Policy::limited(10))
@@ -555,5 +545,17 @@ mod tests {
         let resp_json = serde_json::to_value(&resp).unwrap();
         assert_eq!(resp_json["latency_ms"], 25);
         assert_eq!(resp_json["success"], true);
+    }
+
+    #[test]
+    fn test_probe_client_builder() {
+        let proxy_url = "http://127.0.0.1:2080";
+        let proxy = reqwest::Proxy::all(proxy_url).unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .proxy(proxy)
+            .timeout(std::time::Duration::from_millis(5000))
+            .build();
+        assert!(client.is_ok());
     }
 }

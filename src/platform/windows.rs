@@ -333,6 +333,40 @@ impl PlatformStrategy for WindowsPlatform {
         })
     }
 
+    fn get_process_resource_usage(&self, pid: u32) -> (f64, u64) {
+        if pid == 0 {
+            return (0.0, 0);
+        }
+        if let Ok(output) = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "Get-CimInstance Win32_Process -Filter \"ProcessId = {pid} or ParentProcessId = {pid}\" | Select-Object ProcessId, WorkingSetSize | ConvertTo-Json -Compress"
+                ),
+            ])
+            .output()
+            && output.status.success()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                let mut total_mem = 0u64;
+                if let Some(arr) = val.as_array() {
+                    for item in arr {
+                        if let Some(ws) = item.get("WorkingSetSize").and_then(serde_json::Value::as_u64) {
+                            total_mem = total_mem.saturating_add(ws);
+                        }
+                    }
+                } else if let Some(ws) = val.get("WorkingSetSize").and_then(serde_json::Value::as_u64) {
+                    total_mem = ws;
+                }
+                return (0.0, total_mem);
+            }
+        }
+        (0.0, 0)
+    }
+
     fn enable_system_proxy(&self, port: u16, _sudo_pass: Option<&str>) {
         let proxy_addr = format!("127.0.0.1:{port}");
         let override_hosts = "<local>;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*";

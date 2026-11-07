@@ -145,18 +145,30 @@ pub async fn save_simple_config(
 pub async fn preview_simple_config(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(mut payload): Json<SimpleConfig>,
+    payload: Option<Json<Value>>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
+    let mut cfg = if let Some(Json(val)) = payload {
+        if let Ok(wrapped) = serde_json::from_value::<SaveSimpleConfigRequest>(val.clone()) {
+            wrapped.config
+        } else if let Ok(direct) = serde_json::from_value::<SimpleConfig>(val) {
+            direct
+        } else {
+            simple_config::get_saved_simple_config(&conn)
+        }
+    } else {
+        simple_config::get_saved_simple_config(&conn)
+    };
+
     if !crate::platform::current_platform().is_linux() {
-        payload.inbound.tun_auto_route = false;
+        cfg.inbound.tun_auto_route = false;
     }
 
-    let generated = simple_config::generate_simple_singbox_config(&conn, &payload)
+    let generated = simple_config::generate_simple_singbox_config(&conn, &cfg)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成预览失败: {e}")))?;
 
     Ok(Json(generated))
