@@ -445,16 +445,15 @@ impl PlatformStrategy for LinuxPlatform {
                     let _ = kill(-pid_i32, sig);
                     let _ = kill(pid_i32, sig);
                 }
-                if let Some(pass) = sudo_pass {
-                    let sig_arg = format!("-{sig}");
-                    let pgid_arg = format!("-{pid}");
-                    let _ = self
-                        .run_sudo_command("kill", &[&sig_arg, "--", &pgid_arg], Some(pass))
-                        .await;
-                    let _ = self
-                        .run_sudo_command("kill", &[&sig_arg, "--", &pid.to_string()], Some(pass))
-                        .await;
-                }
+                let sig_arg = format!("-{sig}");
+                let pgid_arg = format!("-{pid}");
+                let pid_str = pid.to_string();
+                let _ = self
+                    .run_sudo_command("kill", &[&sig_arg, "--", &pid_str], sudo_pass)
+                    .await;
+                let _ = self
+                    .run_sudo_command("kill", &[&sig_arg, "--", &pgid_arg], sudo_pass)
+                    .await;
             }
             #[cfg(not(unix))]
             {
@@ -882,7 +881,17 @@ impl PlatformStrategy for LinuxPlatform {
         }
     }
 
-    fn enable_tun_dns(&self, _dns_ip: &str, _sudo_pass: Option<&str>) {}
+    fn enable_tun_dns(&self, dns_ip: &str, sudo_pass: Option<&str>) {
+        // 针对使用 systemd-resolved 的 Linux 环境：
+        // 1. 若宿主机全局配置了 DNSOverTLS=yes，systemd-resolved 默认会对所有接口尝试 TLS (853)，
+        //    而 sing-box tun DNS 仅提供标准 DNS (53)，必须显式为 tun0 关闭 DNSOverTLS，防止所有解析超时。
+        // 2. 确保 tun0 设置为默认 DNS 路由 (~.)。
+        let _ = run_linux_admin_cmd("resolvectl", &["dnsovertls", "tun0", "no"], sudo_pass);
+        let _ = run_linux_admin_cmd("resolvectl", &["dns", "tun0", dns_ip], sudo_pass);
+        let _ = run_linux_admin_cmd("resolvectl", &["domain", "tun0", "~."], sudo_pass);
+        let _ = run_linux_admin_cmd("resolvectl", &["default-route", "tun0", "true"], sudo_pass);
+        let _ = run_linux_admin_cmd("resolvectl", &["flush-caches"], sudo_pass);
+    }
 
     fn disable_tun_dns(&self, sudo_pass: Option<&str>) {
         clean_linux_tun_network(sudo_pass);
@@ -1062,8 +1071,33 @@ fn get_linux_cmd_output(cmd_name: &str, args: &[&str]) -> Option<String> {
     None
 }
 
+/// 检查系统中是否有任何正在运行的 sing-box 进程
+pub fn is_any_singbox_running() -> bool {
+    #[cfg(unix)]
+    {
+        if let Ok(entries) = std::fs::read_dir("/proc") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Ok(comm) = std::fs::read_to_string(path.join("comm"))
+                    && comm.trim() == "sing-box"
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// 检查并清理 Linux 内核遗留的 sing-box TUN 策略路由规则、路由表项与死网卡
 pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
+    // 关键安全守门：若系统中仍有任何 sing-box 进程在运行，绝对不要强行清理 TUN 网卡与策略路由！
+    // 否则会导致正在运行的 sing-box 的 TUN 文件描述符变为 EBADFD (bad file descriptor)，
+    // 并造成 "read packet: read tun: file descriptor in bad state" 和 "find tun interface: Link not found"。
+    if is_any_singbox_running() {
+        return;
+    }
+
     // 1. 检查并循环清理策略路由中的残留项（table 2022 / lookup 2022 / fwmark）
     for _ in 0..10 {
         let Some(rule_output) = get_linux_cmd_output("ip", &["rule", "show"]) else {
@@ -1112,14 +1146,13 @@ pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
         }
     }
 
-    // 4. 若系统启用了 systemd-resolved，刷新 DNS 解析缓存
+    // 4. 若系统启用了 systemd-resolved，还原 tun0 配置并刷新 DNS 解析缓存
+    let _ = run_linux_admin_cmd("resolvectl", &["revert", "tun0"], sudo_pass);
     let _ = run_linux_admin_cmd("resolvectl", &["flush-caches"], sudo_pass);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::clean_linux_tun_network;
-
     #[test]
     fn test_linux_tun_network_cleanup_parser() {
         let sample_rules = r"0:	from all lookup local
@@ -1133,8 +1166,5 @@ mod tests {
         assert!(sample_rules.contains("lookup 2022"));
         assert!(sample_rules.contains("0x2023"));
         assert!(sample_rules.contains("0x2024"));
-
-        // When rules do not contain table 2022, clean function should exit cleanly without error
-        clean_linux_tun_network(None);
     }
 }

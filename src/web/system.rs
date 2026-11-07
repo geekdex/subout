@@ -426,7 +426,7 @@ pub async fn probe_site_connectivity(
 
     let timeout_duration =
         std::time::Duration::from_millis(payload.timeout_ms.unwrap_or(5000).clamp(1000, 10000));
-    let direct_timeout = std::time::Duration::from_millis(1500);
+    let direct_timeout = std::time::Duration::from_millis(2500);
     let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     let service_status = state.service_manager.get_status().await;

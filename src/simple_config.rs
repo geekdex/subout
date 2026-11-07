@@ -455,6 +455,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
             "type": "tun",
             "tag": "tun-in",
             "address": ["172.19.0.1/30"],
+            "mtu": 1500,
             "auto_route": effective_auto_route,
             "strict_route": strict_route,
             "stack": effective_stack

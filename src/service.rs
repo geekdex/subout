@@ -1410,12 +1410,12 @@ impl SingBoxServiceManager {
             *self.system_proxy_active.write().await = false;
         }
         if tun_mode {
-            let tun_ip =
-                get_tun_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.1".to_string());
-            platform.enable_tun_dns(&tun_ip, cached_pass.as_deref());
+            let tun_dns_ip =
+                get_tun_dns_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.2".to_string());
+            platform.enable_tun_dns(&tun_dns_ip, cached_pass.as_deref());
             if platform.is_macos() {
                 self.append_log(&format!(
-                    "🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({tun_ip})"
+                    "🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({tun_dns_ip})"
                 ))
                 .await;
             }
@@ -1789,12 +1789,13 @@ pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
     None
 }
 
-pub fn get_tun_ip_from_config(config: &Value) -> Option<String> {
+pub fn get_tun_dns_ip_from_config(config: &Value) -> Option<String> {
     if let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) {
         for inbound in inbounds {
             if inbound.get("type").and_then(|t| t.as_str()) == Some("tun") {
-                if let Some(addrs) = inbound.get("address").and_then(|a| a.as_array()) {
-                    for addr in addrs {
+                // 1. Explicit dns_address takes highest priority
+                if let Some(dns_addrs) = inbound.get("dns_address").and_then(|a| a.as_array()) {
+                    for addr in dns_addrs {
                         if let Some(s) = addr.as_str()
                             && !s.contains(':')
                         {
@@ -1803,11 +1804,32 @@ pub fn get_tun_ip_from_config(config: &Value) -> Option<String> {
                         }
                     }
                 }
-                return Some("172.19.0.1".to_string());
+                // 2. According to sing-box tun inbound specification:
+                // When dns_address is unset, the next address after the first IPv4 entry in address is used
+                if let Some(addrs) = inbound.get("address").and_then(|a| a.as_array()) {
+                    for addr in addrs {
+                        if let Some(s) = addr.as_str()
+                            && !s.contains(':')
+                        {
+                            let ip_str = s.split('/').next().unwrap_or(s);
+                            if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
+                                let next_ip =
+                                    std::net::Ipv4Addr::from(u32::from(ip).saturating_add(1));
+                                return Some(next_ip.to_string());
+                            }
+                            return Some(ip_str.to_string());
+                        }
+                    }
+                }
+                return Some("172.19.0.2".to_string());
             }
         }
     }
     None
+}
+
+pub fn get_tun_ip_from_config(config: &Value) -> Option<String> {
+    get_tun_dns_ip_from_config(config)
 }
 
 pub fn strip_ansi_codes(input: &str) -> String {
@@ -1852,6 +1874,7 @@ pub fn is_actual_singbox_error(line: &str) -> bool {
         || upper.contains("EXCHANGE FAILED")
         || upper.contains("ROUTER: MATCH")
         || upper.contains("OUTBOUND/")
+        || upper.contains("DID NOT CLOSED PROPERLY")
     {
         return false;
     }
@@ -2519,5 +2542,62 @@ mod tests {
         assert_eq!(port, Some(2080));
 
         let _ = std::fs::remove_file(&db_file);
+    }
+
+    #[test]
+    fn test_get_tun_dns_ip_from_config() {
+        // 1. Explicit dns_address
+        let explicit_dns = serde_json::json!({
+            "inbounds": [
+                {
+                    "type": "tun",
+                    "address": ["172.19.0.1/30"],
+                    "dns_address": ["172.19.0.2"]
+                }
+            ]
+        });
+        assert_eq!(
+            get_tun_dns_ip_from_config(&explicit_dns),
+            Some("172.19.0.2".to_string())
+        );
+
+        // 2. Computed next IP from address
+        let computed_dns = serde_json::json!({
+            "inbounds": [
+                {
+                    "type": "tun",
+                    "address": ["172.19.0.1/30"]
+                }
+            ]
+        });
+        assert_eq!(
+            get_tun_dns_ip_from_config(&computed_dns),
+            Some("172.19.0.2".to_string())
+        );
+
+        // 3. Custom subnet address
+        let custom_subnet = serde_json::json!({
+            "inbounds": [
+                {
+                    "type": "tun",
+                    "address": ["10.0.0.1/24"]
+                }
+            ]
+        });
+        assert_eq!(
+            get_tun_dns_ip_from_config(&custom_subnet),
+            Some("10.0.0.2".to_string())
+        );
+
+        // 4. Inbound without tun
+        let mixed_only = serde_json::json!({
+            "inbounds": [
+                {
+                    "type": "mixed",
+                    "listen_port": 2080
+                }
+            ]
+        });
+        assert_eq!(get_tun_dns_ip_from_config(&mixed_only), None);
     }
 }
