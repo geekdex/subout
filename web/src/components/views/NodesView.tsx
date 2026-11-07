@@ -17,6 +17,7 @@ import {
   ChevronsRight,
   FileCode,
   Info,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -39,12 +40,16 @@ interface NodesViewProps {
   nodes?: NodeItem[];
   subscriptions?: Subscription[];
   onRefresh: () => void;
+  serviceRunning?: boolean;
+  onStopService?: () => Promise<void>;
 }
 
 export const NodesView: React.FC<NodesViewProps> = ({
   nodes = [],
   subscriptions = [],
   onRefresh,
+  serviceRunning = false,
+  onStopService,
 }) => {
   // Local nodes state allowing instant one-by-one rendering during speed tests
   const [localNodes, setLocalNodes] = useState<NodeItem[]>(nodes);
@@ -238,6 +243,13 @@ export const NodesView: React.FC<NodesViewProps> = ({
 
   // Single node speed test
   const handleTestLatency = async (node: NodeItem) => {
+    if (serviceRunning) {
+      error(
+        "无法测速",
+        "sing-box 代理服务正在运行中，请先关闭代理服务后再进行节点测速。",
+      );
+      return;
+    }
     setTestingId(node.id);
     setTestingNodeMap((prev) => ({ ...prev, [node.id]: "testing" }));
     try {
@@ -307,6 +319,13 @@ export const NodesView: React.FC<NodesViewProps> = ({
   // Batch speed test using real-time streaming: tests and renders node by node
   const runBatchTest = async (targetIds: number[], label: string) => {
     if (targetIds.length === 0) return;
+    if (serviceRunning) {
+      error(
+        "无法测速",
+        "sing-box 代理服务正在运行中，请先关闭代理服务后再进行节点测速。",
+      );
+      return;
+    }
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -424,7 +443,10 @@ export const NodesView: React.FC<NodesViewProps> = ({
     (n) => n.last_web_latency !== null || n.last_tcp_latency !== null,
   ).length;
   const availableCount = safeNodes.filter((n) => {
-    const lat = n.last_web_latency ?? n.last_tcp_latency;
+    if (n.last_web_latency !== null && n.last_web_latency !== undefined) {
+      return n.last_web_latency > 0;
+    }
+    const lat = n.last_tcp_latency ?? n.latency_ms;
     return lat !== null && lat !== undefined && lat > 0;
   }).length;
 
@@ -644,10 +666,14 @@ export const NodesView: React.FC<NodesViewProps> = ({
               variant="ghost"
               size="sm"
               loading={isTestingThis}
-              disabled={testingBatchActive}
+              disabled={testingBatchActive || serviceRunning}
               onClick={() => handleTestLatency(node)}
               icon={<Zap className="w-3.5 h-3.5" />}
-              title={`使用当前测试点 [${currentEndpoint.name}] 测速`}
+              title={
+                serviceRunning
+                  ? "sing-box 正在运行，请先停止服务后再测速"
+                  : `使用当前测试点 [${currentEndpoint.name}] 测速`
+              }
             >
               测速
             </Button>
@@ -677,6 +703,33 @@ export const NodesView: React.FC<NodesViewProps> = ({
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6">
+      {/* sing-box is running alert banner */}
+      {serviceRunning && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <div className="text-sm font-semibold text-amber-300">
+                sing-box 代理服务正在运行中
+              </div>
+              <div className="text-xs text-amber-400/80 mt-0.5">
+                为保证测速数据真实性并避免网络流量环路，在开启 sing-box 时已禁用节点测速。请先关闭代理服务后再进行测速。
+              </div>
+            </div>
+          </div>
+          {onStopService && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onStopService}
+              className="shrink-0 border-amber-500/40 text-amber-200 hover:bg-amber-500/20 active:bg-amber-500/30"
+            >
+              停止代理服务
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Top action header */}
       <div className="glass-panel p-5 sm:p-6 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
         <div className="space-y-1">
@@ -735,9 +788,14 @@ export const NodesView: React.FC<NodesViewProps> = ({
                 <Button
                   variant="secondary"
                   size="sm"
+                  disabled={serviceRunning}
                   onClick={handleTestSelected}
                   icon={<Radio className="w-3.5 h-3.5 text-sky-400" />}
-                  title={`使用 [${currentEndpoint.name}] 测速选中的 ${selectedIds.length} 个节点`}
+                  title={
+                    serviceRunning
+                      ? "sing-box 正在运行，请先停止服务后再测速"
+                      : `使用 [${currentEndpoint.name}] 测速选中的 ${selectedIds.length} 个节点`
+                  }
                 >
                   测速所选 ({selectedIds.length})
                 </Button>
@@ -766,9 +824,14 @@ export const NodesView: React.FC<NodesViewProps> = ({
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={serviceRunning}
                 onClick={handleTestAll}
                 icon={<Activity className="w-4 h-4 text-emerald-400" />}
-                title={`使用 [${currentEndpoint.name}] 对全部节点执行测速`}
+                title={
+                  serviceRunning
+                    ? "sing-box 正在运行，请先停止服务后再测速"
+                    : `使用 [${currentEndpoint.name}] 对全部节点执行测速`
+                }
               >
                 全量测速
               </Button>

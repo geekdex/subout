@@ -56,6 +56,7 @@ const AppContent: React.FC = () => {
 
   const { success, error } = useToast();
 
+  const isAuthed = isAuthenticated === true;
   const {
     kernelInfo,
     loading: kernelLoading,
@@ -73,7 +74,7 @@ const AppContent: React.FC = () => {
     sudoActionLoading,
     closeSudoModal,
     handleTakeoverWithSudo,
-  } = useKernelGuard();
+  } = useKernelGuard(isAuthed);
 
   const {
     status: serviceStatus,
@@ -83,7 +84,7 @@ const AppContent: React.FC = () => {
     restartService,
     toggleSystemProxy,
     refreshStatus,
-  } = useServiceStatus();
+  } = useServiceStatus(3000, isAuthed);
 
   const checkAuthStatus = useCallback(async () => {
     const authed = await api.checkAuth();
@@ -348,6 +349,8 @@ const AppContent: React.FC = () => {
               nodes={nodes}
               subscriptions={subscriptions}
               onRefresh={loadAllData}
+              serviceRunning={Boolean(serviceStatus?.running)}
+              onStopService={stopService}
             />
           )}
 

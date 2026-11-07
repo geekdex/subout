@@ -1768,14 +1768,21 @@ pub fn get_nodes_speed_summary(conn: &Connection) -> Result<SpeedTestSummary> {
             }
         }
 
-        // Overall availability: available if either web > 0 or tcp > 0
-        let web_ok = web.is_some_and(|v| v > 0);
-        let tcp_ok = tcp.is_some_and(|v| v > 0);
+        // Overall availability: available if proxy web test succeeded (web > 0),
+        // or if web test was untested and tcp handshake succeeded.
+        // If web test was executed and failed (web <= 0 / -1), it is considered failed.
+        let available = match web {
+            Some(w) if w > 0 => true,
+            Some(_) => false,
+            None => tcp.is_some_and(|v| v > 0),
+        };
 
-        if web_ok || tcp_ok {
+        if available {
             available_nodes += 1;
-            let effective_lat = if web_ok {
-                web.unwrap_or(0) as u64
+            let effective_lat = if let Some(w) = web
+                && w > 0
+            {
+                w as u64
             } else {
                 tcp.unwrap_or(0) as u64
             };

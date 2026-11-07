@@ -27,7 +27,7 @@ export interface DownloadKernelOptions {
   mirror?: boolean;
 }
 
-export function useKernelGuard() {
+export function useKernelGuard(enabled = true) {
   const [kernelInfo, setKernelInfo] = useState<KernelInfo | null>(
     memoryKernelCache,
   );
@@ -119,6 +119,8 @@ export function useKernelGuard() {
   }, [pollDownloadStatus]);
 
   useEffect(() => {
+    if (!enabled) return;
+
     fetchKernelInfo().then((info) => {
       if (info?.download_status) {
         setDownloadStatus(info.download_status);
@@ -141,7 +143,7 @@ export function useKernelGuard() {
       clearInterval(interval);
       stopDownloadPolling();
     };
-  }, [fetchKernelInfo, startDownloadPolling, stopDownloadPolling]);
+  }, [fetchKernelInfo, startDownloadPolling, stopDownloadPolling, enabled]);
 
   const handleDownloadKernel = async (
     options?: DownloadKernelOptions | string | unknown,

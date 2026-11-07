@@ -405,4 +405,42 @@ describe("NodesView Component", () => {
       expect(screen.queryByText("节点配置详情")).toBeNull();
     });
   });
+
+  it("disables speed test buttons and shows warning banner when sing-box service is running", () => {
+    const onStopMock = vi.fn().mockResolvedValue(undefined);
+    renderWithToast(
+      <NodesView
+        nodes={mockNodes}
+        onRefresh={vi.fn()}
+        serviceRunning={true}
+        onStopService={onStopMock}
+      />,
+    );
+
+    // Warning banner is displayed
+    expect(screen.getByText("sing-box 代理服务正在运行中")).toBeDefined();
+    expect(
+      screen.getByText(/为保证测速数据真实性并避免网络流量环路，在开启 sing-box 时已禁用节点测速/),
+    ).toBeDefined();
+
+    // Stop service button is rendered and functional
+    const stopBtn = screen.getByRole("button", { name: /停止代理服务/i });
+    expect(stopBtn).toBeDefined();
+    fireEvent.click(stopBtn);
+    expect(onStopMock).toHaveBeenCalled();
+
+    // "全量测速" button is disabled
+    const testAllBtn = screen.getByRole("button", { name: /全量测速/i });
+    expect(testAllBtn.hasAttribute("disabled")).toBe(true);
+    expect(testAllBtn.getAttribute("title")).toContain("sing-box 正在运行");
+
+    // Single node "测速" buttons are disabled
+    const testBtns = screen.getAllByRole("button", { name: /^测速$/i });
+    expect(testBtns.length).toBeGreaterThan(0);
+    expect(testBtns[0].hasAttribute("disabled")).toBe(true);
+
+    // API calls should NOT have been made
+    expect(api.testNodeLatency).not.toHaveBeenCalled();
+    expect(api.pingNodesStream).not.toHaveBeenCalled();
+  });
 });

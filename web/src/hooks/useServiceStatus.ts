@@ -4,7 +4,7 @@ import { ServiceStatus } from "../types/api";
 import { useToast } from "./useToast";
 import { getErrorMessage } from "../utils/format";
 
-export function useServiceStatus(pollInterval = 3000) {
+export function useServiceStatus(pollInterval = 3000, enabled = true) {
   const [status, setStatus] = useState<ServiceStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -27,10 +27,11 @@ export function useServiceStatus(pollInterval = 3000) {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     fetchStatus();
     const timer = setInterval(fetchStatus, pollInterval);
     return () => clearInterval(timer);
-  }, [fetchStatus, pollInterval]);
+  }, [fetchStatus, pollInterval, enabled]);
 
   const startService = async () => {
     setActionLoading(true);

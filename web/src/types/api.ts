@@ -129,6 +129,11 @@ export const SPEED_TEST_ENDPOINTS: SpeedTestEndpoint[] = [
     description: "Google 主站 204 连通性探测",
   },
   {
+    name: "Cloudflare 测速站",
+    url: "https://speed.cloudflare.com/__down?bytes=0",
+    description: "Cloudflare 官方 Speed Test 全球测速探测点",
+  },
+  {
     name: "Cloudflare 连通性",
     url: "https://cp.cloudflare.com/generate_204",
     description: "Cloudflare 全球 Anycast 边缘网络连通性",

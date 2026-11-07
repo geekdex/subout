@@ -387,6 +387,10 @@ pub const TEST_ENDPOINTS: &[TestEndpointDto] = &[
         url: "https://www.google.com/generate_204",
     },
     TestEndpointDto {
+        name: "Cloudflare 测速站",
+        url: "https://speed.cloudflare.com/__down?bytes=0",
+    },
+    TestEndpointDto {
         name: "Cloudflare 连通性",
         url: "https://cp.cloudflare.com/generate_204",
     },
@@ -567,11 +571,16 @@ pub async fn test_node_web_latency_internal(raw_json: String, target_url: String
                     .redirect(reqwest::redirect::Policy::limited(10))
                     .timeout(Duration::from_millis(5000))
                     .build()
-                && let Ok(_resp) = client.get(&target_url).send().await
+                && let Ok(resp) = client.get(&target_url).send().await
             {
-                // As long as the HTTP request reaches the target site and gets an HTTP response,
-                // record the round-trip time directly ("返回时什么就是什么，正常网络请求")
-                latency = Some(start.elapsed().as_millis() as u64);
+                let status = resp.status();
+                if status != reqwest::StatusCode::BAD_GATEWAY
+                    && status != reqwest::StatusCode::GATEWAY_TIMEOUT
+                    && status != reqwest::StatusCode::SERVICE_UNAVAILABLE
+                    && let Ok(_bytes) = resp.bytes().await
+                {
+                    latency = Some(start.elapsed().as_millis() as u64);
+                }
             }
         }
 
@@ -599,6 +608,13 @@ pub async fn ping_nodes(
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
+
+    if state.service_manager.is_running().await {
+        return Err((
+            StatusCode::CONFLICT,
+            "sing-box 代理服务正在运行中，无法进行节点测速。请先在控制面板或顶栏关闭代理服务后再进行测速。".to_string(),
+        ));
+    }
 
     let test_type = payload.test_type.as_deref().unwrap_or("both");
     let singbox_available = crate::kernel::get_singbox_executable().is_some();
@@ -714,10 +730,8 @@ pub async fn ping_nodes(
                     None
                 };
                 let tcp_val = Some(tcp_latency.map_or(-1, |v| v as i64));
-                let primary = if let Some(w) = web_val
-                    && w > 0
-                {
-                    Some(w)
+                let primary = if let Some(w) = web_val {
+                    if w > 0 { Some(w) } else { Some(-1) }
                 } else if let Some(t) = tcp_val
                     && t > 0
                 {
@@ -798,6 +812,13 @@ pub async fn ping_single_node(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
+    if state.service_manager.is_running().await {
+        return Err((
+            StatusCode::CONFLICT,
+            "sing-box 代理服务正在运行中，无法进行节点测速。请先在控制面板或顶栏关闭代理服务后再进行测速。".to_string(),
+        ));
+    }
+
     let payload: SinglePingPayload = if body_bytes.is_empty() {
         SinglePingPayload::default()
     } else {
@@ -816,7 +837,13 @@ pub async fn ping_single_node(
     };
     let res = ping_nodes(State(state), headers, Json(req)).await?;
     let first = res.first();
-    let lat = first.and_then(|r| r.web_latency.or(r.latency).or(r.tcp_latency));
+    let lat = first.and_then(|r| {
+        if let Some(w) = r.web_latency {
+            if w > 0 { Some(w) } else { Some(-1) }
+        } else {
+            r.tcp_latency.or(r.latency)
+        }
+    });
     let tcp_lat = first.and_then(|r| r.tcp_latency);
     let web_lat = first.and_then(|r| r.web_latency);
     Ok(Json(serde_json::json!({
@@ -835,6 +862,13 @@ pub async fn ping_all_nodes(
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
+
+    if state.service_manager.is_running().await {
+        return Err((
+            StatusCode::CONFLICT,
+            "sing-box 代理服务正在运行中，无法进行节点测速。请先在控制面板或顶栏关闭代理服务后再进行测速。".to_string(),
+        ));
+    }
 
     let payload: SinglePingPayload = if body_bytes.is_empty() {
         SinglePingPayload::default()
@@ -881,6 +915,13 @@ pub async fn ping_nodes_stream(
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
+
+    if state.service_manager.is_running().await {
+        return Err((
+            StatusCode::CONFLICT,
+            "sing-box 代理服务正在运行中，无法进行节点测速。请先在控制面板或顶栏关闭代理服务后再进行测速。".to_string(),
+        ));
+    }
 
     let test_type = payload.test_type.unwrap_or_else(|| "both".to_string());
     let target_url = payload
@@ -1010,10 +1051,8 @@ pub async fn ping_nodes_stream(
                     (tcp, None)
                 };
 
-                let primary_latency = if let Some(w) = web_latency
-                    && w > 0
-                {
-                    Some(w)
+                let primary_latency = if let Some(w) = web_latency {
+                    if w > 0 { Some(w) } else { Some(-1) }
                 } else if let Some(t) = tcp_latency
                     && t > 0
                 {
@@ -1300,7 +1339,7 @@ mod tests {
 
     #[test]
     fn test_speed_test_endpoints_and_defaults() {
-        assert_eq!(TEST_ENDPOINTS.len(), 6);
+        assert_eq!(TEST_ENDPOINTS.len(), 7);
         assert_eq!(
             DEFAULT_SPEED_TEST_URL,
             "https://www.gstatic.com/generate_204"
@@ -1312,6 +1351,10 @@ mod tests {
         assert_eq!(
             get_test_endpoint_name("https://www.google.com/generate_204"),
             "Google 主站连通性"
+        );
+        assert_eq!(
+            get_test_endpoint_name("https://speed.cloudflare.com/__down?bytes=0"),
+            "Cloudflare 测速站"
         );
         assert_eq!(
             get_test_endpoint_name("https://cp.cloudflare.com/generate_204"),
@@ -1333,5 +1376,48 @@ mod tests {
             get_test_endpoint_name("https://unknown.com/test"),
             "自定义测试点"
         );
+    }
+
+    #[test]
+    fn test_primary_latency_prioritizes_web_latency_and_fails_if_web_fails() {
+        // When web proxy succeeds (e.g. 150ms) and tcp succeeds (e.g. 30ms)
+        let web_val = Some(150i64);
+        let tcp_val = Some(30i64);
+        let primary = if let Some(w) = web_val {
+            if w > 0 { Some(w) } else { Some(-1) }
+        } else if let Some(t) = tcp_val
+            && t > 0
+        {
+            Some(t)
+        } else {
+            Some(-1)
+        };
+        assert_eq!(primary, Some(150));
+
+        // When web proxy fails (-1) and tcp succeeds (30ms), primary MUST be -1 (failed)!
+        let web_val_failed = Some(-1i64);
+        let primary_failed = if let Some(w) = web_val_failed {
+            if w > 0 { Some(w) } else { Some(-1) }
+        } else if let Some(t) = tcp_val
+            && t > 0
+        {
+            Some(t)
+        } else {
+            Some(-1)
+        };
+        assert_eq!(primary_failed, Some(-1));
+
+        // When web proxy was not tested (None) and tcp succeeds (30ms), primary falls back to tcp
+        let web_val_none: Option<i64> = None;
+        let primary_fallback = if let Some(w) = web_val_none {
+            if w > 0 { Some(w) } else { Some(-1) }
+        } else if let Some(t) = tcp_val
+            && t > 0
+        {
+            Some(t)
+        } else {
+            Some(-1)
+        };
+        assert_eq!(primary_fallback, Some(30));
     }
 }

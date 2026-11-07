@@ -72,12 +72,14 @@ export function formatLatency(latencyMs: number | null | undefined): {
 export const KNOWN_SPEED_TEST_ENDPOINTS: Record<string, string> = {
   "https://www.gstatic.com/generate_204": "Google 静态资源",
   "https://www.google.com/generate_204": "Google 主站连通性",
+  "https://speed.cloudflare.com/__down?bytes=0": "Cloudflare 测速站",
   "https://cp.cloudflare.com/generate_204": "Cloudflare 连通性",
   "https://captive.apple.com/hotspot-detect.html": "Apple 网络连通性",
   "https://detectportal.firefox.com/success.txt": "Mozilla 网络连通性",
   "https://1.1.1.1/cdn-cgi/trace": "Cloudflare 网络诊断",
   "http://www.gstatic.com/generate_204": "Google 静态资源",
   "http://www.google.com/generate_204": "Google 主站连通性",
+  "http://speed.cloudflare.com/__down?bytes=0": "Cloudflare 测速站",
   "http://cp.cloudflare.com/generate_204": "Cloudflare 连通性",
 };
 
