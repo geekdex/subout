@@ -253,11 +253,13 @@ mod tests {
         let mut inbound = json!({
             "type": "tun",
             "interface_name": "tun0",
-            "auto_redirect": true
+            "auto_redirect": true,
+            "auto_route": true
         });
         linux.sanitize_inbound(&mut inbound);
         assert_eq!(inbound.get("interface_name"), Some(&json!("tun0")));
         assert_eq!(inbound.get("auto_redirect"), Some(&json!(true)));
+        assert_eq!(inbound.get("auto_route"), Some(&json!(true)));
     }
 
     #[test]
@@ -284,11 +286,13 @@ mod tests {
         let mut inbound = json!({
             "type": "tun",
             "interface_name": "tun0",
-            "auto_redirect": true
+            "auto_redirect": true,
+            "auto_route": true
         });
         macos.sanitize_inbound(&mut inbound);
         assert_eq!(inbound.get("interface_name"), None);
         assert_eq!(inbound.get("auto_redirect"), None);
+        assert_eq!(inbound.get("auto_route"), Some(&json!(false)));
         assert_eq!(inbound.get("strict_route"), None);
         assert_eq!(inbound.get("stack"), None);
         assert_eq!(inbound.get("address"), None);
@@ -309,11 +313,13 @@ mod tests {
         let mut inbound = json!({
             "type": "tun",
             "interface_name": "tun0",
-            "auto_redirect": true
+            "auto_redirect": true,
+            "auto_route": true
         });
         windows.sanitize_inbound(&mut inbound);
         assert_eq!(inbound.get("interface_name"), Some(&json!("subout-tun")));
         assert_eq!(inbound.get("auto_redirect"), None);
+        assert_eq!(inbound.get("auto_route"), Some(&json!(false)));
         assert_eq!(inbound.get("strict_route"), None);
         assert_eq!(inbound.get("stack"), None);
         assert_eq!(inbound.get("address"), None);

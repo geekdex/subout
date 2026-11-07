@@ -17,6 +17,7 @@ import {
   SystemInfo,
   SpeedTestEndpoint,
   NodePingProgressEvent,
+  SiteProbeResponse,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -288,6 +289,15 @@ export const api = {
   // System
   async getSystemInfo(): Promise<SystemInfo> {
     return request<SystemInfo>("/api/system/info");
+  },
+  async probeSite(
+    url: string,
+    timeoutMs?: number,
+  ): Promise<SiteProbeResponse> {
+    return request<SiteProbeResponse>("/api/system/site-probe", {
+      method: "POST",
+      body: JSON.stringify({ url, timeout_ms: timeoutMs }),
+    });
   },
   async setAppMode(
     mode: "simple" | "expert",

@@ -728,11 +728,16 @@ impl PlatformStrategy for MacOsPlatform {
         if let Some(obj) = inbound.as_object_mut() {
             obj.remove("auto_redirect");
             let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun
-                && let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
-                && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
-            {
-                obj.remove("interface_name");
+            if is_tun {
+                // Non-Linux systems (macOS) must never enable auto_route
+                if let Some(ar) = obj.get_mut("auto_route") {
+                    *ar = serde_json::json!(false);
+                }
+                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
+                    && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
+                {
+                    obj.remove("interface_name");
+                }
             }
         }
     }

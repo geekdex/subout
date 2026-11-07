@@ -750,10 +750,12 @@ mod tests {
             "tag": "tun-in",
             "address": ["172.19.0.1/30"],
             "interface_name": "tun0",
-            "auto_redirect": true
+            "auto_redirect": true,
+            "auto_route": true
         });
         crate::platform::linux_platform().sanitize_inbound(&mut linux_inbound);
         assert_eq!(linux_inbound.get("auto_redirect"), Some(&json!(true)));
+        assert_eq!(linux_inbound.get("auto_route"), Some(&json!(true)));
         assert_eq!(linux_inbound.get("interface_name"), Some(&json!("tun0")));
         assert_eq!(
             linux_inbound.get("address"),
@@ -761,33 +763,37 @@ mod tests {
         );
         assert_eq!(linux_inbound.get("strict_route"), None);
 
-        // Test macOS strategy: 移除系统不兼容字段，不做隐式增加
+        // Test macOS strategy: 移除系统不兼容字段，强制禁用 auto_route
         let mut macos_inbound = json!({
             "type": "tun",
             "tag": "tun-in",
             "address": ["172.19.0.1/30"],
             "interface_name": "tun0",
-            "auto_redirect": true
+            "auto_redirect": true,
+            "auto_route": true
         });
         crate::platform::macos_platform().sanitize_inbound(&mut macos_inbound);
         assert_eq!(macos_inbound.get("auto_redirect"), None);
         assert_eq!(macos_inbound.get("interface_name"), None);
+        assert_eq!(macos_inbound.get("auto_route"), Some(&json!(false)));
         assert_eq!(
             macos_inbound.get("address"),
             Some(&json!(["172.19.0.1/30"]))
         );
         assert_eq!(macos_inbound.get("strict_route"), None);
 
-        // Test Windows strategy: 适配系统网卡命名，不做隐式增加
+        // Test Windows strategy: 适配系统网卡命名，强制禁用 auto_route
         let mut win_inbound = json!({
             "type": "tun",
             "tag": "tun-in",
             "address": ["172.19.0.1/30"],
             "interface_name": "tun0",
-            "auto_redirect": true
+            "auto_redirect": true,
+            "auto_route": true
         });
         crate::platform::windows_platform().sanitize_inbound(&mut win_inbound);
         assert_eq!(win_inbound.get("auto_redirect"), None);
+        assert_eq!(win_inbound.get("auto_route"), Some(&json!(false)));
         assert_eq!(
             win_inbound.get("interface_name"),
             Some(&json!("subout-tun"))

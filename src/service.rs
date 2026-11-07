@@ -946,7 +946,7 @@ impl SingBoxServiceManager {
         let has_sudo_pass = effective_sudo_pass.is_some();
         let platform = crate::platform::current_platform();
 
-        let use_sudo = !platform.is_windows() && !as_root && has_sudo_pass;
+        let use_sudo = !platform.is_windows() && !as_root && has_sudo_pass && tun_mode;
 
         if use_sudo {
             self.append_log(&format!(

@@ -318,7 +318,12 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {currentTab === "simple" && <SimpleModeView nodes={nodes} />}
+          {currentTab === "simple" && (
+            <SimpleModeView
+              nodes={nodes}
+              systemInfo={systemInfo ?? undefined}
+            />
+          )}
 
           {currentTab === "profiles" && (
             <ProfilesView

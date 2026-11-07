@@ -70,6 +70,14 @@ export interface TakeoverDiagnoseResult {
   can_auto_takeover: boolean;
 }
 
+export interface SiteProbeResponse {
+  url: string;
+  latency_ms: number | null;
+  status_code: number | null;
+  success: boolean;
+  error?: string | null;
+}
+
 export interface NodeItem {
   id: number;
   subscription_id: number | null;

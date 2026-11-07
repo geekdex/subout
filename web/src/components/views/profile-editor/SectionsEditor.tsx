@@ -1505,6 +1505,7 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
     ? config.inbounds
     : [];
   const isAndroid = platform === "android";
+  const isLinux = platform === "linux";
 
   const updateInbounds = (next: InboundItem[]) => {
     onChange({ ...config, inbounds: next });
@@ -1858,18 +1859,33 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                       />
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                          <span className="text-xs text-slate-300">
-                            自动配置路由 (auto_route)
-                          </span>
+                        <div
+                          className={`p-2.5 rounded-lg border flex items-center justify-between ${
+                            isLinux
+                              ? "bg-slate-900/80 border-slate-800"
+                              : "bg-slate-900/40 border-slate-800/60 opacity-75"
+                          }`}
+                        >
+                          <div className="flex flex-col">
+                            <span className="text-xs text-slate-300">
+                              自动配置路由 (auto_route)
+                            </span>
+                            {!isLinux && (
+                              <span className="text-[10px] text-amber-400 mt-0.5">
+                                仅限 Linux，其他系统禁用
+                              </span>
+                            )}
+                          </div>
                           <Switch
-                            checked={Boolean(inb.auto_route)}
-                            onChange={(val) =>
+                            disabled={!isLinux}
+                            checked={isLinux && Boolean(inb.auto_route)}
+                            onChange={(val) => {
+                              if (!isLinux) return;
                               updateInboundAt(idx, {
                                 ...inb,
                                 auto_route: val || undefined,
-                              })
-                            }
+                              });
+                            }}
                           />
                         </div>
 

@@ -96,7 +96,14 @@ impl PlatformStrategy for FallbackPlatform {
 
     fn disable_tun_dns(&self, _sudo_pass: Option<&str>) {}
 
-    fn sanitize_inbound(&self, _inbound: &mut Value) {}
+    fn sanitize_inbound(&self, inbound: &mut Value) {
+        if let Some(obj) = inbound.as_object_mut() {
+            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
+            if is_tun && let Some(ar) = obj.get_mut("auto_route") {
+                *ar = serde_json::json!(false);
+            }
+        }
+    }
 
     fn default_tun_interface_name(&self) -> &'static str {
         ""

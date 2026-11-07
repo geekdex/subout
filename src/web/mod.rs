@@ -321,6 +321,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             get(system::get_system_mode).post(system::set_system_mode),
         )
         .route("/api/system/dirs", get(system::get_system_dirs))
+        .route(
+            "/api/system/site-probe",
+            post(system::probe_site_connectivity),
+        )
         .route("/api/system/initialize", post(system::initialize_db))
         // Kernel Management APIs
         .route("/api/kernel/info", get(kernel_api::get_kernel_info))

@@ -58,12 +58,16 @@ pub async fn save_simple_config(
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let (config, apply, sudo_pass, takeover) = match payload {
+    let (mut config, apply, sudo_pass, takeover) = match payload {
         SaveSimpleConfigPayload::Wrapped(req) => {
             (req.config, req.apply, req.sudo_pass, req.takeover)
         }
         SaveSimpleConfigPayload::Direct(cfg) => (cfg, Some(true), None, None),
     };
+
+    if !crate::platform::current_platform().is_linux() {
+        config.inbound.tun_auto_route = false;
+    }
 
     let generated = simple_config::generate_simple_singbox_config(&conn, &config)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成简单配置失败: {e}")))?;
@@ -141,12 +145,16 @@ pub async fn save_simple_config(
 pub async fn preview_simple_config(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<SimpleConfig>,
+    Json(mut payload): Json<SimpleConfig>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+
+    if !crate::platform::current_platform().is_linux() {
+        payload.inbound.tun_auto_route = false;
+    }
 
     let generated = simple_config::generate_simple_singbox_config(&conn, &payload)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成预览失败: {e}")))?;

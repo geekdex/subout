@@ -8,16 +8,16 @@ use crate::generator;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SimpleDnsConfig {
-    pub mode: String, // "preset_fakeip" | "preset_domestic_foreign" | "fast_public" | "custom"
-    pub domestic_dns: String, // "223.5.5.5"
-    pub foreign_dns: String, // "fakeip" | "https://1.1.1.1/dns-query"
+    pub mode: String, // "local_fakeip" (默认) | "custom" (自定义) | "preset_fakeip" (兼容)
+    pub domestic_dns: String, // "local" | "223.5.5.5" | "119.29.29.29" | 自定义
+    pub foreign_dns: String, // "fakeip" | "8.8.8.8" | "1.1.1.1" | 自定义
 }
 
 impl Default for SimpleDnsConfig {
     fn default() -> Self {
         Self {
-            mode: "preset_fakeip".to_string(),
-            domestic_dns: "223.5.5.5".to_string(),
+            mode: "local_fakeip".to_string(),
+            domestic_dns: "local".to_string(),
             foreign_dns: "fakeip".to_string(),
         }
     }
@@ -39,7 +39,7 @@ impl Default for SimpleInboundConfig {
             mixed_port: 2080,
             allow_lan: false,
             tun_stack: "system".to_string(),
-            tun_auto_route: true,
+            tun_auto_route: crate::platform::current_platform().is_linux(),
         }
     }
 }
@@ -105,15 +105,24 @@ pub struct SimpleConfig {
 
 pub fn get_saved_simple_config(conn: &Connection) -> SimpleConfig {
     if let Ok(Some(json_str)) = db::get_setting(conn, "simple_config")
-        && let Ok(cfg) = serde_json::from_str::<SimpleConfig>(&json_str)
+        && let Ok(mut cfg) = serde_json::from_str::<SimpleConfig>(&json_str)
     {
+        // Auto Route is only supported on Linux; force disable on all other systems
+        if !crate::platform::current_platform().is_linux() {
+            cfg.inbound.tun_auto_route = false;
+        }
         return cfg;
     }
     SimpleConfig::default()
 }
 
 pub fn save_simple_config(conn: &Connection, cfg: &SimpleConfig) -> Result<()> {
-    let json_str = serde_json::to_string(cfg)?;
+    let mut normalized_cfg = cfg.clone();
+    // Auto Route is only supported on Linux; force disable on all other systems
+    if !crate::platform::current_platform().is_linux() {
+        normalized_cfg.inbound.tun_auto_route = false;
+    }
+    let json_str = serde_json::to_string(&normalized_cfg)?;
     db::update_setting(conn, "simple_config", &json_str)?;
     Ok(())
 }
@@ -121,7 +130,7 @@ pub fn save_simple_config(conn: &Connection, cfg: &SimpleConfig) -> Result<()> {
 fn apply_dns_detour(obj: &mut Value, detour: Option<&str>) {
     if let Some(d) = detour {
         let trimmed = d.trim();
-        if !trimmed.is_empty() && trimmed != "direct" {
+        if !trimmed.is_empty() {
             obj["detour"] = json!(trimmed);
         }
     }
@@ -137,12 +146,10 @@ pub fn build_dns_server(tag: &str, address_str: &str, detour: Option<&str>) -> V
         });
     }
     if s == "local" {
-        let mut obj = json!({
+        return json!({
             "tag": tag,
             "type": "local"
         });
-        apply_dns_detour(&mut obj, detour);
-        return obj;
     }
 
     if let Ok(parsed_url) = url::Url::parse(s) {
@@ -277,22 +284,31 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     let log_val = Value::Object(log_map);
 
     // 2. DNS section
-    let is_fakeip_mode = cfg.dns.mode == "preset_fakeip"
+    let is_fakeip_mode = cfg.dns.mode == "local_fakeip"
+        || cfg.dns.mode == "preset_fakeip"
         || cfg.dns.mode == "fakeip"
         || cfg.dns.foreign_dns.trim().eq_ignore_ascii_case("fakeip");
 
-    let domestic_dns = if cfg.dns.domestic_dns.trim().is_empty() {
-        "223.5.5.5".to_string()
+    let domestic_dns = if is_fakeip_mode
+        && (cfg.dns.domestic_dns.trim().is_empty()
+            || cfg.dns.domestic_dns.trim() == "local"
+            || cfg.dns.domestic_dns.trim() == "223.5.5.5")
+    {
+        "local".to_string()
+    } else if cfg.dns.domestic_dns.trim().is_empty() {
+        if is_fakeip_mode {
+            "local".to_string()
+        } else {
+            "223.5.5.5".to_string()
+        }
     } else {
         cfg.dns.domestic_dns.trim().to_string()
     };
 
-    let foreign_dns = if cfg.dns.foreign_dns.trim().is_empty() {
-        if is_fakeip_mode {
-            "fakeip".to_string()
-        } else {
-            "https://1.1.1.1/dns-query".to_string()
-        }
+    let foreign_dns = if is_fakeip_mode {
+        "fakeip".to_string()
+    } else if cfg.dns.foreign_dns.trim().is_empty() {
+        "8.8.8.8".to_string()
     } else {
         cfg.dns.foreign_dns.trim().to_string()
     };
@@ -332,10 +348,10 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     };
 
     let dns_servers = if is_direct_all {
-        vec![build_dns_server("dns_local", &domestic_dns, None)]
+        vec![build_dns_server("dns_local", &domestic_dns, Some("direct"))]
     } else if is_fakeip_mode {
         vec![
-            build_dns_server("dns_local", &domestic_dns, None),
+            build_dns_server("dns_local", &domestic_dns, Some("direct")),
             build_dns_server("dns_fakeip", "fakeip", None),
         ]
     } else {
@@ -344,10 +360,10 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         let remote_dns_detour = if has_nodes && target_proxy != "direct" {
             Some("proxy")
         } else {
-            None
+            Some("direct")
         };
         vec![
-            build_dns_server("dns_local", &domestic_dns, None),
+            build_dns_server("dns_local", &domestic_dns, Some("direct")),
             build_dns_server("dns_remote", &foreign_dns, remote_dns_detour),
         ]
     };
@@ -422,20 +438,31 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
 
     let inbounds_val = if cfg.inbound.inbound_type.as_str() == "tun" {
         let platform = crate::platform::current_platform();
-        let effective_stack = platform.effective_tun_stack(cfg.inbound.tun_stack.as_str());
+        let raw_stack = match cfg.inbound.tun_stack.trim().to_lowercase().as_str() {
+            "gvisor" => "gvisor",
+            "mixed" => "mixed",
+            _ => "system",
+        };
+        let effective_stack = platform.effective_tun_stack(raw_stack);
         let iface_name = platform.default_tun_interface_name();
         let strict_route = platform.default_tun_strict_route();
+        let effective_auto_route = if platform.is_linux() {
+            cfg.inbound.tun_auto_route
+        } else {
+            false
+        };
         let mut tun_obj = json!({
             "type": "tun",
             "tag": "tun-in",
             "address": ["172.19.0.1/30"],
-            "auto_route": cfg.inbound.tun_auto_route,
+            "auto_route": effective_auto_route,
             "strict_route": strict_route,
             "stack": effective_stack
         });
         if !iface_name.is_empty() {
             tun_obj["interface_name"] = json!(iface_name);
         }
+        platform.sanitize_inbound(&mut tun_obj);
         json!([tun_obj, mixed_obj])
     } else {
         json!([mixed_obj])
@@ -651,8 +678,8 @@ mod tests {
         let local_udp = build_dns_server("dns_local", "223.5.5.5", Some("direct"));
         assert_eq!(local_udp["type"], "udp");
         assert_eq!(local_udp["server"], "223.5.5.5");
-        // "direct" detour should be omitted to avoid sing-box "detour to empty direct outbound" error
-        assert!(local_udp.get("detour").is_none());
+        // "direct" detour ensures domestic DNS queries route directly rather than via proxy
+        assert_eq!(local_udp["detour"], "direct");
 
         // FakeIP produces pure IPv4 range
         let fakeip = build_dns_server("dns_fakeip", "fakeip", None);
@@ -680,7 +707,7 @@ mod tests {
     fn test_generate_simple_singbox_config_structure() {
         let conn = crate::db::init_db(":memory:").unwrap();
         let cfg = SimpleConfig::default();
-        assert_eq!(cfg.dns.mode, "preset_fakeip");
+        assert_eq!(cfg.dns.mode, "local_fakeip");
 
         let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
 
@@ -847,6 +874,34 @@ mod tests {
     }
 
     #[test]
+    fn test_simple_config_local_fakeip_default() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        let cfg = SimpleConfig::default();
+        assert_eq!(cfg.dns.mode, "local_fakeip");
+
+        let generated_cfg = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        let dns_servers = generated_cfg
+            .get("dns")
+            .unwrap()
+            .get("servers")
+            .unwrap()
+            .as_array()
+            .unwrap();
+
+        let local_srv = dns_servers
+            .iter()
+            .find(|s| s.get("tag").unwrap().as_str() == Some("dns_local"))
+            .unwrap();
+        assert_eq!(local_srv.get("type").unwrap().as_str(), Some("local"));
+
+        let fakeip_srv = dns_servers
+            .iter()
+            .find(|s| s.get("tag").unwrap().as_str() == Some("dns_fakeip"))
+            .unwrap();
+        assert_eq!(fakeip_srv.get("type").unwrap().as_str(), Some("fakeip"));
+    }
+
+    #[test]
     fn test_simple_config_preset_domestic_foreign_mode() {
         let conn = crate::db::init_db(":memory:").unwrap();
         crate::db::save_node(
@@ -941,9 +996,20 @@ mod tests {
         mixed_cfg.inbound.inbound_type = "mixed".to_string();
         let generated_mixed = generate_simple_singbox_config(&conn, &mixed_cfg).unwrap();
         let mixed_inbounds = generated_mixed.get("inbounds").unwrap().as_array().unwrap();
+        assert_eq!(mixed_inbounds.len(), 1);
         assert_eq!(
             mixed_inbounds[0].get("type").unwrap().as_str(),
             Some("mixed")
+        );
+
+        // Test TUN stack options
+        let mut gvisor_cfg = SimpleConfig::default();
+        gvisor_cfg.inbound.tun_stack = "gvisor".to_string();
+        let gen_gvisor = generate_simple_singbox_config(&conn, &gvisor_cfg).unwrap();
+        let gvisor_inbounds = gen_gvisor.get("inbounds").unwrap().as_array().unwrap();
+        assert_eq!(
+            gvisor_inbounds[0].get("stack").unwrap().as_str(),
+            Some("gvisor")
         );
     }
 
@@ -1058,5 +1124,23 @@ mod tests {
                 .iter()
                 .any(|r| r.get("outbound").and_then(|o| o.as_str()) == Some("direct"))
         );
+    }
+
+    #[test]
+    fn test_simple_config_tun_auto_route_platforms() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        let mut cfg = SimpleConfig::default();
+        cfg.inbound.inbound_type = "tun".to_string();
+        cfg.inbound.tun_auto_route = true;
+
+        let generated = generate_simple_singbox_config(&conn, &cfg).unwrap();
+        let inbounds = generated["inbounds"].as_array().unwrap();
+        let tun = inbounds
+            .iter()
+            .find(|i| i.get("type").and_then(|t| t.as_str()) == Some("tun"))
+            .expect("tun inbound must exist");
+
+        let is_linux = crate::platform::current_platform().is_linux();
+        assert_eq!(tun["auto_route"].as_bool(), Some(is_linux));
     }
 }

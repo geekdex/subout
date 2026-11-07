@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Sparkles,
   X,
+  RotateCw,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
@@ -42,9 +43,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const [switchingConfig, setSwitchingConfig] = useState(false);
   const [siteTesting, setSiteTesting] = useState(false);
-  const [siteResults, setSiteResults] = useState<{
-    [site: string]: number | null;
-  }>({});
+  const [siteStatuses, setSiteStatuses] = useState<
+    Record<
+      string,
+      {
+        status: "idle" | "testing" | "success" | "error";
+        latency_ms?: number | null;
+        status_code?: number | null;
+        error?: string | null;
+      }
+    >
+  >({});
   const [hideConflictTip, setHideConflictTip] = useState<boolean>(() => {
     try {
       const today = new Date().toISOString().slice(0, 10);
@@ -90,39 +99,77 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
+  const probeSites = [
+    {
+      id: "baidu",
+      name: "百度 (国内直连)",
+      url: "https://www.baidu.com",
+      description: "国内主站直连响应",
+    },
+    {
+      id: "google",
+      name: "Google (境外加速)",
+      url: "https://www.google.com",
+      description: "国际主流站点代理连通性",
+    },
+    {
+      id: "cloudflare",
+      name: "Cloudflare (边缘网络)",
+      url: "https://1.1.1.1",
+      description: "全球 Anycast 边缘节点",
+    },
+    {
+      id: "github",
+      name: "GitHub (全球代码库)",
+      url: "https://github.com",
+      description: "开发者海外网络访问",
+    },
+  ];
+
   const handleRunSiteTest = async () => {
     setSiteTesting(true);
-    const sites = [
-      { name: "Baidu (国内)", host: "www.baidu.com" },
-      { name: "Cloudflare (国际CDN)", host: "1.1.1.1" },
-      { name: "Google (境外)", host: "www.google.com" },
-      { name: "GitHub (代码库)", host: "github.com" },
-    ];
 
-    const testSite = async (site: { name: string; host: string }) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
-      const start = Date.now();
+    // Set all to testing state for dynamic progress indicators
+    const initialStatuses: Record<
+      string,
+      {
+        status: "idle" | "testing" | "success" | "error";
+        latency_ms?: number | null;
+        status_code?: number | null;
+        error?: string | null;
+      }
+    > = {};
+    for (const s of probeSites) {
+      initialStatuses[s.id] = { status: "testing" };
+    }
+    setSiteStatuses(initialStatuses);
+
+    // Concurrently trigger server-side site probe
+    const testSite = async (site: (typeof probeSites)[0]) => {
       try {
-        await fetch(`https://${site.host}/favicon.ico`, {
-          mode: "no-cors",
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        return { name: site.name, latency: Date.now() - start };
-      } catch {
-        clearTimeout(timer);
-        return { name: site.name, latency: 0 };
+        const res = await api.probeSite(site.url, 4500);
+        setSiteStatuses((prev) => ({
+          ...prev,
+          [site.id]: {
+            status: res.success ? "success" : "error",
+            latency_ms: res.latency_ms,
+            status_code: res.status_code,
+            error: res.error,
+          },
+        }));
+      } catch (err: unknown) {
+        setSiteStatuses((prev) => ({
+          ...prev,
+          [site.id]: {
+            status: "error",
+            latency_ms: null,
+            error: getErrorMessage(err),
+          },
+        }));
       }
     };
 
-    const testResults = await Promise.all(sites.map(testSite));
-    const results: { [site: string]: number | null } = {};
-    for (const r of testResults) {
-      results[r.name] = r.latency;
-    }
-    setSiteResults(results);
+    await Promise.allSettled(probeSites.map(testSite));
     setSiteTesting(false);
   };
 
@@ -380,49 +427,76 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Right 1 col: Quick Connectivity Probe */}
         <div className="glass-panel p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Radio className="w-4 h-4 text-sky-400" />
-              <h3 className="text-sm font-semibold text-slate-100">
-                网络连通性探针
-              </h3>
+            <div>
+              <div className="flex items-center gap-2">
+                <Radio className="w-4 h-4 text-sky-400" />
+                <h3 className="text-sm font-semibold text-slate-100">
+                  网络连通性探针
+                </h3>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                服务端本机直接连通性探测
+              </p>
             </div>
             <Button
               variant="secondary"
               size="sm"
               loading={siteTesting}
               onClick={handleRunSiteTest}
+              icon={<RotateCw className={`w-3.5 h-3.5 ${siteTesting ? "animate-spin text-sky-400" : ""}`} />}
             >
               测速探针
             </Button>
           </div>
 
-          <div className="space-y-2.5">
-            {[
-              { name: "Baidu (国内)", host: "www.baidu.com" },
-              { name: "Cloudflare (国际CDN)", host: "1.1.1.1" },
-              { name: "Google (境外)", host: "www.google.com" },
-              { name: "GitHub (代码库)", host: "github.com" },
-            ].map((s) => {
-              const res = siteResults[s.name];
+          <div className="space-y-3">
+            {probeSites.map((s) => {
+              const st = siteStatuses[s.id];
               return (
                 <div
-                  key={s.name}
-                  className="p-3 rounded-lg bg-slate-800/40 border border-slate-800/80 flex items-center justify-between text-xs"
+                  key={s.id}
+                  className="p-3 rounded-lg bg-slate-800/40 border border-slate-800/80 flex items-center justify-between text-xs transition-colors hover:border-slate-700"
                 >
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-                    <span>{s.name}</span>
+                  <div className="space-y-1 pr-2 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-slate-200">
+                        {s.name}
+                      </span>
+                    </div>
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] font-mono text-slate-400 hover:text-sky-400 flex items-center gap-1 transition-colors truncate"
+                      title={s.url}
+                    >
+                      <span>{s.url}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0 text-slate-500" />
+                    </a>
                   </div>
-                  <div>
-                    {res === undefined ? (
-                      <span className="text-slate-500 text-[11px]">未测</span>
-                    ) : res === 0 ? (
-                      <span className="text-rose-400 font-medium">
-                        失败 / 超时
+
+                  <div className="shrink-0 flex items-center justify-end">
+                    {!st || st.status === "idle" ? (
+                      <span className="text-slate-500 text-[11px] px-2 py-0.5 rounded bg-slate-900/60">
+                        未测试
+                      </span>
+                    ) : st.status === "testing" ? (
+                      <span className="text-[11px] text-sky-400 font-medium flex items-center gap-1.5 px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20">
+                        <RotateCw className="w-3 h-3 animate-spin text-sky-400" />
+                        <span>测速中...</span>
+                      </span>
+                    ) : st.status === "success" ? (
+                      <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                        {st.latency_ms ?? 0} ms
                       </span>
                     ) : (
-                      <span className="text-emerald-400 font-mono font-medium">
-                        {res} ms
+                      <span
+                        className="px-2 py-0.5 rounded text-[11px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/30 truncate max-w-[110px]"
+                        title={st.error || "失败 / 超时"}
+                      >
+                        {st.error && st.error.length <= 10
+                          ? st.error
+                          : "超时 / 阻断"}
                       </span>
                     )}
                   </div>
@@ -430,6 +504,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               );
             })}
           </div>
+
+          <p className="text-[11px] text-slate-500 leading-relaxed pt-1 border-t border-slate-800/60">
+            💡 由程序服务端宿主机直接发起探测，无论代理是否开启均可准确检测境外与境内网络的实际连通性与延迟。
+          </p>
         </div>
       </div>
     </div>

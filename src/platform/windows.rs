@@ -408,11 +408,16 @@ impl PlatformStrategy for WindowsPlatform {
         if let Some(obj) = inbound.as_object_mut() {
             obj.remove("auto_redirect");
             let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun
-                && let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
-                && iface == "tun0"
-            {
-                obj.insert("interface_name".to_string(), json!("subout-tun"));
+            if is_tun {
+                // Non-Linux systems (Windows) must never enable auto_route
+                if let Some(ar) = obj.get_mut("auto_route") {
+                    *ar = serde_json::json!(false);
+                }
+                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
+                    && iface == "tun0"
+                {
+                    obj.insert("interface_name".to_string(), json!("subout-tun"));
+                }
             }
         }
     }

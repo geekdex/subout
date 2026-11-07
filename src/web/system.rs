@@ -385,6 +385,143 @@ pub async fn set_system_mode(
     })))
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct SiteProbeRequest {
+    pub url: String,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct SiteProbeResponse {
+    pub url: String,
+    pub latency_ms: Option<u64>,
+    pub status_code: Option<u16>,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// Directly tests site reachability from the host server.
+/// Works reliably whether proxy is running (TUN or mixed) or completely stopped.
+pub async fn probe_site_connectivity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<SiteProbeRequest>,
+) -> Result<Json<SiteProbeResponse>, StatusCode> {
+    check_auth(&state, &headers).await?;
+
+    let mut url = payload.url.trim().to_string();
+    if url.is_empty() {
+        return Ok(Json(SiteProbeResponse {
+            url,
+            latency_ms: None,
+            status_code: None,
+            success: false,
+            error: Some("网址不能为空".to_string()),
+        }));
+    }
+
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        url = format!("https://{url}");
+    }
+
+    let timeout_duration =
+        std::time::Duration::from_millis(payload.timeout_ms.unwrap_or(4000).clamp(500, 10000));
+    let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+    let service_status = state.service_manager.get_status().await;
+    let is_running = service_status.running;
+    let mixed_port = service_status.mixed_port.unwrap_or(2080);
+    let is_tun = service_status.is_tun;
+
+    // Detect if the local mixed port is actually listening
+    let is_local_mixed_port_open = std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], mixed_port)),
+        std::time::Duration::from_millis(100),
+    )
+    .is_ok();
+
+    // 1. Direct / system routing attempt
+    // If local proxy port is NOT open, bypass any stale env proxy (e.g. all_proxy=127.0.0.1:2080 in shell env)
+    // so that direct connectivity (like baidu) doesn't fail due to dead proxy.
+    let try_direct_client = if is_local_mixed_port_open {
+        reqwest::Client::builder()
+            .user_agent(user_agent)
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .timeout(timeout_duration)
+            .build()
+    } else {
+        reqwest::Client::builder()
+            .no_proxy()
+            .user_agent(user_agent)
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .timeout(timeout_duration)
+            .build()
+    };
+
+    let start = std::time::Instant::now();
+    let mut last_err = None;
+    if let Ok(client) = try_direct_client {
+        match client.get(&url).send().await {
+            Ok(resp) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                let status = resp.status().as_u16();
+                let success = status < 400 || status == 403 || status == 405 || status == 429;
+                return Ok(Json(SiteProbeResponse {
+                    url,
+                    latency_ms: Some(elapsed),
+                    status_code: Some(status),
+                    success,
+                    error: None,
+                }));
+            }
+            Err(e) => {
+                last_err = Some(e.to_string());
+            }
+        }
+    }
+
+    // 2. If direct attempt failed and sing-box is running in mixed mode (mixed port is open),
+    // probe via the active local mixed proxy
+    if is_running && !is_tun && is_local_mixed_port_open {
+        let proxy_url = format!("http://127.0.0.1:{mixed_port}");
+        if let Ok(proxy) = reqwest::Proxy::all(&proxy_url)
+            && let Ok(client) = reqwest::Client::builder()
+                .proxy(proxy)
+                .user_agent(user_agent)
+                .redirect(reqwest::redirect::Policy::limited(10))
+                .timeout(timeout_duration)
+                .build()
+        {
+            let proxy_start = std::time::Instant::now();
+            match client.get(&url).send().await {
+                Ok(resp) => {
+                    let elapsed = proxy_start.elapsed().as_millis() as u64;
+                    let status = resp.status().as_u16();
+                    let success = status < 400 || status == 403 || status == 405 || status == 429;
+                    return Ok(Json(SiteProbeResponse {
+                        url,
+                        latency_ms: Some(elapsed),
+                        status_code: Some(status),
+                        success,
+                        error: None,
+                    }));
+                }
+                Err(e) => {
+                    last_err = Some(e.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(Json(SiteProbeResponse {
+        url,
+        latency_ms: None,
+        status_code: None,
+        success: false,
+        error: Some(last_err.unwrap_or_else(|| "网络请求超时或连接失败".to_string())),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,5 +533,27 @@ mod tests {
             assert!(ip.parse::<std::net::Ipv4Addr>().is_ok());
             assert!(!ip.starts_with("127."));
         }
+    }
+
+    #[test]
+    fn test_site_probe_request_response_serde() {
+        let req = SiteProbeRequest {
+            url: "https://www.baidu.com".to_string(),
+            timeout_ms: Some(3000),
+        };
+        let json_val = serde_json::to_value(&req).unwrap();
+        assert_eq!(json_val["url"], "https://www.baidu.com");
+        assert_eq!(json_val["timeout_ms"], 3000);
+
+        let resp = SiteProbeResponse {
+            url: "https://www.baidu.com".to_string(),
+            latency_ms: Some(25),
+            status_code: Some(200),
+            success: true,
+            error: None,
+        };
+        let resp_json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(resp_json["latency_ms"], 25);
+        assert_eq!(resp_json["success"], true);
     }
 }
