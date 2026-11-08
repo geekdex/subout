@@ -494,7 +494,15 @@ impl SingBoxServiceManager {
         let config_json = running_config_content
             .as_deref()
             .and_then(|s| serde_json::from_str::<Value>(s).ok());
-        let is_tun = is_run && config_json.as_ref().is_some_and(is_tun_mode);
+        let is_tun = if is_run {
+            config_json.as_ref().is_some_and(is_tun_mode)
+        } else if let Some(db_path) = self.db_path.read().await.as_deref()
+            && let Ok(conn) = rusqlite::Connection::open(db_path)
+        {
+            is_tun_for_active_mode(&conn)
+        } else {
+            config_json.as_ref().is_some_and(is_tun_mode)
+        };
         let conflicting_processes = detect_conflicting_singbox_processes(pid);
 
         let (log_level, log_disabled, log_output) = if is_run {
@@ -965,7 +973,6 @@ impl SingBoxServiceManager {
         }
 
         let mut final_config_json = config_json.clone();
-        crate::generator::sanitize_runtime_config(&mut final_config_json);
         if let Some(ref out_path) = log_output_file
             && let Some(log_obj) = final_config_json
                 .get_mut("log")
@@ -1413,12 +1420,6 @@ impl SingBoxServiceManager {
             let tun_dns_ip =
                 get_tun_dns_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.2".to_string());
             platform.enable_tun_dns(&tun_dns_ip, cached_pass.as_deref());
-            if platform.is_macos() {
-                self.append_log(&format!(
-                    "🌐 已自动设置 macOS 系统 DNS 指向 TUN 虚拟网卡 ({tun_dns_ip})"
-                ))
-                .await;
-            }
         }
 
         let summary = get_inbounds_summary_from_config(&config_path);
@@ -1733,6 +1734,43 @@ pub async fn run_sudo_command(
     crate::platform::current_platform()
         .run_sudo_command(cmd_name, args, sudo_pass)
         .await
+}
+
+pub fn is_tun_for_active_mode(conn: &rusqlite::Connection) -> bool {
+    let mode = crate::db::get_setting(conn, "app_mode")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "simple".to_string());
+    if mode == "simple" {
+        let simple_cfg = crate::simple_config::get_saved_simple_config(conn);
+        simple_cfg.inbound.inbound_type == "tun"
+    } else {
+        let running_id_str = crate::db::get_setting(conn, "running_config_id")
+            .unwrap_or(None)
+            .unwrap_or_default();
+        if let Ok(id) = running_id_str.parse::<i64>() {
+            let parsed_content =
+                if let Ok(Some(prof)) = crate::db::get_config_profile_by_id(conn, id) {
+                    serde_json::from_str::<Value>(&prof.content).ok()
+                } else if let Ok(Some(history)) = crate::db::get_config_history_detail(conn, id)
+                    && let Some(content_str) = history.content
+                {
+                    serde_json::from_str::<Value>(&content_str).ok()
+                } else {
+                    None
+                };
+            if let Some(c) = parsed_content {
+                return is_tun_mode(&c);
+            }
+        }
+        if let Ok(Some(inbounds_str)) = crate::db::get_base_config_section(conn, "inbounds")
+            && let Ok(inbounds_val) = serde_json::from_str::<Value>(&inbounds_str)
+        {
+            let dummy = serde_json::json!({ "inbounds": inbounds_val });
+            is_tun_mode(&dummy)
+        } else {
+            false
+        }
+    }
 }
 
 pub fn get_mixed_port_for_active_mode(conn: &rusqlite::Connection) -> Option<u16> {

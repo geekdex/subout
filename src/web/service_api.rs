@@ -364,9 +364,8 @@ pub fn get_config_for_mode(
 
         if let Ok(id) = running_id_str.parse::<i64>() {
             if let Ok(Some(prof)) = db::get_config_profile_by_id(conn, id)
-                && let Ok(mut c) = serde_json::from_str::<Value>(&prof.content)
+                && let Ok(c) = serde_json::from_str::<Value>(&prof.content)
             {
-                generator::sanitize_runtime_config(&mut c);
                 return Ok(c);
             }
             if let Ok(Some(history)) = db::get_config_history_detail(conn, id)

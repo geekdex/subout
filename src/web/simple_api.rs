@@ -58,16 +58,12 @@ pub async fn save_simple_config(
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let (mut config, apply, sudo_pass, takeover) = match payload {
+    let (config, apply, sudo_pass, takeover) = match payload {
         SaveSimpleConfigPayload::Wrapped(req) => {
             (req.config, req.apply, req.sudo_pass, req.takeover)
         }
         SaveSimpleConfigPayload::Direct(cfg) => (cfg, Some(true), None, None),
     };
-
-    if !crate::platform::current_platform().is_linux() {
-        config.inbound.tun_auto_route = false;
-    }
 
     let generated = simple_config::generate_simple_singbox_config(&conn, &config)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成简单配置失败: {e}")))?;
@@ -133,6 +129,14 @@ pub async fn save_simple_config(
                 format!("配置已保存，但重启服务失败: {e}"),
             ));
         }
+    } else if !state.service_manager.is_running().await {
+        let config_path = crate::service::SingBoxServiceManager::get_running_config_path();
+        if let Some(parent) = config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(config_str) = serde_json::to_string_pretty(&generated) {
+            let _ = std::fs::write(&config_path, config_str);
+        }
     }
 
     Ok(Json(serde_json::json!({
@@ -152,7 +156,7 @@ pub async fn preview_simple_config(
         .map_err(|s| (s, "未授权".to_string()))?;
     let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
 
-    let mut cfg = if let Some(Json(val)) = payload {
+    let cfg = if let Some(Json(val)) = payload {
         if let Ok(wrapped) = serde_json::from_value::<SaveSimpleConfigRequest>(val.clone()) {
             wrapped.config
         } else if let Ok(direct) = serde_json::from_value::<SimpleConfig>(val) {
@@ -163,10 +167,6 @@ pub async fn preview_simple_config(
     } else {
         simple_config::get_saved_simple_config(&conn)
     };
-
-    if !crate::platform::current_platform().is_linux() {
-        cfg.inbound.tun_auto_route = false;
-    }
 
     let generated = simple_config::generate_simple_singbox_config(&conn, &cfg)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成预览失败: {e}")))?;

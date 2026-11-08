@@ -356,7 +356,13 @@ impl AppPaths {
             candidates.push(custom.clone());
         }
 
-        // 2. Application data kernel path (<data_dir>/bin/sing-box or <data_dir>/sing-box/sing-box)
+        // 2. Application data kernel path (<data_dir>/bin/sing-box-<os>-<arch> or <data_dir>/bin/sing-box)
+        if let Some(target) = crate::kernel::detect_current_target() {
+            let ext = if target.os == "windows" { ".exe" } else { "" };
+            let platform_bin = format!("sing-box-{}-{}{}", target.os, target.arch, ext);
+            candidates.push(self.kernel_dir().join(&platform_bin));
+            candidates.push(PathBuf::from(format!("./runtime/data/bin/{platform_bin}")));
+        }
         candidates.push(self.kernel_binary_path());
         candidates.push(self.data_dir.join("sing-box").join(binary_name));
 

@@ -447,7 +447,6 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         }
 
         println!("\n[Server] 正在停止服务并安全退出... (再次按 Ctrl+C 强制退出)");
-        let _ = shutdown_tx.send(true);
 
         // Spawn listener for secondary Ctrl+C to force immediate quit
         tokio::spawn(async {
@@ -459,10 +458,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         });
 
         // Stop sing-box and clean up system proxy settings (disable_system_proxy / disable_tun_dns).
-        // This MUST happen BEFORE axum connection draining so that even if the process is killed
-        // by launchctl/systemctl's ExitTimeOut immediately after, the proxy is already cleared.
-        // Without this, the system proxy would point at a dead port → long-term disconnection.
+        // This MUST happen BEFORE signaling shutdown_tx and draining axum connections so that
+        // the 300ms HTTP drain timeout never cancels stop() before system DNS/proxy is restored.
         let _ = service_mgr_for_shutdown.stop().await;
+        let _ = shutdown_tx.send(true);
     };
 
     let mut shutdown_exit_rx = shutdown_signal_rx.clone();

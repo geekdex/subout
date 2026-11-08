@@ -323,40 +323,91 @@ const ConditionFieldsEditor: React.FC<ConditionFieldsEditorProps> = ({
         </div>
 
         {isAndroid ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <TagListInput
-              label="Android 应用包名 (package_name)"
-              values={item.package_name || []}
-              onChange={(v) => updateField("package_name", v)}
-              placeholder="例如: org.telegram.messenger, com.android.chrome"
-            />
-            <TagListInput
-              label="Android 包名正则 (package_name_regex)"
-              values={item.package_name_regex || []}
-              onChange={(v) => updateField("package_name_regex", v)}
-              placeholder="例如: ^com\\.google\\..*"
-            />
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <TagListInput
+                label="Android 应用包名 (package_name)"
+                values={item.package_name || []}
+                onChange={(v) => updateField("package_name", v)}
+                placeholder="例如: org.telegram.messenger, com.android.chrome"
+              />
+              <TagListInput
+                label="Android 包名正则 (package_name_regex)"
+                values={item.package_name_regex || []}
+                onChange={(v) => updateField("package_name_regex", v)}
+                placeholder="例如: ^com\\.google\\..*"
+              />
+            </div>
+            {Boolean(
+              item.process_name?.length ||
+              item.process_path?.length ||
+              item.process_path_regex?.length,
+            ) && (
+              <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 flex items-center justify-between gap-2 text-xs text-rose-200">
+                <span>
+                  检测到不兼容 Android 平台的桌面端进程字段
+                  (process_name/process_path)，请移除后再保存：
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next: NestedRuleItem = { ...item };
+                    delete next.process_name;
+                    delete next.process_path;
+                    delete next.process_path_regex;
+                    onChange(next);
+                  }}
+                  className="px-2 py-1 rounded text-[11px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 border border-rose-500/30 shrink-0"
+                >
+                  移除桌面进程字段
+                </button>
+              </div>
+            )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <TagListInput
-              label="进程名称 (process_name)"
-              values={item.process_name || []}
-              onChange={(v) => updateField("process_name", v)}
-              placeholder="例如: curl, git, chrome, Code"
-            />
-            <TagListInput
-              label="进程完整路径 (process_path)"
-              values={item.process_path || []}
-              onChange={(v) => updateField("process_path", v)}
-              placeholder="例如: /usr/bin/curl, C:\\Program Files\\..."
-            />
-            <TagListInput
-              label="进程路径正则 (process_path_regex)"
-              values={item.process_path_regex || []}
-              onChange={(v) => updateField("process_path_regex", v)}
-              placeholder="例如: .*/Steam/.*"
-            />
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <TagListInput
+                label="进程名称 (process_name)"
+                values={item.process_name || []}
+                onChange={(v) => updateField("process_name", v)}
+                placeholder="例如: curl, git, chrome, Code"
+              />
+              <TagListInput
+                label="进程完整路径 (process_path)"
+                values={item.process_path || []}
+                onChange={(v) => updateField("process_path", v)}
+                placeholder="例如: /usr/bin/curl, C:\\Program Files\\..."
+              />
+              <TagListInput
+                label="进程路径正则 (process_path_regex)"
+                values={item.process_path_regex || []}
+                onChange={(v) => updateField("process_path_regex", v)}
+                placeholder="例如: .*/Steam/.*"
+              />
+            </div>
+            {Boolean(
+              item.package_name?.length || item.package_name_regex?.length,
+            ) && (
+              <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 flex items-center justify-between gap-2 text-xs text-rose-200">
+                <span>
+                  检测到不兼容桌面平台的 Android 应用包名字段
+                  (package_name)，请移除后再保存：
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next: NestedRuleItem = { ...item };
+                    delete next.package_name;
+                    delete next.package_name_regex;
+                    onChange(next);
+                  }}
+                  className="px-2 py-1 rounded text-[11px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 border border-rose-500/30 shrink-0"
+                >
+                  移除 Android 包名字段
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

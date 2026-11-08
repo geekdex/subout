@@ -420,7 +420,9 @@ describe("NodesView Component", () => {
     // Warning banner is displayed
     expect(screen.getByText("sing-box 代理服务正在运行中")).toBeDefined();
     expect(
-      screen.getByText(/为保证测速数据真实性并避免网络流量环路，在开启 sing-box 时已禁用节点测速/),
+      screen.getByText(
+        /为保证测速数据真实性并避免网络流量环路，在开启 sing-box 时已禁用节点测速/,
+      ),
     ).toBeDefined();
 
     // Stop service button is rendered and functional

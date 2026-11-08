@@ -443,7 +443,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               size="sm"
               loading={siteTesting}
               onClick={handleRunSiteTest}
-              icon={<RotateCw className={`w-3.5 h-3.5 ${siteTesting ? "animate-spin text-sky-400" : ""}`} />}
+              icon={
+                <RotateCw
+                  className={`w-3.5 h-3.5 ${siteTesting ? "animate-spin text-sky-400" : ""}`}
+                />
+              }
             >
               测速探针
             </Button>
@@ -506,7 +510,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <p className="text-[11px] text-slate-500 leading-relaxed pt-1 border-t border-slate-800/60">
-            💡 由程序服务端宿主机直接发起探测，无论代理是否开启均可准确检测境外与境内网络的实际连通性与延迟。
+            💡
+            由程序服务端宿主机直接发起探测，无论代理是否开启均可准确检测境外与境内网络的实际连通性与延迟。
           </p>
         </div>
       </div>

@@ -102,10 +102,7 @@ impl PlatformStrategy for FallbackPlatform {
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
-            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun && let Some(ar) = obj.get_mut("auto_route") {
-                *ar = serde_json::json!(false);
-            }
+            obj.remove("auto_redirect");
         }
     }
 

@@ -110,6 +110,7 @@ pub fn sanitize_dns_value(dns: &mut Value) {
             .get("strategy")
             .and_then(|s| s.as_str())
             .is_some_and(|s| s == "ipv4_only");
+        let mut fakeip_tags = HashSet::new();
         if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for server in servers {
                 if let Some(srv_obj) = server.as_object_mut() {
@@ -118,6 +119,9 @@ pub fn sanitize_dns_value(dns: &mut Value) {
                         srv_obj.remove("detour");
                     }
                     if srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
+                        if let Some(tag) = srv_obj.get("tag").and_then(|t| t.as_str()) {
+                            fakeip_tags.insert(tag.to_string());
+                        }
                         if !srv_obj.contains_key("inet4_range") {
                             srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
                         }
@@ -125,6 +129,19 @@ pub fn sanitize_dns_value(dns: &mut Value) {
                             srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
                         }
                     }
+                }
+            }
+        }
+        if !fakeip_tags.is_empty()
+            && let Some(rules) = obj.get_mut("rules").and_then(|r| r.as_array_mut())
+        {
+            for rule in rules {
+                if let Some(rule_obj) = rule.as_object_mut()
+                    && let Some(srv) = rule_obj.get("server").and_then(|s| s.as_str())
+                    && fakeip_tags.contains(srv)
+                    && !rule_obj.contains_key("query_type")
+                {
+                    rule_obj.insert("query_type".to_string(), json!(["A", "AAAA"]));
                 }
             }
         }
@@ -227,6 +244,30 @@ pub fn sanitize_log_value(log: &mut Value) {
     }
 }
 
+fn find_preferred_domain_resolver_tag(root: &serde_json::Map<String, Value>) -> Option<String> {
+    root.get("dns")
+        .and_then(|d| d.get("servers"))
+        .and_then(|s| s.as_array())
+        .and_then(|servers| {
+            servers
+                .iter()
+                .find(|srv| {
+                    srv.get("type").and_then(|t| t.as_str()) != Some("fakeip")
+                        && srv
+                            .get("detour")
+                            .and_then(|d| d.as_str())
+                            .is_none_or(|d| d.is_empty() || d == "direct")
+                })
+                .or_else(|| {
+                    servers
+                        .iter()
+                        .find(|srv| srv.get("type").and_then(|t| t.as_str()) != Some("fakeip"))
+                })
+                .and_then(|srv| srv.get("tag").and_then(|t| t.as_str()))
+        })
+        .map(str::to_string)
+}
+
 /// Sanitize and prepare the runtime sing-box configuration to adhere to best practices:
 /// 1. Remove deprecated `independent_cache` from `dns` (deprecated in 1.14.0, removed in 1.16.0).
 /// 2. Remove redundant `detour: "direct"` from DNS, rule sets, and `http_clients` to avoid "detour to an empty direct outbound makes no sense".
@@ -236,10 +277,31 @@ pub fn sanitize_runtime_config(config: &mut Value) {
         return;
     };
 
+    let has_tun_inbound = root
+        .get("inbounds")
+        .and_then(|i| i.as_array())
+        .is_some_and(|arr| {
+            arr.iter()
+                .any(|inb| inb.get("type").and_then(|t| t.as_str()) == Some("tun"))
+        });
+
     if let Some(log) = root.get_mut("log") {
         sanitize_log_value(log);
     }
     if let Some(dns) = root.get_mut("dns") {
+        if has_tun_inbound
+            && let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut())
+        {
+            for server in servers {
+                if let Some(srv_obj) = server.as_object_mut()
+                    && srv_obj.get("type").and_then(|t| t.as_str()) == Some("local")
+                    && !srv_obj.contains_key("server")
+                {
+                    srv_obj.insert("type".to_string(), json!("udp"));
+                    srv_obj.insert("server".to_string(), json!("223.5.5.5"));
+                }
+            }
+        }
         sanitize_dns_value(dns);
     }
     if let Some(inbounds) = root.get_mut("inbounds") {
@@ -318,19 +380,9 @@ pub fn sanitize_runtime_config(config: &mut Value) {
     }
 
     // sing-box 1.14 将 "missing route.default_domain_resolver" 从废弃警告升级为启动错误。
-    // 若配置了 DNS 服务器但未指定解析器，自动指向首个非 fakeip 的服务器。
+    // 若配置了 DNS 服务器但未指定解析器，优先指向首个直连（无代理 detour）的非 fakeip 服务器。
     // （先取出 owned 值，避免与 route 的可变借用冲突）
-    let resolver_tag = root
-        .get("dns")
-        .and_then(|d| d.get("servers"))
-        .and_then(|s| s.as_array())
-        .and_then(|servers| {
-            servers
-                .iter()
-                .find(|srv| srv.get("type").and_then(|t| t.as_str()) != Some("fakeip"))
-                .and_then(|srv| srv.get("tag").and_then(|t| t.as_str()))
-        })
-        .map(str::to_string);
+    let resolver_tag = find_preferred_domain_resolver_tag(root);
     if let Some(route_obj) = root.get_mut("route").and_then(|r| r.as_object_mut())
         && !route_obj.contains_key("default_domain_resolver")
         && let Some(tag) = resolver_tag
@@ -763,7 +815,7 @@ mod tests {
         );
         assert_eq!(linux_inbound.get("strict_route"), None);
 
-        // Test macOS strategy: 移除系统不兼容字段，强制禁用 auto_route
+        // Test macOS strategy: 移除系统不兼容字段，保留 auto_route
         let mut macos_inbound = json!({
             "type": "tun",
             "tag": "tun-in",
@@ -775,14 +827,14 @@ mod tests {
         crate::platform::macos_platform().sanitize_inbound(&mut macos_inbound);
         assert_eq!(macos_inbound.get("auto_redirect"), None);
         assert_eq!(macos_inbound.get("interface_name"), None);
-        assert_eq!(macos_inbound.get("auto_route"), Some(&json!(false)));
+        assert_eq!(macos_inbound.get("auto_route"), Some(&json!(true)));
         assert_eq!(
             macos_inbound.get("address"),
             Some(&json!(["172.19.0.1/30"]))
         );
         assert_eq!(macos_inbound.get("strict_route"), None);
 
-        // Test Windows strategy: 适配系统网卡命名，强制禁用 auto_route
+        // Test Windows strategy: 适配系统网卡命名，保留 auto_route
         let mut win_inbound = json!({
             "type": "tun",
             "tag": "tun-in",
@@ -793,7 +845,7 @@ mod tests {
         });
         crate::platform::windows_platform().sanitize_inbound(&mut win_inbound);
         assert_eq!(win_inbound.get("auto_redirect"), None);
-        assert_eq!(win_inbound.get("auto_route"), Some(&json!(false)));
+        assert_eq!(win_inbound.get("auto_route"), Some(&json!(true)));
         assert_eq!(
             win_inbound.get("interface_name"),
             Some(&json!("subout-tun"))

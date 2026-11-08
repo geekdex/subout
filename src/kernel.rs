@@ -387,6 +387,12 @@ pub fn extract_archive(
     }
     std::fs::rename(&temp_path, &target_path)?;
 
+    if let Some(target) = detect_current_target() {
+        let ext = if target.os == "windows" { ".exe" } else { "" };
+        let platform_path = dest_dir.join(format!("sing-box-{}-{}{}", target.os, target.arch, ext));
+        let _ = std::fs::copy(&target_path, &platform_path);
+    }
+
     Ok(target_path)
 }
 

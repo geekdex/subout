@@ -516,6 +516,7 @@ pub async fn validate_full_config(
     if let Some(hc) = payload.http_clients {
         config["http_clients"] = hc;
     }
+    generator::sanitize_runtime_config(&mut config);
 
     let temp_file_path = crate::paths::AppPaths::get().temp_file_path("singbox_val", ".json");
 
@@ -778,23 +779,23 @@ pub async fn create_history_config(
                 "servers": [
                     {
                         "tag": "dns-remote",
-                        "address": "tls://1.1.1.1",
-                        "address_resolver": "dns-direct"
+                        "type": "tls",
+                        "server": "1.1.1.1"
                     },
                     {
                         "tag": "dns-direct",
-                        "address": "local",
-                        "detour": "direct"
+                        "type": "udp",
+                        "server": "223.5.5.5"
                     }
                 ]
             },
             "inbounds": [],
             "outbounds": [
-                { "type": "direct", "tag": "direct" },
-                { "type": "block", "tag": "block" }
+                { "type": "direct", "tag": "direct" }
             ],
             "route": {
                 "auto_detect_interface": true,
+                "default_domain_resolver": "dns-direct",
                 "default_http_client": "direct"
             },
             "http_clients": [

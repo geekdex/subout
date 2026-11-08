@@ -27,10 +27,236 @@ pub fn validate_singbox_schema(config: &Value) -> Result<(), Vec<String>> {
 
 /// Validates a JSON string against the official `schema.json`.
 pub fn validate_singbox_schema_str(config_str: &str) -> Result<Value, Vec<String>> {
+    validate_singbox_config_str_for_platform(config_str, None)
+}
+
+/// Validates a sing-box configuration JSON value against both the official `schema.json`
+/// and explicit target-platform / `sing-box 1.14` semantic constraints.
+pub fn validate_singbox_config_for_platform(
+    config: &Value,
+    platform: Option<&str>,
+) -> Result<(), Vec<String>> {
+    let mut errors = Vec::new();
+    if let Err(schema_errs) = validate_singbox_schema(config) {
+        errors.extend(schema_errs);
+    }
+    if let Err(semantic_errs) = validate_platform_and_semantic_rules(config, platform) {
+        errors.extend(semantic_errs);
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Validates a JSON string against both the official `schema.json` and target-platform rules.
+pub fn validate_singbox_config_str_for_platform(
+    config_str: &str,
+    platform: Option<&str>,
+) -> Result<Value, Vec<String>> {
     let parsed: Value =
         serde_json::from_str(config_str).map_err(|e| vec![format!("JSON 语法解析失败: {e}")])?;
-    validate_singbox_schema(&parsed)?;
+    validate_singbox_config_for_platform(&parsed, platform)?;
     Ok(parsed)
+}
+
+fn has_non_empty_field(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
+    match obj.get(key) {
+        Some(Value::String(s)) => !s.trim().is_empty(),
+        Some(Value::Array(arr)) => !arr.is_empty(),
+        Some(Value::Number(_) | Value::Object(_)) => true,
+        Some(Value::Bool(b)) => *b,
+        _ => false,
+    }
+}
+
+fn validate_rule_platform_fields(rule: &Value, plat: &str, path: &str, errors: &mut Vec<String>) {
+    let Some(obj) = rule.as_object() else {
+        return;
+    };
+
+    if plat == "android" {
+        for key in ["process_name", "process_path", "process_path_regex"] {
+            if has_non_empty_field(obj, key) {
+                errors.push(format!(
+                    "{path}.{key}: 桌面端进程匹配字段 '{key}' 不适用于 Android 平台，请改用 package_name / package_name_regex 或移除该项"
+                ));
+            }
+        }
+    } else {
+        for key in ["package_name", "package_name_regex"] {
+            if has_non_empty_field(obj, key) {
+                errors.push(format!(
+                    "{path}.{key}: Android 应用包名匹配字段 '{key}' 不适用于桌面平台 ({})，请改用 process_name / process_path 或移除该项",
+                    plat.to_uppercase()
+                ));
+            }
+        }
+    }
+
+    if let Some(children) = obj.get("rules").and_then(Value::as_array) {
+        for (idx, child) in children.iter().enumerate() {
+            let child_path = format!("{path}.rules[{idx}]");
+            validate_rule_platform_fields(child, plat, &child_path, errors);
+        }
+    }
+}
+
+fn validate_platform_and_semantic_rules(
+    config: &Value,
+    platform: Option<&str>,
+) -> Result<(), Vec<String>> {
+    let Some(root) = config.as_object() else {
+        return Ok(());
+    };
+    let mut errors = Vec::new();
+    let plat_norm = platform
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty());
+
+    // 1. Platform-specific explicit validation
+    if let Some(ref plat) = plat_norm {
+        if let Some(inbounds) = root.get("inbounds").and_then(Value::as_array) {
+            for (idx, inb) in inbounds.iter().enumerate() {
+                let Some(inb_obj) = inb.as_object() else {
+                    continue;
+                };
+                if inb_obj.get("type").and_then(Value::as_str) == Some("tun") {
+                    if inb_obj.get("auto_redirect").and_then(Value::as_bool) == Some(true)
+                        && plat != "linux"
+                    {
+                        errors.push(format!(
+                            "inbounds[{idx}].auto_redirect: 仅 Linux 平台支持 auto_redirect (nftables)，当前平台 ({}) 不支持，请关闭或移除该项",
+                            plat.to_uppercase()
+                        ));
+                    }
+
+                    if has_non_empty_field(inb_obj, "netns") && plat != "linux" {
+                        errors.push(format!(
+                            "inbounds[{idx}].netns: 仅 Linux 平台支持 netns 网络命名空间，当前平台 ({}) 不支持，请移除该项",
+                            plat.to_uppercase()
+                        ));
+                    }
+
+                    if plat == "macos"
+                        && let Some(iface) = inb_obj
+                            .get("interface_name")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                    {
+                        let valid_utun = iface
+                            .strip_prefix("utun")
+                            .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit()));
+                        if !valid_utun {
+                            errors.push(format!(
+                                "inbounds[{idx}].interface_name: macOS 平台 TUN 网卡名称必须为 utun[0-9]*（如 utun9）或留空由系统自动分配，当前值 '{iface}' 不合法"
+                            ));
+                        }
+                    }
+
+                    if plat != "android" {
+                        for key in ["include_package", "exclude_package", "include_android_user"] {
+                            if has_non_empty_field(inb_obj, key) {
+                                errors.push(format!(
+                                    "inbounds[{idx}].{key}: Android 应用分流字段 '{key}' 仅适用于 Android 平台，当前平台 ({}) 不支持，请移除该项",
+                                    plat.to_uppercase()
+                                ));
+                            }
+                        }
+                    }
+
+                    if plat != "linux" {
+                        for key in [
+                            "include_uid",
+                            "include_uid_range",
+                            "exclude_uid",
+                            "exclude_uid_range",
+                            "include_interface",
+                            "exclude_interface",
+                            "include_mac_address",
+                            "exclude_mac_address",
+                        ] {
+                            if has_non_empty_field(inb_obj, key) {
+                                errors.push(format!(
+                                    "inbounds[{idx}].{key}: Linux 专属 TUN 路由过滤字段 '{key}' 仅适用于 Linux 平台，当前平台 ({}) 不支持，请移除该项",
+                                    plat.to_uppercase()
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(route_rules) = root
+            .get("route")
+            .and_then(|r| r.get("rules"))
+            .and_then(Value::as_array)
+        {
+            for (idx, rule) in route_rules.iter().enumerate() {
+                let path = format!("route.rules[{idx}]");
+                validate_rule_platform_fields(rule, plat, &path, &mut errors);
+            }
+        }
+
+        if let Some(dns_rules) = root
+            .get("dns")
+            .and_then(|d| d.get("rules"))
+            .and_then(Value::as_array)
+        {
+            for (idx, rule) in dns_rules.iter().enumerate() {
+                let path = format!("dns.rules[{idx}]");
+                validate_rule_platform_fields(rule, plat, &path, &mut errors);
+            }
+        }
+    }
+
+    // 2. Explicit sing-box 1.14 semantic checks
+    if let Some(servers) = root
+        .get("dns")
+        .and_then(|d| d.get("servers"))
+        .and_then(Value::as_array)
+    {
+        for (idx, srv) in servers.iter().enumerate() {
+            if srv.get("detour").and_then(Value::as_str) == Some("direct") {
+                errors.push(format!(
+                    "dns.servers[{idx}].detour: 不能将 detour 设为 'direct'（sing-box 1.14 中指向空 direct 出站会导致启动失败），请设为无绕行（直连）"
+                ));
+            }
+        }
+    }
+
+    if let Some(clients) = root.get("http_clients").and_then(Value::as_array) {
+        for (idx, client) in clients.iter().enumerate() {
+            if client.get("detour").and_then(Value::as_str) == Some("direct") {
+                errors.push(format!(
+                    "http_clients[{idx}].detour: 不能将 detour 设为 'direct'（sing-box 1.14 中指向空 direct 出站会导致启动失败），请移除 detour 字段以使用默认直连"
+                ));
+            }
+        }
+    }
+
+    if let Some(rule_sets) = root
+        .get("route")
+        .and_then(|r| r.get("rule_set"))
+        .and_then(Value::as_array)
+    {
+        for (idx, rs) in rule_sets.iter().enumerate() {
+            if rs.get("download_detour").and_then(Value::as_str) == Some("direct") {
+                errors.push(format!(
+                    "route.rule_set[{idx}].download_detour: 不能将 download_detour 设为 'direct'（sing-box 1.14 中指向空 direct 出站会导致启动失败），请移除该字段"
+                ));
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 fn resolve_ref<'a>(root_schema: &'a Value, reference: &str) -> Option<&'a Value> {
@@ -727,5 +953,87 @@ mod tests {
         });
         let err4 = validate_singbox_schema(&bad_nested_rule_with_action).unwrap_err();
         assert!(err4.iter().any(|e| e.contains("server")));
+    }
+
+    #[test]
+    fn test_platform_specific_explicit_validation_rejects_incompatible_fields() {
+        let non_linux_auto_redirect = json!({
+            "inbounds": [
+                {
+                    "type": "tun",
+                    "tag": "tun-in",
+                    "address": ["172.19.0.1/30"],
+                    "auto_route": true,
+                    "auto_redirect": true
+                }
+            ]
+        });
+        assert!(
+            validate_singbox_config_for_platform(&non_linux_auto_redirect, Some("linux")).is_ok()
+        );
+        let macos_err =
+            validate_singbox_config_for_platform(&non_linux_auto_redirect, Some("macos"))
+                .unwrap_err();
+        assert!(macos_err.iter().any(|e| e.contains("auto_redirect")));
+
+        let macos_bad_iface = json!({
+            "inbounds": [
+                {
+                    "type": "tun",
+                    "tag": "tun-in",
+                    "interface_name": "tun0",
+                    "address": ["172.19.0.1/30"]
+                }
+            ]
+        });
+        let iface_err =
+            validate_singbox_config_for_platform(&macos_bad_iface, Some("macos")).unwrap_err();
+        assert!(iface_err.iter().any(|e| e.contains("interface_name")));
+
+        let android_with_process_name = json!({
+            "route": {
+                "rules": [
+                    {
+                        "process_name": ["curl"],
+                        "outbound": "direct"
+                    }
+                ]
+            }
+        });
+        let android_err =
+            validate_singbox_config_for_platform(&android_with_process_name, Some("android"))
+                .unwrap_err();
+        assert!(android_err.iter().any(|e| e.contains("process_name")));
+
+        let desktop_with_package_name = json!({
+            "route": {
+                "rules": [
+                    {
+                        "package_name": ["com.android.chrome"],
+                        "outbound": "direct"
+                    }
+                ]
+            }
+        });
+        let desktop_err =
+            validate_singbox_config_for_platform(&desktop_with_package_name, Some("linux"))
+                .unwrap_err();
+        assert!(desktop_err.iter().any(|e| e.contains("package_name")));
+
+        let direct_detour_cfg = json!({
+            "http_clients": [
+                {
+                    "tag": "direct",
+                    "detour": "direct"
+                }
+            ]
+        });
+        let detour_err =
+            validate_singbox_config_for_platform(&direct_detour_cfg, Some("linux")).unwrap_err();
+        assert!(
+            detour_err
+                .iter()
+                .any(|e| e.contains("http_clients[0].detour"))
+        );
     }
 }

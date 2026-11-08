@@ -423,4 +423,53 @@ describe("ProfileEditor Visual Configuration Component", () => {
       show_json_preview: true,
     });
   });
+
+  it("blocks saving on non-Linux platform when Linux-only auto_redirect is set, without silently stripping it", async () => {
+    const invalidMacProfile: ConfigProfile = {
+      ...baseLinuxProfile,
+      id: 4,
+      name: "macOS 测试配置",
+      platform: "macos",
+      content: JSON.stringify({
+        $schema: "https://sing-box.sagernet.org/schema.json",
+        log: { level: "info", timestamp: true },
+        dns: {},
+        inbounds: [
+          {
+            type: "tun",
+            tag: "tun-in",
+            address: ["172.19.0.1/30"],
+            auto_route: true,
+            auto_redirect: true,
+          },
+        ],
+        outbounds: [{ type: "direct", tag: "direct" }],
+        route: {},
+      }),
+    };
+
+    const onSaved = vi.fn();
+    render(
+      <ToastProvider>
+        <ProfileEditor
+          profile={invalidMacProfile}
+          onClose={vi.fn()}
+          onSaved={onSaved}
+        />
+      </ToastProvider>,
+    );
+
+    // JSON preview explicitly retains auto_redirect: true instead of secretly stripping it
+    const previewEl = screen.getByTestId("json-preview-content");
+    const previewJson = JSON.parse(previewEl.textContent || "{}");
+    expect(previewJson.inbounds[0].auto_redirect).toBe(true);
+
+    // Clicking Save is blocked with an explicit platform validation error
+    fireEvent.click(screen.getByText("保存配置"));
+    expect(api.updateConfig).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByText(/仅 Linux 平台支持 auto_redirect/).length,
+    ).toBeGreaterThan(0);
+  });
 });

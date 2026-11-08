@@ -290,10 +290,7 @@ export const api = {
   async getSystemInfo(): Promise<SystemInfo> {
     return request<SystemInfo>("/api/system/info");
   },
-  async probeSite(
-    url: string,
-    timeoutMs?: number,
-  ): Promise<SiteProbeResponse> {
+  async probeSite(url: string, timeoutMs?: number): Promise<SiteProbeResponse> {
     return request<SiteProbeResponse>("/api/system/site-probe", {
       method: "POST",
       body: JSON.stringify({ url, timeout_ms: timeoutMs }),
@@ -397,12 +394,13 @@ export const api = {
   },
   async validateConfigSchema(
     content: string,
+    platform?: string,
   ): Promise<{ valid: boolean; errors: string[] }> {
     return request<{ valid: boolean; errors: string[] }>(
       "/api/configs/validate",
       {
         method: "POST",
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(platform ? { content, platform } : { content }),
       },
     );
   },

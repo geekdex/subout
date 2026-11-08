@@ -345,7 +345,7 @@ mod tests {
         macos.sanitize_inbound(&mut inbound);
         assert_eq!(inbound.get("interface_name"), None);
         assert_eq!(inbound.get("auto_redirect"), None);
-        assert_eq!(inbound.get("auto_route"), Some(&json!(false)));
+        assert_eq!(inbound.get("auto_route"), Some(&json!(true)));
         assert_eq!(inbound.get("strict_route"), None);
         assert_eq!(inbound.get("stack"), None);
         assert_eq!(inbound.get("address"), None);
@@ -372,7 +372,7 @@ mod tests {
         windows.sanitize_inbound(&mut inbound);
         assert_eq!(inbound.get("interface_name"), Some(&json!("subout-tun")));
         assert_eq!(inbound.get("auto_redirect"), None);
-        assert_eq!(inbound.get("auto_route"), Some(&json!(false)));
+        assert_eq!(inbound.get("auto_route"), Some(&json!(true)));
         assert_eq!(inbound.get("strict_route"), None);
         assert_eq!(inbound.get("stack"), None);
         assert_eq!(inbound.get("address"), None);

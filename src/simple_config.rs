@@ -17,7 +17,7 @@ impl Default for SimpleDnsConfig {
     fn default() -> Self {
         Self {
             mode: "local_fakeip".to_string(),
-            domestic_dns: "local".to_string(),
+            domestic_dns: "223.5.5.5".to_string(),
             foreign_dns: "fakeip".to_string(),
         }
     }
@@ -39,7 +39,7 @@ impl Default for SimpleInboundConfig {
             mixed_port: 2080,
             allow_lan: false,
             tun_stack: "system".to_string(),
-            tun_auto_route: crate::platform::current_platform().is_linux(),
+            tun_auto_route: true,
         }
     }
 }
@@ -105,24 +105,15 @@ pub struct SimpleConfig {
 
 pub fn get_saved_simple_config(conn: &Connection) -> SimpleConfig {
     if let Ok(Some(json_str)) = db::get_setting(conn, "simple_config")
-        && let Ok(mut cfg) = serde_json::from_str::<SimpleConfig>(&json_str)
+        && let Ok(cfg) = serde_json::from_str::<SimpleConfig>(&json_str)
     {
-        // Auto Route is only supported on Linux; force disable on all other systems
-        if !crate::platform::current_platform().is_linux() {
-            cfg.inbound.tun_auto_route = false;
-        }
         return cfg;
     }
     SimpleConfig::default()
 }
 
 pub fn save_simple_config(conn: &Connection, cfg: &SimpleConfig) -> Result<()> {
-    let mut normalized_cfg = cfg.clone();
-    // Auto Route is only supported on Linux; force disable on all other systems
-    if !crate::platform::current_platform().is_linux() {
-        normalized_cfg.inbound.tun_auto_route = false;
-    }
-    let json_str = serde_json::to_string(&normalized_cfg)?;
+    let json_str = serde_json::to_string(cfg)?;
     db::update_setting(conn, "simple_config", &json_str)?;
     Ok(())
 }
@@ -130,7 +121,7 @@ pub fn save_simple_config(conn: &Connection, cfg: &SimpleConfig) -> Result<()> {
 fn apply_dns_detour(obj: &mut Value, detour: Option<&str>) {
     if let Some(d) = detour {
         let trimmed = d.trim();
-        if !trimmed.is_empty() {
+        if !trimmed.is_empty() && trimmed != "direct" {
             obj["detour"] = json!(trimmed);
         }
     }
@@ -289,20 +280,11 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         || cfg.dns.mode == "fakeip"
         || cfg.dns.foreign_dns.trim().eq_ignore_ascii_case("fakeip");
 
-    let domestic_dns = if is_fakeip_mode
-        && (cfg.dns.domestic_dns.trim().is_empty()
-            || cfg.dns.domestic_dns.trim() == "local"
-            || cfg.dns.domestic_dns.trim() == "223.5.5.5")
-    {
-        "local".to_string()
-    } else if cfg.dns.domestic_dns.trim().is_empty() {
-        if is_fakeip_mode {
-            "local".to_string()
-        } else {
-            "223.5.5.5".to_string()
-        }
+    let raw_domestic = cfg.dns.domestic_dns.trim();
+    let domestic_dns = if raw_domestic.is_empty() || raw_domestic.eq_ignore_ascii_case("local") {
+        "223.5.5.5".to_string()
     } else {
-        cfg.dns.domestic_dns.trim().to_string()
+        raw_domestic.to_string()
     };
 
     let foreign_dns = if is_fakeip_mode {
@@ -395,21 +377,64 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
                     "rule_set": "geosite-cn",
                     "server": "dns_local"
                 }));
-                dns_rules.push(json!({
-                    "rule_set": "geosite-geolocation-!cn",
-                    "server": remote_dns_tag
-                }));
+                if remote_dns_tag == "dns_fakeip" {
+                    dns_rules.push(json!({
+                        "query_type": ["HTTPS", "SVCB"],
+                        "action": "predefined",
+                        "rcode": "NOERROR"
+                    }));
+                    dns_rules.push(json!({
+                        "rule_set": "geosite-geolocation-!cn",
+                        "query_type": ["A", "AAAA"],
+                        "server": "dns_fakeip"
+                    }));
+                    dns_rules.push(json!({
+                        "query_type": ["A", "AAAA"],
+                        "server": "dns_fakeip"
+                    }));
+                } else {
+                    dns_rules.push(json!({
+                        "rule_set": "geosite-geolocation-!cn",
+                        "server": remote_dns_tag
+                    }));
+                }
             }
             "gfw" => {
-                dns_rules.push(json!({
-                    "rule_set": "geosite-geolocation-!cn",
-                    "server": remote_dns_tag
-                }));
+                if remote_dns_tag == "dns_fakeip" {
+                    dns_rules.push(json!({
+                        "rule_set": "geosite-geolocation-!cn",
+                        "query_type": ["HTTPS", "SVCB"],
+                        "action": "predefined",
+                        "rcode": "NOERROR"
+                    }));
+                    dns_rules.push(json!({
+                        "rule_set": "geosite-geolocation-!cn",
+                        "query_type": ["A", "AAAA"],
+                        "server": "dns_fakeip"
+                    }));
+                } else {
+                    dns_rules.push(json!({
+                        "rule_set": "geosite-geolocation-!cn",
+                        "server": remote_dns_tag
+                    }));
+                }
             }
             "global" => {
-                dns_rules.push(json!({
-                    "server": remote_dns_tag
-                }));
+                if remote_dns_tag == "dns_fakeip" {
+                    dns_rules.push(json!({
+                        "query_type": ["HTTPS", "SVCB"],
+                        "action": "predefined",
+                        "rcode": "NOERROR"
+                    }));
+                    dns_rules.push(json!({
+                        "query_type": ["A", "AAAA"],
+                        "server": "dns_fakeip"
+                    }));
+                } else {
+                    dns_rules.push(json!({
+                        "server": remote_dns_tag
+                    }));
+                }
             }
             _ => {}
         }
@@ -446,11 +471,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         let effective_stack = platform.effective_tun_stack(raw_stack);
         let iface_name = platform.default_tun_interface_name();
         let strict_route = platform.default_tun_strict_route();
-        let effective_auto_route = if platform.is_linux() {
-            cfg.inbound.tun_auto_route
-        } else {
-            false
-        };
+        let effective_auto_route = cfg.inbound.tun_auto_route;
         let mut tun_obj = json!({
             "type": "tun",
             "tag": "tun-in",
@@ -463,7 +484,9 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         if !iface_name.is_empty() {
             tun_obj["interface_name"] = json!(iface_name);
         }
-        platform.sanitize_inbound(&mut tun_obj);
+        if platform.is_linux() && effective_auto_route {
+            tun_obj["auto_redirect"] = json!(true);
+        }
         json!([tun_obj, mixed_obj])
     } else {
         json!([mixed_obj])
@@ -659,7 +682,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }
     });
 
-    Ok(json!({
+    let result = json!({
         "log": log_val,
         "dns": dns_val,
         "inbounds": inbounds_val,
@@ -667,7 +690,8 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         "route": route_val,
         "http_clients": http_clients,
         "experimental": experimental_val
-    }))
+    });
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -679,8 +703,8 @@ mod tests {
         let local_udp = build_dns_server("dns_local", "223.5.5.5", Some("direct"));
         assert_eq!(local_udp["type"], "udp");
         assert_eq!(local_udp["server"], "223.5.5.5");
-        // "direct" detour ensures domestic DNS queries route directly rather than via proxy
-        assert_eq!(local_udp["detour"], "direct");
+        // Omitting "detour" when target is "direct" prevents sing-box "detour to an empty direct outbound makes no sense" fatal error
+        assert!(local_udp.get("detour").is_none());
 
         // FakeIP produces pure IPv4 range
         let fakeip = build_dns_server("dns_fakeip", "fakeip", None);
@@ -893,7 +917,8 @@ mod tests {
             .iter()
             .find(|s| s.get("tag").unwrap().as_str() == Some("dns_local"))
             .unwrap();
-        assert_eq!(local_srv.get("type").unwrap().as_str(), Some("local"));
+        assert_eq!(local_srv.get("type").unwrap().as_str(), Some("udp"));
+        assert_eq!(local_srv.get("server").unwrap().as_str(), Some("223.5.5.5"));
 
         let fakeip_srv = dns_servers
             .iter()
@@ -1141,7 +1166,6 @@ mod tests {
             .find(|i| i.get("type").and_then(|t| t.as_str()) == Some("tun"))
             .expect("tun inbound must exist");
 
-        let is_linux = crate::platform::current_platform().is_linux();
-        assert_eq!(tun["auto_route"].as_bool(), Some(is_linux));
+        assert_eq!(tun["auto_route"].as_bool(), Some(true));
     }
 }

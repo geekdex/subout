@@ -722,23 +722,60 @@ impl PlatformStrategy for MacOsPlatform {
     fn disable_system_proxy(&self, sudo_pass: Option<&str>) {
         let services = get_macos_network_services();
         for svc in services {
-            run_macos_netsetup(&["-setwebproxystate", &svc, "off"], sudo_pass);
-            run_macos_netsetup(&["-setsecurewebproxystate", &svc, "off"], sudo_pass);
-            run_macos_netsetup(&["-setsocksfirewallproxystate", &svc, "off"], sudo_pass);
+            let web_on = std::process::Command::new("networksetup")
+                .args(["-getwebproxy", &svc])
+                .output()
+                .map_or(true, |o| {
+                    String::from_utf8_lossy(&o.stdout).contains("Enabled: Yes")
+                });
+            if web_on {
+                run_macos_netsetup(&["-setwebproxystate", &svc, "off"], sudo_pass);
+            }
+
+            let sec_on = std::process::Command::new("networksetup")
+                .args(["-getsecurewebproxy", &svc])
+                .output()
+                .map_or(true, |o| {
+                    String::from_utf8_lossy(&o.stdout).contains("Enabled: Yes")
+                });
+            if sec_on {
+                run_macos_netsetup(&["-setsecurewebproxystate", &svc, "off"], sudo_pass);
+            }
+
+            let socks_on = std::process::Command::new("networksetup")
+                .args(["-getsocksfirewallproxy", &svc])
+                .output()
+                .map_or(true, |o| {
+                    String::from_utf8_lossy(&o.stdout).contains("Enabled: Yes")
+                });
+            if socks_on {
+                run_macos_netsetup(&["-setsocksfirewallproxystate", &svc, "off"], sudo_pass);
+            }
         }
     }
 
-    fn enable_tun_dns(&self, dns_ip: &str, sudo_pass: Option<&str>) {
-        let services = get_macos_network_services();
-        for svc in services {
-            run_macos_netsetup(&["-setdnsservers", &svc, dns_ip], sudo_pass);
-        }
+    fn enable_tun_dns(&self, _dns_ip: &str, sudo_pass: Option<&str>) {
+        // sing-box 1.14+ with `auto_route: true` natively configures per-interface TUN DNS
+        // (`dns_mode: "hijack"` by default). Clean up any residual 172.19.x DNS on physical
+        // services from older versions so physical interface DNS is never polluted.
+        self.disable_tun_dns(sudo_pass);
     }
 
     fn disable_tun_dns(&self, sudo_pass: Option<&str>) {
         let services = get_macos_network_services();
         for svc in services {
-            run_macos_netsetup(&["-setdnsservers", &svc, "empty"], sudo_pass);
+            if let Ok(output) = std::process::Command::new("networksetup")
+                .args(["-getdnsservers", &svc])
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.contains("172.19.")
+                    || stdout.contains("172.18.")
+                    || stdout.contains("198.18.")
+                {
+                    run_macos_netsetup(&["-setdnsservers", &svc, "empty"], sudo_pass);
+                }
+            }
         }
     }
 
@@ -746,16 +783,11 @@ impl PlatformStrategy for MacOsPlatform {
         if let Some(obj) = inbound.as_object_mut() {
             obj.remove("auto_redirect");
             let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun {
-                // Non-Linux systems (macOS) must never enable auto_route
-                if let Some(ar) = obj.get_mut("auto_route") {
-                    *ar = serde_json::json!(false);
-                }
-                if let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
-                    && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
-                {
-                    obj.remove("interface_name");
-                }
+            if is_tun
+                && let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
+                && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
+            {
+                obj.remove("interface_name");
             }
         }
     }

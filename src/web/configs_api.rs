@@ -40,6 +40,7 @@ pub struct SetRunningConfigRequest {
 pub struct ValidateConfigSchemaRequest {
     #[serde(alias = "config_json")]
     pub content: String,
+    pub platform: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -154,13 +155,19 @@ pub async fn create_config(
         .to_string()
     });
 
-    let validated_val =
-        crate::schema_validator::validate_singbox_schema_str(&content).map_err(|errs| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("配置未通过官方 JSON Schema 校验: {}", errs.join("；")),
-            )
-        })?;
+    let validated_val = crate::schema_validator::validate_singbox_config_str_for_platform(
+        &content,
+        Some(&platform),
+    )
+    .map_err(|errs| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "配置未通过官方 JSON Schema 或平台规范校验: {}",
+                errs.join("；")
+            ),
+        )
+    })?;
     let normalized_content = serde_json::to_string_pretty(&validated_val).unwrap_or(content);
 
     let profile = db::create_config_profile(
@@ -241,13 +248,19 @@ pub async fn update_config(
         None => existing.platform,
     };
 
-    let validated_val = crate::schema_validator::validate_singbox_schema_str(&payload.content)
-        .map_err(|errs| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("配置未通过官方 JSON Schema 校验: {}", errs.join("；")),
-            )
-        })?;
+    let validated_val = crate::schema_validator::validate_singbox_config_str_for_platform(
+        &payload.content,
+        Some(&platform),
+    )
+    .map_err(|errs| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "配置未通过官方 JSON Schema 或平台规范校验: {}",
+                errs.join("；")
+            ),
+        )
+    })?;
     let normalized_content =
         serde_json::to_string_pretty(&validated_val).unwrap_or_else(|_| payload.content.clone());
 
@@ -382,7 +395,10 @@ pub async fn validate_config_schema(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
-    match crate::schema_validator::validate_singbox_schema_str(&payload.content) {
+    match crate::schema_validator::validate_singbox_config_str_for_platform(
+        &payload.content,
+        payload.platform.as_deref(),
+    ) {
         Ok(_) => Ok(Json(ValidateConfigSchemaResponse {
             valid: true,
             errors: Vec::new(),

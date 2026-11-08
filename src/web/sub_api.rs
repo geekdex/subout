@@ -23,7 +23,7 @@ pub async fn serve_subscription(
     let latest_vcode = db::get_node_group_version_code(&conn).unwrap_or(0);
 
     let (final_content, effective_vcode) = if profile.version_code < latest_vcode {
-        // Lazy Sync: Update nodes only, preserve route/dns/log/inbounds
+        // Lazy Sync: Update nodes only, preserve route/dns/log/inbounds explicitly
         if let Ok(base_val) = serde_json::from_str::<serde_json::Value>(&profile.content) {
             match generator::sync_config_with_latest_resources(&conn, &base_val, &[]) {
                 Ok((updated_val, _)) => {

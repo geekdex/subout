@@ -1505,7 +1505,6 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
     ? config.inbounds
     : [];
   const isAndroid = platform === "android";
-  const isLinux = platform === "linux";
 
   const updateInbounds = (next: InboundItem[]) => {
     onChange({ ...config, inbounds: next });
@@ -1798,20 +1797,37 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                     />
 
                     {isTun ? (
-                      <Input
-                        label="MTU 大小 (mtu)"
-                        type="number"
-                        value={inb.mtu ? String(inb.mtu) : ""}
-                        onChange={(e) =>
-                          updateInboundAt(idx, {
-                            ...inb,
-                            mtu: e.target.value
-                              ? Number(e.target.value)
-                              : undefined,
-                          })
-                        }
-                        placeholder="默认 (如 9000 或 1500)"
-                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          label="网卡名称 (interface_name)"
+                          value={inb.interface_name || ""}
+                          onChange={(e) =>
+                            updateInboundAt(idx, {
+                              ...inb,
+                              interface_name: e.target.value || undefined,
+                            })
+                          }
+                          placeholder={
+                            platform === "macos"
+                              ? "留空或 utun9"
+                              : "留空自动分配"
+                          }
+                        />
+                        <Input
+                          label="MTU 大小 (mtu)"
+                          type="number"
+                          value={inb.mtu ? String(inb.mtu) : ""}
+                          onChange={(e) =>
+                            updateInboundAt(idx, {
+                              ...inb,
+                              mtu: e.target.value
+                                ? Number(e.target.value)
+                                : undefined,
+                            })
+                          }
+                          placeholder="默认 (如 9000)"
+                        />
+                      </div>
                     ) : (
                       <div className="grid grid-cols-2 gap-2">
                         <Input
@@ -1859,33 +1875,18 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                       />
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div
-                          className={`p-2.5 rounded-lg border flex items-center justify-between ${
-                            isLinux
-                              ? "bg-slate-900/80 border-slate-800"
-                              : "bg-slate-900/40 border-slate-800/60 opacity-75"
-                          }`}
-                        >
-                          <div className="flex flex-col">
-                            <span className="text-xs text-slate-300">
-                              自动配置路由 (auto_route)
-                            </span>
-                            {!isLinux && (
-                              <span className="text-[10px] text-amber-400 mt-0.5">
-                                仅限 Linux，其他系统禁用
-                              </span>
-                            )}
-                          </div>
+                        <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                          <span className="text-xs text-slate-300">
+                            自动配置路由 (auto_route)
+                          </span>
                           <Switch
-                            disabled={!isLinux}
-                            checked={isLinux && Boolean(inb.auto_route)}
-                            onChange={(val) => {
-                              if (!isLinux) return;
+                            checked={Boolean(inb.auto_route)}
+                            onChange={(val) =>
                               updateInboundAt(idx, {
                                 ...inb,
                                 auto_route: val || undefined,
-                              });
-                            }}
+                              })
+                            }
                           />
                         </div>
 
@@ -1904,11 +1905,33 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                           />
                         </div>
 
-                        {platform === "linux" && (
-                          <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                            <span className="text-xs text-slate-300">
-                              NFTables 自动重定向 (auto_redirect)
-                            </span>
+                        {(platform === "linux" ||
+                          Boolean(inb.auto_redirect)) && (
+                          <div
+                            className={`p-2.5 rounded-lg border flex items-center justify-between ${
+                              platform !== "linux" && Boolean(inb.auto_redirect)
+                                ? "bg-rose-500/10 border-rose-500/40"
+                                : "bg-slate-900/80 border-slate-800"
+                            }`}
+                          >
+                            <div>
+                              <span
+                                className={`text-xs block ${
+                                  platform !== "linux" &&
+                                  Boolean(inb.auto_redirect)
+                                    ? "text-rose-200 font-semibold"
+                                    : "text-slate-300"
+                                }`}
+                              >
+                                NFTables 自动重定向 (auto_redirect)
+                              </span>
+                              {platform !== "linux" &&
+                                Boolean(inb.auto_redirect) && (
+                                  <span className="text-[10px] text-rose-300">
+                                    仅 Linux 支持，当前平台不支持，请关闭后保存
+                                  </span>
+                                )}
+                            </div>
                             <Switch
                               checked={Boolean(inb.auto_redirect)}
                               onChange={(val) =>
@@ -1922,8 +1945,64 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                         )}
                       </div>
 
-                      {isAndroid && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                      {"stack" in inb &&
+                        inb.stack !== undefined &&
+                        inb.stack !== "" && (
+                          <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 flex items-center justify-between gap-2">
+                            <span className="text-xs text-rose-200">
+                              检测到旧版字段{" "}
+                              <code className="font-mono">
+                                stack: &quot;{String(inb.stack)}&quot;
+                              </code>
+                              ，不符合当前官方 Schema 规范，请移除后再保存。
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const copy = { ...inb };
+                                delete copy.stack;
+                                updateInboundAt(idx, copy);
+                              }}
+                              className="px-2 py-1 rounded text-[11px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30 shrink-0"
+                            >
+                              移除 stack 字段
+                            </button>
+                          </div>
+                        )}
+
+                      {(isAndroid ||
+                        Boolean(
+                          inb.include_package?.length ||
+                          inb.exclude_package?.length,
+                        )) && (
+                        <div
+                          className={`grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 ${
+                            !isAndroid
+                              ? "p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40"
+                              : ""
+                          }`}
+                        >
+                          {!isAndroid && (
+                            <div className="md:col-span-2 flex items-center justify-between text-xs text-rose-200">
+                              <span>
+                                当前非 Android 平台配置包含 Android
+                                专属包名分流字段，请清空后再保存：
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateInboundAt(idx, {
+                                    ...inb,
+                                    include_package: undefined,
+                                    exclude_package: undefined,
+                                  })
+                                }
+                                className="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 border border-rose-500/30"
+                              >
+                                一键清空包名字段
+                              </button>
+                            </div>
+                          )}
                           <TagListInput
                             label="仅代理指定 Android 应用包名 (include_package)"
                             values={inb.include_package || []}

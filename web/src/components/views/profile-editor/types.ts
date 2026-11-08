@@ -548,9 +548,6 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
         )
         .map((inb) => {
           const copy: Record<string, unknown> = { ...inb };
-          if (copy.type === "tun" && "stack" in copy) {
-            delete copy.stack;
-          }
           if ("address" in copy) {
             const addrArr = toStrArray(copy.address);
             if (addrArr) copy.address = addrArr;
@@ -631,21 +628,9 @@ function cleanRuleNode(
   depth = 0,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  const isAndroid = platform === "android";
 
   for (const [k, v] of Object.entries(rule)) {
     if (v === undefined || v === null || v === "") continue;
-    if (
-      isAndroid &&
-      (k === "process_name" ||
-        k === "process_path" ||
-        k === "process_path_regex")
-    ) {
-      continue;
-    }
-    if (!isAndroid && (k === "package_name" || k === "package_name_regex")) {
-      continue;
-    }
     if (
       depth > 0 &&
       [
@@ -916,13 +901,6 @@ export function serializeVisualStateToConfig(
 
   result.inbounds = (state.inbounds || []).map((inb) => {
     const copy = { ...(inb as Record<string, unknown>) };
-    if (copy.type === "tun") {
-      delete copy.stack;
-    }
-    if (platform !== "android") {
-      delete copy.include_package;
-      delete copy.exclude_package;
-    }
     return cleanObject(copy);
   });
 
@@ -957,4 +935,107 @@ export function serializeVisualStateToConfig(
     : {};
 
   return result;
+}
+
+/**
+ * Validates explicit platform compatibility and sing-box 1.14 semantic rules
+ * without mutating any fields. Any returned error blocks saving until resolved by the user.
+ */
+export function validateExplicitPlatformConstraints(
+  state: SingBoxVisualConfig,
+  platform: PlatformType,
+): string[] {
+  const errors: string[] = [];
+  const platUpper = platform.toUpperCase();
+
+  for (let i = 0; i < (state.inbounds || []).length; i++) {
+    const inb = state.inbounds![i];
+    if (inb.type === "tun") {
+      if (inb.auto_redirect === true && platform !== "linux") {
+        errors.push(
+          `inbounds[${i}].auto_redirect: 仅 Linux 平台支持 auto_redirect (nftables)，当前平台 (${platUpper}) 不支持，请关闭该项`,
+        );
+      }
+      if (
+        platform === "macos" &&
+        typeof inb.interface_name === "string" &&
+        inb.interface_name.trim() !== "" &&
+        !/^utun[0-9]*$/.test(inb.interface_name.trim())
+      ) {
+        errors.push(
+          `inbounds[${i}].interface_name: macOS 平台 TUN 网卡名称必须为 utun[0-9]*（如 utun9）或留空由系统自动分配，当前值 '${inb.interface_name}' 不合法`,
+        );
+      }
+      if (
+        platform !== "android" &&
+        ((Array.isArray(inb.include_package) &&
+          inb.include_package.length > 0) ||
+          (Array.isArray(inb.exclude_package) &&
+            inb.exclude_package.length > 0))
+      ) {
+        errors.push(
+          `inbounds[${i}]: Android 应用分流字段 (include_package / exclude_package) 仅适用于 Android 平台，当前平台 (${platUpper}) 不支持，请清空该项`,
+        );
+      }
+      if ("stack" in inb && inb.stack !== undefined && inb.stack !== "") {
+        errors.push(
+          `inbounds[${i}].stack: 官方 Schema 不允许 stack 字段，请移除该项`,
+        );
+      }
+    }
+  }
+
+  const checkRules = (rules: NestedRuleItem[] | undefined, prefix: string) => {
+    if (!Array.isArray(rules)) return;
+    rules.forEach((r, idx) => {
+      const path = `${prefix}[${idx}]`;
+      if (platform === "android") {
+        for (const key of [
+          "process_name",
+          "process_path",
+          "process_path_regex",
+        ] as const) {
+          if (Array.isArray(r[key]) && r[key]!.length > 0) {
+            errors.push(
+              `${path}.${key}: 桌面端进程匹配字段 '${key}' 不适用于 Android 平台，请改用 package_name 或移除该项`,
+            );
+          }
+        }
+      } else {
+        for (const key of ["package_name", "package_name_regex"] as const) {
+          if (Array.isArray(r[key]) && r[key]!.length > 0) {
+            errors.push(
+              `${path}.${key}: Android 应用包名匹配字段 '${key}' 不适用于桌面平台 (${platUpper})，请改用 process_name 或移除该项`,
+            );
+          }
+        }
+      }
+      if (r.type === "logical" && Array.isArray(r.rules)) {
+        checkRules(r.rules, `${path}.rules`);
+      }
+    });
+  };
+
+  checkRules(state.route?.rules, "route.rules");
+  checkRules(state.dns?.rules, "dns.rules");
+
+  for (let i = 0; i < (state.dns?.servers || []).length; i++) {
+    const srv = state.dns!.servers![i];
+    if (srv.detour === "direct") {
+      errors.push(
+        `dns.servers[${i}].detour: 不能将 detour 设为 'direct'（sing-box 1.14 中指向空 direct 出站会导致启动失败），请设为无绕行（直连）`,
+      );
+    }
+  }
+
+  for (let i = 0; i < (state.http_clients || []).length; i++) {
+    const hc = state.http_clients![i];
+    if (hc.detour === "direct") {
+      errors.push(
+        `http_clients[${i}].detour: 不能将 detour 设为 'direct'（sing-box 1.14 中指向空 direct 出站会导致启动失败），请移除 detour 字段以使用默认直连`,
+      );
+    }
+  }
+
+  return errors;
 }

@@ -44,7 +44,7 @@ const defaultSimpleConfig: SimpleConfig = {
   },
   dns: {
     mode: "local_fakeip",
-    domestic_dns: "local",
+    domestic_dns: "223.5.5.5",
     foreign_dns: "fakeip",
   },
   inbound: {
@@ -64,27 +64,7 @@ const defaultSimpleConfig: SimpleConfig = {
 
 export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
   nodes = [],
-  systemInfo: propSystemInfo,
 }) => {
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | undefined>(
-    propSystemInfo,
-  );
-
-  useEffect(() => {
-    if (propSystemInfo) {
-      setSystemInfo(propSystemInfo);
-    } else if (typeof api?.getSystemInfo === "function") {
-      api.getSystemInfo().then(setSystemInfo).catch(() => {});
-    }
-  }, [propSystemInfo]);
-
-  const isLinux = systemInfo
-    ? systemInfo.host_os === "linux" || systemInfo.is_linux === true
-    : true;
-  const osName = (
-    systemInfo?.host_os || (systemInfo?.is_linux ? "linux" : "未知系统")
-  ).toUpperCase();
-
   const [config, setConfig] = useState<SimpleConfig>(defaultSimpleConfig);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -102,9 +82,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
           inbound: {
             ...defaultSimpleConfig.inbound,
             ...(cfg.inbound || {}),
-            tun_auto_route: isLinux
-              ? ((cfg.inbound || {}).tun_auto_route ?? true)
-              : false,
+            tun_auto_route: (cfg.inbound || {}).tun_auto_route ?? true,
           },
           route: { ...defaultSimpleConfig.route, ...(cfg.route || {}) },
         });
@@ -114,7 +92,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [error, isLinux]);
+  }, [error]);
 
   useEffect(() => {
     loadConfig();
@@ -128,9 +106,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
         ...config,
         inbound: {
           ...config.inbound,
-          tun_auto_route: isLinux
-            ? (config.inbound?.tun_auto_route ?? true)
-            : false,
+          tun_auto_route: config.inbound?.tun_auto_route ?? true,
         },
       };
       await api.saveSimpleConfig(payloadConfig, apply);
@@ -157,9 +133,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
         ...config,
         inbound: {
           ...config.inbound,
-          tun_auto_route: isLinux
-            ? (config.inbound?.tun_auto_route ?? true)
-            : false,
+          tun_auto_route: config.inbound?.tun_auto_route ?? true,
         },
       };
       const generated = await api.previewSimpleConfig(payloadConfig);
@@ -241,14 +215,11 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
   const tunStack = config?.inbound?.tun_stack || "system";
   const mixedPort = config?.inbound?.mixed_port || 2080;
   const allowLan = config?.inbound?.allow_lan || false;
-  const tunAutoRoute = isLinux
-    ? (config?.inbound?.tun_auto_route ?? true)
-    : false;
+  const tunAutoRoute = config?.inbound?.tun_auto_route ?? true;
 
   // DNS options & helpers
-  const dnsMode =
-    config?.dns?.mode === "custom" ? "custom" : "local_fakeip";
-  const domesticDns = config?.dns?.domestic_dns || "local";
+  const dnsMode = config?.dns?.mode === "custom" ? "custom" : "local_fakeip";
+  const domesticDns = config?.dns?.domestic_dns || "223.5.5.5";
   const foreignDns = config?.dns?.foreign_dns || "fakeip";
 
   // Domestic DNS Presets
@@ -510,17 +481,20 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
                         {
                           value: "system",
                           label: "System (系统网络协议栈 - 推荐)",
-                          description: "直接调用操作系统内核网络协议栈，性能优异，开销低",
+                          description:
+                            "直接调用操作系统内核网络协议栈，性能优异，开销低",
                         },
                         {
                           value: "gvisor",
                           label: "gVisor (用户态沙盒协议栈)",
-                          description: "Google 用户态网络协议栈，跨平台隔离兼容性极高",
+                          description:
+                            "Google 用户态网络协议栈，跨平台隔离兼容性极高",
                         },
                         {
                           value: "mixed",
                           label: "Mixed (混合网络协议栈)",
-                          description: "TCP 使用系统网络栈，UDP 使用 gVisor 协议栈",
+                          description:
+                            "TCP 使用系统网络栈，UDP 使用 gVisor 协议栈",
                         },
                       ]}
                     />
@@ -551,35 +525,21 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <div
-                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                      isLinux
-                        ? "bg-slate-800/40 border-slate-800"
-                        : "bg-slate-900/40 border-slate-800/60 opacity-80"
-                    }`}
-                  >
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/40 border border-slate-800 transition-colors">
                     <div className="pr-2">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-medium text-slate-200 block">
                           TUN 自动配置路由 (Auto Route)
                         </span>
-                        {!isLinux && (
-                          <Badge variant="warning" size="sm">
-                            仅限 Linux
-                          </Badge>
-                        )}
                       </div>
                       <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                        {isLinux
-                          ? "自动接管默认网关路由表，免手动设置网络接口"
-                          : `Auto Route 仅在 Linux 平台受支持；当前系统（${osName}）已禁用，不可开启`}
+                        自动接管系统路由表将流量导入 TUN
+                        虚拟网卡，全平台推荐开启
                       </p>
                     </div>
                     <Switch
-                      disabled={!isLinux}
                       checked={tunAutoRoute}
                       onChange={(checked) => {
-                        if (!isLinux) return;
                         setConfig({
                           ...config,
                           inbound: {
@@ -700,7 +660,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
                     dns: {
                       ...config.dns,
                       mode: "local_fakeip",
-                      domestic_dns: "local",
+                      domestic_dns: "223.5.5.5",
                       foreign_dns: "fakeip",
                     },
                   })
@@ -784,7 +744,9 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
-                      variant={domesticPreset === "ali" ? "primary" : "secondary"}
+                      variant={
+                        domesticPreset === "ali" ? "primary" : "secondary"
+                      }
                       onClick={() =>
                         setConfig({
                           ...config,
@@ -878,9 +840,7 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
                     <Button
                       size="sm"
                       variant={
-                        foreignPreset === "cloudflare"
-                          ? "primary"
-                          : "secondary"
+                        foreignPreset === "cloudflare" ? "primary" : "secondary"
                       }
                       onClick={() =>
                         setConfig({
@@ -1157,7 +1117,9 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
                   DNS 解析策略
                 </span>
                 <span className="text-slate-200 font-mono font-medium truncate block">
-                  {dnsMode === "local_fakeip" ? "LocalDNS+FakeIP" : "自定义解析"}
+                  {dnsMode === "local_fakeip"
+                    ? "LocalDNS+FakeIP"
+                    : "自定义解析"}
                 </span>
               </div>
               <div className="p-2.5 rounded bg-slate-950/40 border border-slate-800">
@@ -1209,7 +1171,9 @@ export const SimpleModeView: React.FC<SimpleModeViewProps> = ({
               <Badge variant="info" size="sm">
                 {modes.find((m) => m.id === currentMode)?.title || "小白模式"}
               </Badge>
-              <span>{isDirectAll ? "全部直连模式" : `出口: ${currentOutbound}`}</span>
+              <span>
+                {isDirectAll ? "全部直连模式" : `出口: ${currentOutbound}`}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <CopyButton text={previewJson} />

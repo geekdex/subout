@@ -56,8 +56,12 @@ describe("SimpleModeView Component", () => {
     expect(screen.getByText("混合代理端口 (备选)")).toBeDefined();
 
     // Verify DNS mode selection
-    expect(screen.getAllByText("DNS 解析策略").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/LocalDNS \+ FakeIP/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("DNS 解析策略").length).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(
+      screen.getAllByText(/LocalDNS \+ FakeIP/).length,
+    ).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/自定义 DNS/).length).toBeGreaterThanOrEqual(1);
 
     // Verify right-side topology card
@@ -68,8 +72,8 @@ describe("SimpleModeView Component", () => {
     expect(screen.queryByText("网络连通性一键测速")).toBeNull();
   });
 
-  it("disables auto_route on non-linux systems and marks it as unavailable", async () => {
-    const nonLinuxSystemInfo = {
+  it("enables auto_route by default across all platforms (including macOS)", async () => {
+    const macosSystemInfo = {
       host_os: "macos" as const,
       host_arch: "arm64",
       app_mode: "simple" as const,
@@ -79,24 +83,18 @@ describe("SimpleModeView Component", () => {
 
     render(
       <ToastProvider>
-        <SimpleModeView nodes={[]} systemInfo={nonLinuxSystemInfo} />
+        <SimpleModeView nodes={[]} systemInfo={macosSystemInfo} />
       </ToastProvider>,
     );
 
     expect(await screen.findByText("小白极简模式 (Simple Mode)")).toBeDefined();
+    expect(screen.getByText("TUN 自动配置路由 (Auto Route)")).toBeDefined();
 
-    // Verify "仅限 Linux" badge appears
-    expect(screen.getByText("仅限 Linux")).toBeDefined();
-    expect(
-      screen.getByText(/Auto Route 仅在 Linux 平台受支持；当前系统（MACOS）已禁用，不可开启/),
-    ).toBeDefined();
-
-    // Verify switch is disabled
     const switches = screen.getAllByRole("switch");
-    // The auto_route switch is the first switch under TUN inbounds
-    const autoRouteSwitch = switches.find((s) => s.getAttribute("disabled") !== null);
+    const autoRouteSwitch = switches[0];
     expect(autoRouteSwitch).toBeDefined();
-    expect(autoRouteSwitch?.getAttribute("aria-checked")).toBe("false");
+    expect(autoRouteSwitch?.getAttribute("disabled")).toBeNull();
+    expect(autoRouteSwitch?.getAttribute("aria-checked")).toBe("true");
   });
 
   it("renders preview config button, opens modal dialog and displays formatted JSON configuration", async () => {

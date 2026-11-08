@@ -29,6 +29,7 @@ import {
   SingBoxVisualConfig,
   parseConfigToVisualState,
   serializeVisualStateToConfig,
+  validateExplicitPlatformConstraints,
 } from "./profile-editor/types";
 import {
   RouteTabPanel,
@@ -260,7 +261,21 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   const handleValidateSchema = async (): Promise<boolean> => {
     setValidating(true);
     try {
-      const res = await api.validateConfigSchema(liveJsonString);
+      const localPlatformErrors = validateExplicitPlatformConstraints(
+        visualState,
+        profile.platform,
+      );
+      if (localPlatformErrors.length > 0) {
+        setSchemaErrors(localPlatformErrors);
+        setSchemaValidatedOk(false);
+        error("配置未通过平台规范校验", localPlatformErrors[0]);
+        return false;
+      }
+
+      const res = await api.validateConfigSchema(
+        liveJsonString,
+        profile.platform,
+      );
       if (res.valid) {
         setSchemaErrors([]);
         setSchemaValidatedOk(true);
@@ -289,10 +304,24 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
       return;
     }
 
+    const localPlatformErrors = validateExplicitPlatformConstraints(
+      visualState,
+      profile.platform,
+    );
+    if (localPlatformErrors.length > 0) {
+      setSchemaErrors(localPlatformErrors);
+      setSchemaValidatedOk(false);
+      error("配置存在不兼容当前平台的字段，无法保存", localPlatformErrors[0]);
+      return;
+    }
+
     setSaving(true);
     try {
       try {
-        const check = await api.validateConfigSchema(liveJsonString);
+        const check = await api.validateConfigSchema(
+          liveJsonString,
+          profile.platform,
+        );
         if (check && check.valid === false) {
           setSchemaErrors(
             check.errors?.length

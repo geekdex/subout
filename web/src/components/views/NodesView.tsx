@@ -713,7 +713,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
                 sing-box 代理服务正在运行中
               </div>
               <div className="text-xs text-amber-400/80 mt-0.5">
-                为保证测速数据真实性并避免网络流量环路，在开启 sing-box 时已禁用节点测速。请先关闭代理服务后再进行测速。
+                为保证测速数据真实性并避免网络流量环路，在开启 sing-box
+                时已禁用节点测速。请先关闭代理服务后再进行测速。
               </div>
             </div>
           </div>
