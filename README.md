@@ -76,8 +76,8 @@ Subout 在单一二进制架构下融合了**本地代理客户端**与**配置�
 ### 2. 源码本地编译安装
 
 ```bash
-# Linux & macOS
-sudo ./install.sh
+# Linux & macOS (以普通用户身份运行；编译阶段使用当前用户环境，系统写入时自动调用 sudo)
+./install.sh
 
 # Windows (PowerShell 管理员)
 .\install.ps1
@@ -101,8 +101,8 @@ sudo ./install.sh
 
 | 平台                | 查看状态                             | 实时日志                                  | 重启服务                                                      | 停止服务                                                                           | 彻底卸载                              |
 | :------------------ | :----------------------------------- | :---------------------------------------- | :------------------------------------------------------------ | :--------------------------------------------------------------------------------- | :------------------------------------ |
-| **Linux (systemd)** | `systemctl status subout`            | `journalctl -u subout -f`                 | `sudo systemctl restart subout`                               | `sudo systemctl stop subout`                                                       | `sudo ./install.sh uninstall --purge` |
-| **macOS (launchd)** | `launchctl list \| grep subout`      | `tail -f /Library/Logs/Subout/stdout.log` | `sudo launchctl kickstart -k system/io.github.geekdex.subout` | `sudo launchctl unload -w "/Library/LaunchDaemons/io.github.geekdex.subout.plist"` | `sudo ./install.sh uninstall --purge` |
+| **Linux (systemd)** | `systemctl status subout`            | `journalctl -u subout -f`                 | `sudo systemctl restart subout`                               | `sudo systemctl stop subout`                                                       | `./install.sh uninstall --purge` |
+| **macOS (launchd)** | `launchctl list \| grep subout`      | `tail -f /Library/Logs/Subout/stdout.log` | `sudo launchctl kickstart -k system/io.github.geekdex.subout` | `sudo launchctl unload -w "/Library/LaunchDaemons/io.github.geekdex.subout.plist"` | `./install.sh uninstall --purge` |
 | **Windows (Task)**  | `Get-ScheduledTask -TaskName Subout` | 查看 `logs\subout.log`                    | `Restart-ScheduledTask Subout`                                | `Stop-ScheduledTask -TaskName Subout`                                              | `.\install.ps1 uninstall -Purge`      |
 
 ---

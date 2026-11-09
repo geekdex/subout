@@ -53,17 +53,17 @@ show_help() {
     echo "  -h, --help              显示此帮助信息"
     echo
     echo "示例:"
-    echo "  # 本地源码开发构建安装 (在代码目录中运行，自动 pnpm build + cargo build --release 并安装)"
-    echo "  sudo ./install.sh"
+    echo "  # 本地源码开发构建安装 (在代码目录中以普通用户运行，自动以当前用户环境编译并在安装时请求 sudo 权限)"
+    echo "  ./install.sh"
     echo
     echo "  # 在线一键下载最新 Release 并安装 (README 推荐普通用户使用)"
     echo "  curl -fsSL https://raw.githubusercontent.com/geekdex/subout/main/install.sh | bash"
     echo
     echo "  # 卸载 (保留配置与数据)"
-    echo "  sudo ./install.sh uninstall"
+    echo "  ./install.sh uninstall"
     echo
     echo "  # 彻底卸载 (清理所有数据与日志)"
-    echo "  sudo ./install.sh uninstall --purge"
+    echo "  ./install.sh uninstall --purge"
     exit 0
 }
 
@@ -145,44 +145,146 @@ if [[ $EUID -ne 0 ]]; then
     fi
 fi
 
-# Ensure developer toolchains (cargo, pnpm, node, npm) are in PATH even when running under sudo
-setup_dev_env_paths() {
-    local candidate_paths=(
-        "$HOME/.cargo/bin"
-        "/opt/homebrew/bin"
-        "/opt/homebrew/sbin"
-        "/usr/local/bin"
-        "/usr/local/sbin"
-        "$HOME/.local/share/pnpm"
-        "$HOME/.pnpm"
-        "$HOME/.local/bin"
-    )
-    if [[ -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
-        local user_home
-        user_home="$(eval echo "~$SUDO_USER" 2>/dev/null || true)"
-        if [[ -n "$user_home" ]]; then
-            candidate_paths+=(
-                "$user_home/.cargo/bin"
-                "$user_home/.local/share/pnpm"
-                "$user_home/.pnpm"
-                "$user_home/.local/bin"
-                "$user_home/.fnm/current/bin"
-            )
-            # Check nvm node paths if present
-            if [[ -d "$user_home/.nvm/versions/node" ]]; then
-                for node_ver in "$user_home/.nvm/versions/node"/*; do
-                    if [[ -d "$node_ver/bin" ]]; then
-                        candidate_paths+=("$node_ver/bin")
-                    fi
-                done
+# Ensure sudo credentials are ready for privileged system operations
+ensure_sudo_access() {
+    if [[ -n "$SUDO" ]]; then
+        if ! sudo -n true 2>/dev/null; then
+            echo -e "${YELLOW}提示: 安装至系统目录及配置系统服务需要 root 权限，正在请求 sudo 权限...${NC}"
+            if ! sudo -v; then
+                echo -e "${RED}错误: 获取 sudo 权限失败，操作已取消。${NC}"
+                exit 1
             fi
         fi
+        # Keep sudo credential active in background during long builds
+        if [[ -z "${SUDO_KEEP_ALIVE_PID:-}" ]]; then
+            (while true; do sleep 45; sudo -n true 2>/dev/null || break; done) &
+            SUDO_KEEP_ALIVE_PID=$!
+        fi
     fi
+}
+
+# Global cleanup helper on script exit
+cleanup() {
+    if [[ -n "${SUDO_KEEP_ALIVE_PID:-}" ]]; then
+        kill "$SUDO_KEEP_ALIVE_PID" 2>/dev/null || true
+    fi
+    if [[ -n "${TMP_DIR:-}" && -d "$TMP_DIR" ]]; then
+        $SUDO rm -rf "$TMP_DIR" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+# Determine unprivileged build user and home directory
+if [[ $EUID -eq 0 && -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
+    BUILD_USER="$SUDO_USER"
+    BUILD_USER_HOME="$(eval echo "~$SUDO_USER" 2>/dev/null || true)"
+else
+    BUILD_USER="$(id -un 2>/dev/null || echo "$USER")"
+    BUILD_USER_HOME="$HOME"
+fi
+
+# Set up developer toolchain paths (Node.js, pnpm, npm, Rust/cargo, fnm, nvm, etc.)
+setup_dev_env_paths() {
+    local base_home="${1:-$BUILD_USER_HOME}"
+    local candidate_paths=(
+        "$base_home/.cargo/bin"
+        "$base_home/.local/bin"
+        "$base_home/.local/share/pnpm"
+        "$base_home/.pnpm"
+        "/opt/homebrew/bin"
+        "/opt/homebrew/sbin"
+        "/home/linuxbrew/.linuxbrew/bin"
+        "/home/linuxbrew/.linuxbrew/sbin"
+        "/usr/local/bin"
+        "/usr/local/sbin"
+        "$base_home/.volta/bin"
+        "$base_home/.local/share/mise/shims"
+        "$base_home/.asdf/shims"
+    )
+
+    if [[ -d "$base_home/.local/share/fnm" ]]; then
+        candidate_paths+=("$base_home/.local/share/fnm")
+    fi
+
+    if [[ -d "$base_home/.nvm/versions/node" ]]; then
+        for node_ver in "$base_home/.nvm/versions/node"/*; do
+            if [[ -d "$node_ver/bin" ]]; then
+                candidate_paths+=("$node_ver/bin")
+            fi
+        done
+    fi
+
     for p in "${candidate_paths[@]}"; do
         if [[ -d "$p" && ":$PATH:" != *":$p:"* ]]; then
             export PATH="$p:$PATH"
         fi
     done
+
+    if [[ -f "$base_home/.cargo/env" ]]; then
+        # shellcheck disable=SC1090
+        . "$base_home/.cargo/env" >/dev/null 2>&1 || true
+    fi
+
+    if command -v fnm >/dev/null 2>&1; then
+        eval "$(fnm env --shell bash 2>/dev/null)" || true
+    fi
+
+    if ! command -v node >/dev/null 2>&1 && [[ -s "$base_home/.nvm/nvm.sh" ]]; then
+        # shellcheck disable=SC1090
+        . "$base_home/.nvm/nvm.sh" 2>/dev/null || true
+    fi
+}
+
+# Helper to execute development build commands in the unprivileged user's environment
+run_build_cmd() {
+    local cmd="$1"
+    if [[ $EUID -eq 0 && -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
+        sudo -u "$SUDO_USER" bash -c "
+            base_home=\"$BUILD_USER_HOME\"
+            candidate_paths=(
+                \"\$base_home/.cargo/bin\"
+                \"\$base_home/.local/bin\"
+                \"\$base_home/.local/share/pnpm\"
+                \"\$base_home/.pnpm\"
+                \"/opt/homebrew/bin\"
+                \"/opt/homebrew/sbin\"
+                \"/home/linuxbrew/.linuxbrew/bin\"
+                \"/home/linuxbrew/.linuxbrew/sbin\"
+                \"/usr/local/bin\"
+                \"/usr/local/sbin\"
+                \"\$base_home/.volta/bin\"
+                \"\$base_home/.local/share/mise/shims\"
+                \"\$base_home/.asdf/shims\"
+            )
+            if [[ -d \"\$base_home/.local/share/fnm\" ]]; then
+                candidate_paths+=(\"\$base_home/.local/share/fnm\")
+            fi
+            if [[ -d \"\$base_home/.nvm/versions/node\" ]]; then
+                for node_ver in \"\$base_home/.nvm/versions/node\"/*; do
+                    if [[ -d \"\$node_ver/bin\" ]]; then
+                        candidate_paths+=(\"\$node_ver/bin\")
+                    fi
+                done
+            fi
+            for p in \"\${candidate_paths[@]}\"; do
+                if [[ -d \"\$p\" && \":\$PATH:\" != *\":\$p:\"* ]]; then
+                    export PATH=\"\$p:\$PATH\"
+                fi
+            done
+            if [[ -f \"\$base_home/.cargo/env\" ]]; then
+                . \"\$base_home/.cargo/env\" >/dev/null 2>&1 || true
+            fi
+            if command -v fnm >/dev/null 2>&1; then
+                eval \"\$(fnm env --shell bash 2>/dev/null)\" || true
+            fi
+            if ! command -v node >/dev/null 2>&1 && [[ -s \"\$base_home/.nvm/nvm.sh\" ]]; then
+                . \"\$base_home/.nvm/nvm.sh\" 2>/dev/null || true
+            fi
+            $cmd
+        "
+    else
+        bash -c "$cmd"
+    fi
 }
 
 # Detect Operating System and Architecture
@@ -254,11 +356,11 @@ macos_disable_system_proxy() {
     fi
     while IFS= read -r svc; do
         [[ -z "$svc" ]] && continue
-        networksetup -setwebproxystate "$svc" off 2>/dev/null || true
-        networksetup -setsecurewebproxystate "$svc" off 2>/dev/null || true
-        networksetup -setsocksfirewallproxystate "$svc" off 2>/dev/null || true
+        $SUDO networksetup -setwebproxystate "$svc" off 2>/dev/null || true
+        $SUDO networksetup -setsecurewebproxystate "$svc" off 2>/dev/null || true
+        $SUDO networksetup -setsocksfirewallproxystate "$svc" off 2>/dev/null || true
         # Also clear TUN DNS - reset to "Empty" (system default)
-        networksetup -setdnsservers "$svc" "Empty" 2>/dev/null || true
+        $SUDO networksetup -setdnsservers "$svc" "Empty" 2>/dev/null || true
     done <<< "$services"
     echo -e "${GREEN}  ✓ macOS 系统代理已清除${NC}"
 }
@@ -286,6 +388,8 @@ do_uninstall() {
     echo -e "${CYAN}======================================================${NC}"
     echo -e "${CYAN}       正在卸载 ${BOLD}subout${NC}${CYAN} 服务与文件...       ${NC}"
     echo -e "${CYAN}======================================================${NC}"
+
+    ensure_sudo_access
 
     # 1. Stop and remove systemd service (Linux)
     if [[ "$TARGET_OS" == "linux" ]]; then
@@ -353,7 +457,7 @@ do_uninstall() {
     else
         echo -e "${YELLOW}提示: 用户业务数据已保留: ${DATA_DIR}${NC}"
         [[ -d "$LOG_DIR" ]] && echo -e "${YELLOW}提示: 日志目录已保留: ${LOG_DIR}${NC}"
-        echo -e "${YELLOW}如需彻底删除配置与数据库，请执行: ${BOLD}sudo $0 uninstall --purge${NC}"
+        echo -e "${YELLOW}如需彻底删除配置与数据库，请执行: ${BOLD}$0 uninstall --purge${NC}"
     fi
 
     echo
@@ -380,6 +484,9 @@ echo -e "日志目录: ${BOLD}${LOG_DIR}${NC}"
 echo -e "Web 端口: ${BOLD}${PORT}${NC}"
 echo
 
+# Pre-validate sudo access upfront if system write operations will be performed
+ensure_sudo_access
+
 # 1. Determine Source Binary
 SOURCE_BIN=""
 
@@ -403,7 +510,14 @@ if [[ -n "$CUSTOM_BIN_PATH" && -f "$CUSTOM_BIN_PATH" ]]; then
 # 1.2 Local Development Mode: Build frontend (pnpm build) + Build backend (cargo build --release) (Requirement 2)
 elif [[ "$IS_LOCAL_SOURCE" == "true" && "$FROM_RELEASE" != "true" ]]; then
     echo -e "${BLUE}[1/4] 检测到本地源码仓库，正在执行完整开发编译构建...${NC}"
-    setup_dev_env_paths
+
+    if [[ $EUID -eq 0 && -n "$SUDO_USER" && "$SUDO_USER" != "root" ]]; then
+        echo -e "${YELLOW}  [最佳实践提示] 检测到当前以 sudo 运行本地源码构建。${NC}"
+        echo -e "${YELLOW}  编译阶段将自动切换至用户 '${BUILD_USER}' 的环境执行，以使用该用户的 Node.js/Rust 工具链并防止产生 root 权限文件。${NC}"
+        echo -e "${YELLOW}  推荐用法: 本地源码开发构建建议直接运行 './install.sh' (无需 sudo)。${NC}"
+    fi
+
+    setup_dev_env_paths "$BUILD_USER_HOME"
 
     # Step 1.1: Build Frontend in web directory (pnpm build)
     echo -e "${BLUE}  -> [步骤 1/2] 进入 web 目录编译前端 UI (pnpm build)...${NC}"
@@ -411,28 +525,31 @@ elif [[ "$IS_LOCAL_SOURCE" == "true" && "$FROM_RELEASE" != "true" ]]; then
 
     # Select package manager (prefer pnpm)
     PKG_MGR=""
-    if command -v pnpm >/dev/null 2>&1; then
+    if run_build_cmd "command -v pnpm" >/dev/null 2>&1; then
         PKG_MGR="pnpm"
-    elif command -v npm >/dev/null 2>&1; then
+    elif run_build_cmd "command -v npm" >/dev/null 2>&1; then
         PKG_MGR="npm"
         echo -e "${YELLOW}  提示: 系统未安装 pnpm，自动降级使用 npm 进行构建...${NC}"
     else
-        echo -e "${RED}错误: 未检测到 pnpm 或 npm/node。构建前端 UI 需要 Node.js 与 pnpm/npm 环境。${NC}"
+        echo -e "${RED}错误: 在用户 '${BUILD_USER}' 的环境中未检测到 pnpm 或 npm/node。构建前端 UI 需要 Node.js 与 pnpm/npm 环境。${NC}"
         echo -e "请先安装 Node.js 与 pnpm (例如: npm install -g pnpm)。"
+        if [[ $EUID -eq 0 && -n "$SUDO_USER" ]]; then
+            echo -e "提示: 如果该工具已在您的普通用户环境安装，请退出 sudo 直接运行: ${BOLD}./install.sh${NC}"
+        fi
         exit 1
     fi
 
     # Install dependencies if node_modules is missing
     if [[ ! -d "${WEB_DIR}/node_modules" ]]; then
         echo -e "${BLUE}  -> 前端依赖未初始化，正在执行 ${PKG_MGR} install...${NC}"
-        (cd "$WEB_DIR" && $PKG_MGR install)
+        run_build_cmd "cd '$WEB_DIR' && $PKG_MGR install"
     fi
 
     # Execute build
     if [[ "$PKG_MGR" == "pnpm" ]]; then
-        (cd "$WEB_DIR" && pnpm build)
+        run_build_cmd "cd '$WEB_DIR' && pnpm build"
     else
-        (cd "$WEB_DIR" && npm run build)
+        run_build_cmd "cd '$WEB_DIR' && npm run build"
     fi
 
     if [[ ! -f "${WEB_DIR}/dist/index.html" ]]; then
@@ -443,12 +560,15 @@ elif [[ "$IS_LOCAL_SOURCE" == "true" && "$FROM_RELEASE" != "true" ]]; then
 
     # Step 1.2: Build Backend with Cargo
     echo -e "${BLUE}  -> [步骤 2/2] 返回项目根目录编译后端 (cargo build --release)...${NC}"
-    if ! command -v cargo >/dev/null 2>&1; then
-        echo -e "${RED}错误: 未检测到 cargo 命令。请先安装 Rust 工具链 (https://rustup.rs)。${NC}"
+    if ! run_build_cmd "command -v cargo" >/dev/null 2>&1; then
+        echo -e "${RED}错误: 在用户 '${BUILD_USER}' 的环境中未检测到 cargo 命令。请先安装 Rust 工具链 (https://rustup.rs)。${NC}"
+        if [[ $EUID -eq 0 && -n "$SUDO_USER" ]]; then
+            echo -e "提示: 如果 cargo 已在您的普通用户环境安装，请退出 sudo 直接运行: ${BOLD}./install.sh${NC}"
+        fi
         exit 1
     fi
 
-    (cd "$SCRIPT_DIR" && cargo build --release)
+    run_build_cmd "cd '$SCRIPT_DIR' && cargo build --release"
     COMPILED_BIN="${SCRIPT_DIR}/target/release/${APP_NAME}"
 
     if [[ ! -f "$COMPILED_BIN" ]]; then
@@ -463,7 +583,6 @@ elif [[ "$IS_LOCAL_SOURCE" == "true" && "$FROM_RELEASE" != "true" ]]; then
 else
     echo -e "${BLUE}[1/4] 正在从 GitHub Releases 获取预编译版本 (${TARGET_TRIPLE})...${NC}"
     TMP_DIR="$(mktemp -d)"
-    trap '$SUDO rm -rf "$TMP_DIR"' EXIT
 
     LATEST_TAG="$TARGET_TAG"
 
@@ -704,5 +823,5 @@ if [[ "$NO_SERVICE" != "true" ]]; then
     echo
 fi
 echo -e "一键卸载命令:"
-echo -e "  ${BOLD}sudo ./install.sh uninstall${NC} (或加上 --purge 彻底删除数据)"
+echo -e "  ${BOLD}./install.sh uninstall${NC} (或加上 --purge 彻底删除数据)"
 echo
