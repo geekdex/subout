@@ -299,7 +299,12 @@ export const api = {
   async setAppMode(
     mode: "simple" | "expert",
     restart = false,
-  ): Promise<{ success: boolean; app_mode: string }> {
+  ): Promise<{
+    success: boolean;
+    app_mode: string;
+    config_valid?: boolean;
+    config_warning?: string | null;
+  }> {
     return request("/api/system/mode", {
       method: "POST",
       body: JSON.stringify({

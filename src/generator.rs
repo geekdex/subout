@@ -93,6 +93,88 @@ pub fn sanitize_outbounds_value(outbounds: &mut Value) {
     }
 }
 
+/// Fields a `logical` DNS rule may keep on its parent node in sing-box 1.14.
+/// Anything else is a leaf condition and must live inside `rules`; carrying it on
+/// the parent makes `sing-box check` fail with `json: unknown field "<name>"`
+/// (e.g. `dns.rules[0].query_type`). Keeping an allowlist is safer than a denylist:
+/// newly introduced leaf fields are handled automatically.
+const LOGICAL_DNS_RULE_PARENT_FIELDS: &[&str] = &[
+    "type",
+    "mode",
+    "rules",
+    "invert",
+    // DNSRuleAction fields
+    "action",
+    "answer",
+    "client_subnet",
+    "disable_cache",
+    "disable_optimistic_cache",
+    "extra",
+    "method",
+    "no_drop",
+    "ns",
+    "race",
+    "rcode",
+    "remove_client_subnet",
+    "rewrite_ttl",
+    "server",
+    "speculative",
+    "tag",
+    "timeout",
+];
+
+/// Normalizes one DNS rule in place.
+///
+/// - Logical rules: leaf-only condition fields are moved from the parent into a
+///   nested child rule (preserving their intent) so the config decodes cleanly.
+///   They are never given a top-level `query_type`.
+/// - Plain rules: when they resolve via a fakeip server, add `query_type` so only
+///   A/AAAA queries receive fake IPs, avoiding HTTPS/SVCB pollution.
+fn normalize_dns_rule(rule: &mut Value, fakeip_tags: &HashSet<String>, top_level: bool) {
+    let Some(rule_obj) = rule.as_object_mut() else {
+        return;
+    };
+
+    if rule_obj.get("type").and_then(|t| t.as_str()) == Some("logical") {
+        let leaf_keys: Vec<String> = rule_obj
+            .keys()
+            .filter(|k| !LOGICAL_DNS_RULE_PARENT_FIELDS.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        let mut leaf_conditions = serde_json::Map::new();
+        for key in leaf_keys {
+            if let Some(value) = rule_obj.remove(&key) {
+                leaf_conditions.insert(key, value);
+            }
+        }
+        if !leaf_conditions.is_empty() {
+            let children = rule_obj
+                .entry("rules")
+                .or_insert_with(|| Value::Array(Vec::new()));
+            if !children.is_array() {
+                *children = Value::Array(Vec::new());
+            }
+            if let Some(arr) = children.as_array_mut() {
+                arr.push(Value::Object(leaf_conditions));
+            }
+        }
+        if let Some(children) = rule_obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
+            for child in children.iter_mut() {
+                normalize_dns_rule(child, fakeip_tags, false);
+            }
+        }
+        return;
+    }
+
+    if top_level
+        && let Some(srv) = rule_obj.get("server").and_then(|s| s.as_str())
+        && fakeip_tags.contains(srv)
+        && !rule_obj.contains_key("query_type")
+    {
+        rule_obj.insert("query_type".to_string(), json!(["A", "AAAA"]));
+    }
+}
+
 pub fn sanitize_dns_value(dns: &mut Value) {
     if let Some(obj) = dns.as_object_mut() {
         // `independent_cache` is deprecated in sing-box 1.14.0 and removed in 1.16.0
@@ -132,17 +214,12 @@ pub fn sanitize_dns_value(dns: &mut Value) {
                 }
             }
         }
-        if !fakeip_tags.is_empty()
-            && let Some(rules) = obj.get_mut("rules").and_then(|r| r.as_array_mut())
-        {
-            for rule in rules {
-                if let Some(rule_obj) = rule.as_object_mut()
-                    && let Some(srv) = rule_obj.get("server").and_then(|s| s.as_str())
-                    && fakeip_tags.contains(srv)
-                    && !rule_obj.contains_key("query_type")
-                {
-                    rule_obj.insert("query_type".to_string(), json!(["A", "AAAA"]));
-                }
+        // Always normalize rules, even without fakeip servers: repairing logical
+        // rules that carry leaf conditions on their parent is required for a valid
+        // config regardless of the DNS servers in use.
+        if let Some(rules) = obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
+            for rule in rules.iter_mut() {
+                normalize_dns_rule(rule, &fakeip_tags, true);
             }
         }
     }
@@ -1104,6 +1181,137 @@ mod tests {
         sanitize_runtime_config(&mut cfg);
         assert!(cfg["dns"].get("independent_cache").is_none());
         assert_eq!(cfg["dns"]["strategy"], "ipv4_only");
+    }
+
+    #[test]
+    fn test_sanitize_dns_value_skips_query_type_injection_for_logical_rules() {
+        let mut dns = json!({
+            "strategy": "ipv4_only",
+            "servers": [
+                { "type": "fakeip", "tag": "fakeip-dns" },
+                { "type": "udp", "tag": "local-dns", "server": "223.5.5.5" }
+            ],
+            "rules": [
+                {
+                    "type": "logical",
+                    "mode": "and",
+                    "server": "fakeip-dns",
+                    "rules": [
+                        { "query_type": ["A", "AAAA"] },
+                        { "rule_set": ["geosite-geolocation-!cn"] }
+                    ]
+                }
+            ],
+            "final": "local-dns"
+        });
+        sanitize_dns_value(&mut dns);
+
+        let parent = &dns["rules"][0];
+        // A top-level query_type on a logical rule is rejected by sing-box 1.14
+        assert!(parent.get("query_type").is_none());
+        assert_eq!(parent["server"], "fakeip-dns");
+        // Leaf conditions stay where they belong
+        assert_eq!(parent["rules"][0]["query_type"], json!(["A", "AAAA"]));
+    }
+
+    #[test]
+    fn test_sanitize_dns_value_moves_logical_parent_conditions_into_child() {
+        let mut dns = json!({
+            "strategy": "ipv4_only",
+            "servers": [{ "type": "udp", "tag": "local-dns", "server": "223.5.5.5" }],
+            "rules": [
+                {
+                    "type": "logical",
+                    "mode": "and",
+                    "query_type": ["A", "AAAA"],
+                    "rule_set": ["geosite-geolocation-!cn"],
+                    "server": "local-dns",
+                    "rules": [{ "domain_suffix": [".cn"] }]
+                }
+            ],
+            "final": "local-dns"
+        });
+        sanitize_dns_value(&mut dns);
+
+        let parent = &dns["rules"][0];
+        assert!(parent.get("query_type").is_none());
+        assert!(parent.get("rule_set").is_none());
+        assert_eq!(parent["server"], "local-dns"); // action field stays on parent
+
+        let children = parent["rules"].as_array().unwrap();
+        assert_eq!(children.len(), 2);
+        let moved = children
+            .iter()
+            .find(|c| c.get("query_type").is_some())
+            .expect("leaf conditions should be preserved in a child rule");
+        assert_eq!(moved["query_type"], json!(["A", "AAAA"]));
+        assert_eq!(moved["rule_set"], json!(["geosite-geolocation-!cn"]));
+    }
+
+    #[test]
+    fn test_sanitized_logical_dns_rule_passes_singbox_check() {
+        // Reproduces the shape that used to break mode switching: a logical DNS
+        // rule resolving via a fakeip server. The old sanitizer injected a
+        // top-level `query_type`, which sing-box 1.14 rejects with
+        // `dns.rules[0].query_type: json: unknown field "query_type"`.
+        let mut cfg = json!({
+            "log": { "level": "info", "timestamp": true },
+            "dns": {
+                "servers": [
+                    { "type": "fakeip", "tag": "fakeip-dns" },
+                    { "type": "udp", "tag": "local-dns", "server": "223.5.5.5" }
+                ],
+                "rules": [
+                    {
+                        "type": "logical",
+                        "mode": "and",
+                        "server": "fakeip-dns",
+                        "rules": [
+                            { "query_type": ["A", "AAAA"] },
+                            { "domain_suffix": [".cn"] }
+                        ]
+                    }
+                ],
+                "final": "local-dns"
+            },
+            "inbounds": [
+                { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080 }
+            ],
+            "outbounds": [{ "type": "direct", "tag": "direct" }],
+            "route": { "rules": [], "final": "direct" }
+        });
+        sanitize_runtime_config(&mut cfg);
+
+        assert!(
+            cfg["dns"]["rules"][0].get("query_type").is_none(),
+            "logical DNS rule must not carry a top-level query_type"
+        );
+
+        let res = crate::web::config::validate_config_with_singbox(
+            &cfg["log"],
+            &cfg["dns"],
+            &cfg["inbounds"],
+            &cfg["outbounds"],
+            &cfg["route"],
+            &cfg["experimental"],
+            None,
+        );
+        assert!(res.is_ok(), "Validation failed: {:?}", res.err());
+    }
+
+    #[test]
+    fn test_sanitize_dns_value_still_injects_query_type_for_plain_fakeip_rules() {
+        let mut dns = json!({
+            "strategy": "ipv4_only",
+            "servers": [
+                { "type": "fakeip", "tag": "fakeip-dns" },
+                { "type": "udp", "tag": "local-dns", "server": "223.5.5.5" }
+            ],
+            "rules": [{ "server": "fakeip-dns" }],
+            "final": "local-dns"
+        });
+        sanitize_dns_value(&mut dns);
+        assert_eq!(dns["rules"][0]["query_type"], json!(["A", "AAAA"]));
     }
 
     #[test]

@@ -670,6 +670,9 @@ pub fn validate_config_with_singbox(
     }
 }
 
+const DECODE_PREFIX: &str = "decode config at ";
+const UNKNOWN_FIELD_PREFIX: &str = "json: unknown field \"";
+
 fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
     let mut clean = String::new();
     let mut in_escape = false;
@@ -686,10 +689,15 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
     }
 
     let mut msg = clean.trim().to_string();
-    if let Some(pos) = msg.find("decode config at .temp_singbox_val_")
-        && let Some(end_pos) = msg[pos..].find(".json: ")
-    {
-        msg = format!("{}{}", &msg[..pos], &msg[pos + end_pos + 7..]);
+    // Strip the generated temp-file path (`decode config at <path>: <error>`) so the
+    // message only contains the JSON location and the actual decode error. Matching
+    // the filename is fragile — temp names differ per platform/run (singbox_val_*.json,
+    // .temp_singbox_val_*.json, ...), so cut everything up to the separator `: `.
+    if let Some(pos) = msg.find(DECODE_PREFIX) {
+        let after_path = &msg[pos + DECODE_PREFIX.len()..];
+        if let Some(sep) = after_path.find(": ") {
+            msg = format!("{}{}", &msg[..pos], &after_path[sep + 2..]);
+        }
     }
 
     let msg = msg.trim();
@@ -734,11 +742,23 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
         }
     }
 
-    if let Some(unknown_pos) = msg.find("json: unknown field \"") {
-        let field_info = &msg[unknown_pos + 20..];
+    if let Some(unknown_pos) = msg.find(UNKNOWN_FIELD_PREFIX) {
+        // +20 was off by one: it pointed at the opening quote and produced an empty
+        // field name (存在未知或不支持的属性 ""), hiding the real culprit.
+        let field_info = &msg[unknown_pos + UNKNOWN_FIELD_PREFIX.len()..];
         if let Some(end_quote) = field_info.find('"') {
             let field_name = &field_info[..end_quote];
-            return format!("配置校验失败：存在未知或不支持的属性 \"{field_name}\" ({msg})");
+            let mut location = msg[..unknown_pos]
+                .trim()
+                .trim_end_matches(':')
+                .trim()
+                .to_string();
+            if let Some(prefix_end) = location.find("] ") {
+                location = location[prefix_end + 2..].to_string();
+            }
+            return format!(
+                "配置校验失败：存在未知或不支持的属性 \"{field_name}\"（位置 {location}）。请检查该配置节或升级内核 ({msg})"
+            );
         }
     }
 
@@ -1567,5 +1587,23 @@ mod tests {
 
         assert!(formatted.contains("第 73 个出站 (索引 #72) 校验失败"));
         assert!(formatted.contains("未指定任何目标节点/出站 (outbounds 列表为空)"));
+    }
+
+    #[test]
+    fn test_format_singbox_error_unknown_field_shows_name_and_location() {
+        let raw_err = "FATAL[0000] decode config at /Library/Application Support/Subout/run/singbox_val_7376_1794233572095_68.json: dns.rules[0].query_type: json: unknown field \"query_type\"";
+        let formatted = format_singbox_error(raw_err, None);
+
+        assert!(formatted.contains("\"query_type\""), "{formatted}");
+        assert!(!formatted.contains("属性 \"\""), "{formatted}");
+        assert!(formatted.contains("位置 dns.rules[0].query_type"), "{formatted}");
+        assert!(
+            !formatted.contains("singbox_val_7376"),
+            "temp path should be stripped: {formatted}"
+        );
+        assert!(
+            !formatted.contains("/Library/Application Support"),
+            "absolute path should be stripped: {formatted}"
+        );
     }
 }

@@ -282,6 +282,54 @@ pub async fn get_system_mode(
     }))
 }
 
+/// Maps a config validation outcome to an advisory warning. A failed validation must
+/// never abort a mode switch.
+fn mode_config_warning(validation: Result<(), String>) -> Option<String> {
+    validation
+        .err()
+        .map(|err_msg| format!("目标模式配置校验未通过: {err_msg}"))
+}
+
+/// Generates and validates the target mode's configuration.
+///
+/// Config problems are returned as a warning, never as an error: switching modes is a
+/// preference change. Blocking it on an invalid config locks the user out of the target
+/// mode, leaving no way to enter it and repair the broken config.
+fn check_mode_config(
+    conn: &rusqlite::Connection,
+    target_mode: &str,
+) -> (Option<serde_json::Value>, Option<String>) {
+    let target_config = match crate::web::service_api::get_config_for_mode(conn, target_mode) {
+        Ok(config) => config,
+        Err((_, msg)) => {
+            return (None, Some(format!("目标模式配置生成失败: {msg}")));
+        }
+    };
+
+    let log = target_config.get("log").cloned().unwrap_or_default();
+    let dns = target_config.get("dns").cloned().unwrap_or_default();
+    let inbounds = target_config.get("inbounds").cloned().unwrap_or_default();
+    let outbounds = target_config.get("outbounds").cloned().unwrap_or_default();
+    let route = target_config.get("route").cloned().unwrap_or_default();
+    let experimental = target_config
+        .get("experimental")
+        .cloned()
+        .unwrap_or_default();
+    let http_clients = target_config.get("http_clients");
+
+    let warning = mode_config_warning(crate::web::config::validate_config_with_singbox(
+        &log,
+        &dns,
+        &inbounds,
+        &outbounds,
+        &route,
+        &experimental,
+        http_clients,
+    ));
+
+    (Some(target_config), warning)
+}
+
 pub async fn set_system_mode(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -299,42 +347,11 @@ pub async fn set_system_mode(
         "simple"
     };
 
-    let current_mode = crate::db::get_setting(&conn, "app_mode")
-        .unwrap_or(None)
-        .unwrap_or_else(|| "simple".to_string());
+    // 1. Generate & validate the target config (advisory only, never blocks the switch)
+    let (target_config, mut config_warning) = check_mode_config(&conn, target_mode);
+    let config_valid = config_warning.is_none();
 
-    // 1. Generate target mode config to validate
-    let target_config = crate::web::service_api::get_config_for_mode(&conn, target_mode)
-        .map_err(|(code, msg)| (code, format!("目标模式配置生成失败: {msg}")))?;
-
-    // 2. Validate configuration with sing-box logic
-    let log = target_config.get("log").cloned().unwrap_or_default();
-    let dns = target_config.get("dns").cloned().unwrap_or_default();
-    let inbounds = target_config.get("inbounds").cloned().unwrap_or_default();
-    let outbounds = target_config.get("outbounds").cloned().unwrap_or_default();
-    let route = target_config.get("route").cloned().unwrap_or_default();
-    let experimental = target_config
-        .get("experimental")
-        .cloned()
-        .unwrap_or_default();
-    let http_clients = target_config.get("http_clients");
-
-    if let Err(err_msg) = crate::web::config::validate_config_with_singbox(
-        &log,
-        &dns,
-        &inbounds,
-        &outbounds,
-        &route,
-        &experimental,
-        http_clients,
-    ) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("目标模式配置校验未通过: {err_msg}"),
-        ));
-    }
-
-    // 3. Lifecycle control: if service is currently running, gracefully stop it first to release TUN/proxy
+    // 2. Lifecycle control: if service is currently running, gracefully stop it first to release TUN/proxy
     let was_running = state.service_manager.is_running().await;
     if was_running {
         state.service_manager.stop().await.map_err(|e| {
@@ -345,7 +362,8 @@ pub async fn set_system_mode(
         })?;
     }
 
-    // 4. Update database settings
+    // 3. Always persist the mode, even when the target config is invalid, so the user
+    //    can enter that mode and fix the config from the UI.
     crate::db::update_setting(&conn, "app_mode", target_mode).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -359,28 +377,41 @@ pub async fn set_system_mode(
         )
     })?;
 
-    // 5. Handle service restart if requested
+    // 4. Restart only when requested and when the config is usable. Never restart with
+    //    an invalid config, and never roll back the mode (that would recreate the lockout).
     let should_restart = payload.restart_service.unwrap_or(false);
+    let mut service_restarted = false;
     if should_restart {
-        let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
-        if let Err(e) = state
-            .service_manager
-            .start_with_options(&target_config, sudo_pass.as_deref(), false, None)
-            .await
-        {
-            // Rollback mode in database
-            let _ = crate::db::update_setting(&conn, "app_mode", &current_mode);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("模式切换后启动新服务失败，已自动回滚为原模式: {e}"),
-            ));
+        if let Some(config) = target_config.as_ref().filter(|_| config_valid) {
+            let sudo_pass = payload.sudo_pass.filter(|p| !p.trim().is_empty());
+            match state
+                .service_manager
+                .start_with_options(config, sudo_pass.as_deref(), false, None)
+                .await
+            {
+                Ok(()) => service_restarted = true,
+                Err(e) => {
+                    let reason = format!("模式切换后启动新服务失败: {e}");
+                    config_warning = Some(match config_warning.take() {
+                        Some(prev) => format!("{prev}；{reason}"),
+                        None => reason,
+                    });
+                }
+            }
+        } else {
+            let reason = config_warning
+                .clone()
+                .unwrap_or_else(|| "目标模式配置不可用".to_string());
+            config_warning = Some(format!("{reason}；已跳过自动启动服务，请先修正配置"));
         }
     }
 
     Ok(Json(serde_json::json!({
         "status": "success",
         "app_mode": target_mode,
-        "service_restarted": should_restart,
+        "config_valid": config_valid,
+        "config_warning": config_warning,
+        "service_restarted": service_restarted,
         "service_previously_running": was_running
     })))
 }
@@ -545,6 +576,15 @@ mod tests {
         let resp_json = serde_json::to_value(&resp).unwrap();
         assert_eq!(resp_json["latency_ms"], 25);
         assert_eq!(resp_json["success"], true);
+    }
+
+    #[test]
+    fn test_mode_config_warning_never_blocks_switch() {
+        assert_eq!(mode_config_warning(Ok(())), None);
+        assert_eq!(
+            mode_config_warning(Err("存在未知字段 query_type".to_string())),
+            Some("目标模式配置校验未通过: 存在未知字段 query_type".to_string())
+        );
     }
 
     #[test]

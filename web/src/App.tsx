@@ -54,7 +54,7 @@ const AppContent: React.FC = () => {
   // Mobile Menu Drawer State
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const { success, error } = useToast();
+  const { success, error, warning } = useToast();
 
   const isAuthed = isAuthenticated === true;
   const {
@@ -146,11 +146,16 @@ const AppContent: React.FC = () => {
 
   const handleSwitchMode = async (mode: "simple" | "expert") => {
     try {
-      await api.setAppMode(mode, false);
-      success(
-        "已切换工作模式",
-        `已切换至 ${mode === "simple" ? "小白模式" : "专业模式"}`,
-      );
+      const result = await api.setAppMode(mode, false);
+      const modeLabel = mode === "simple" ? "小白模式" : "专业模式";
+      if (result.config_warning) {
+        // Config validation is advisory: the mode is switched so the user can
+        // enter it and repair the config instead of being locked out. The warning
+        // may also cover a skipped/failed service start, so keep the title generic.
+        warning(`已切换至 ${modeLabel}，但存在告警`, result.config_warning);
+      } else {
+        success("已切换工作模式", `已切换至 ${modeLabel}`);
+      }
       if (
         mode === "simple" &&
         ["profiles", "groups", "auto-update"].includes(currentTab)

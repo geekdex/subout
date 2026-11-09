@@ -397,6 +397,44 @@ export const ARRAY_STRING_RULE_KEYS = [
 
 export const ARRAY_NUMBER_RULE_KEYS = ["port", "source_port"] as const;
 
+/**
+ * Keys a `logical` rule may keep on its parent node. In sing-box 1.14 a logical
+ * rule only accepts `type`/`mode`/`rules`/`invert` plus rule-action fields; any
+ * condition field left on the parent (e.g. `query_type`) makes `sing-box check`
+ * fail with `json: unknown field "<name>"`.
+ */
+const LOGICAL_RULE_PARENT_KEYS: ReadonlySet<string> = new Set([
+  "type",
+  "mode",
+  "rules",
+  "invert",
+  // DNS / route rule action fields
+  "action",
+  "outbound",
+  "method",
+  "no_drop",
+  "sniffer",
+  "timeout",
+  "server",
+  "strategy",
+  "disable_cache",
+  "disable_optimistic_cache",
+  "rewrite_ttl",
+  "client_subnet",
+  "remove_client_subnet",
+  "override_address",
+  "override_port",
+  "tls_fragment",
+  "tls_record_fragment",
+  "tag",
+  "race",
+  "speculative",
+  "rcode",
+  "answer",
+  "ns",
+  "extra",
+]);
+
 function toStrArray(val: unknown): string[] | undefined {
   if (Array.isArray(val)) {
     const filtered = val.map((v) => String(v).trim()).filter(Boolean);
@@ -473,7 +511,22 @@ function normalizeRuleNode(
 
   if (out.type === "logical") {
     out.mode = out.mode === "or" ? "or" : "and";
-    const childRules = Array.isArray(out.rules) ? out.rules : [];
+    // Condition fields accidentally left on the logical parent are invalid there.
+    // Move them into a nested child rule so the intent is preserved and the saved
+    // config stays valid.
+    const leafConditions: Record<string, unknown> = {};
+    for (const key of Object.keys(out)) {
+      if (!LOGICAL_RULE_PARENT_KEYS.has(key)) {
+        leafConditions[key] = out[key];
+        delete out[key];
+      }
+    }
+    const childRules: unknown[] = Array.isArray(out.rules)
+      ? [...out.rules]
+      : [];
+    if (Object.keys(leafConditions).length > 0) {
+      childRules.push(leafConditions);
+    }
     out.rules = childRules
       .filter(
         (r): r is Record<string, unknown> =>

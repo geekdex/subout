@@ -5,6 +5,7 @@ import { ProfileEditor, JSON_PREVIEW_STORAGE_KEY } from "./ProfileEditor";
 import { ToastProvider } from "../ui/Toast";
 import { api } from "../../api/client";
 import { ConfigProfile } from "../../types/api";
+import { parseConfigToVisualState } from "./profile-editor/types";
 
 vi.mock("../../api/client", () => ({
   api: {
@@ -574,5 +575,45 @@ describe("ProfileEditor Visual Configuration Component", () => {
     expect(screen.getAllByDisplayValue("remote-dns").length).toBeGreaterThan(0);
     expect(screen.getAllByDisplayValue("local-dns").length).toBeGreaterThan(0);
     expect(screen.getAllByDisplayValue("fakeip-dns").length).toBeGreaterThan(0);
+  });
+});
+
+describe("parseConfigToVisualState logical DNS rule normalization", () => {
+  it("moves condition fields off a logical parent into a nested child rule", () => {
+    const visual = parseConfigToVisualState(
+      JSON.stringify({
+        dns: {
+          servers: [{ type: "udp", tag: "local-dns", server: "223.5.5.5" }],
+          rules: [
+            {
+              type: "logical",
+              mode: "and",
+              query_type: ["A", "AAAA"],
+              rule_set: ["geosite-geolocation-!cn"],
+              server: "local-dns",
+              rules: [{ domain_suffix: [".cn"] }],
+            },
+          ],
+          final: "local-dns",
+        },
+      }),
+    );
+
+    const parent = visual.dns?.rules?.[0] as unknown as Record<string, unknown>;
+    expect(parent).toBeDefined();
+    // A logical rule cannot carry query_type/rule_set on its parent in 1.14
+    expect(parent.query_type).toBeUndefined();
+    expect(parent.rule_set).toBeUndefined();
+    // Action fields stay on the parent
+    expect(parent.server).toBe("local-dns");
+
+    const children = parent.rules as Record<string, unknown>[];
+    expect(children).toHaveLength(2);
+    expect(children[0]).toMatchObject({ domain_suffix: [".cn"] });
+    // Intent is preserved by moving the conditions into a leaf child
+    expect(children[1]).toMatchObject({
+      query_type: ["A", "AAAA"],
+      rule_set: ["geosite-geolocation-!cn"],
+    });
   });
 });
