@@ -396,10 +396,76 @@ pub fn extract_archive(
     Ok(target_path)
 }
 
+/// 预置的知名 GitHub 加速镜像前缀（按测速响应稳定性与可用性排序）
+pub const DEFAULT_GITHUB_MIRRORS: &[&str] = &[
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+    "https://mirror.ghproxy.com/",
+    "https://ghproxy.net/",
+];
+
+/// 根据目标 GitHub URL 生成可尝试的加速镜像地址列表
+/// 支持通过环境变量 `SUBOUT_GITHUB_MIRROR` 自定义优先镜像前缀
+pub fn get_mirror_urls(target_url: &str) -> Vec<String> {
+    let mut mirrors = Vec::new();
+    if let Ok(custom) = std::env::var("SUBOUT_GITHUB_MIRROR") {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            let prefix = if trimmed.ends_with('/') {
+                trimmed.to_string()
+            } else {
+                format!("{trimmed}/")
+            };
+            mirrors.push(format!("{prefix}{target_url}"));
+        }
+    }
+    for &prefix in DEFAULT_GITHUB_MIRRORS {
+        let candidate = format!("{prefix}{target_url}");
+        if !mirrors.contains(&candidate) {
+            mirrors.push(candidate);
+        }
+    }
+    mirrors
+}
+
 async fn wait_for_cancel(cancel_flag: &std::sync::atomic::AtomicBool) {
     while !cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+}
+
+async fn try_download_mirrors(
+    client: &reqwest::Client,
+    cancel_flag: &std::sync::atomic::AtomicBool,
+    mirror_urls: &[String],
+) -> Result<reqwest::Response> {
+    let mut last_err = String::from("无可用镜像");
+    for url in mirror_urls {
+        eprintln!("[Kernel] 正在尝试国内加速镜像: {url}...");
+        let req_opt = tokio::select! {
+            res = client.get(url).send() => Some(res),
+            () = wait_for_cancel(cancel_flag) => None,
+        };
+        match req_opt {
+            None => return Err(anyhow!("下载已取消")),
+            Some(Ok(res)) if res.status().is_success() => {
+                eprintln!("[Kernel] 加速镜像连接成功: {url}");
+                return Ok(res);
+            }
+            Some(Ok(res)) => {
+                last_err = format!("{url} 返回 HTTP {}", res.status());
+                eprintln!(
+                    "[Kernel] 镜像 {url} 返回 HTTP {}，尝试下一个备用镜像...",
+                    res.status()
+                );
+            }
+            Some(Err(e)) => {
+                last_err = format!("{url} ({e})");
+                eprintln!("[Kernel] 镜像 {url} 连接失败: {e}，尝试下一个备用镜像...");
+            }
+        }
+    }
+    Err(anyhow!(last_err))
 }
 
 pub async fn download_and_install_kernel(
@@ -421,81 +487,76 @@ pub async fn download_and_install_kernel(
     }
 
     let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(15))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .connect_timeout(std::time::Duration::from_secs(10))
         .read_timeout(std::time::Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::limited(10))
         .build()?;
 
     let primary_url = target.url;
-    let mirror_url = format!("https://ghproxy.net/{}", target.url);
+    let mirror_urls = get_mirror_urls(target.url);
 
-    let mut download_url = if use_mirror {
-        mirror_url.clone()
-    } else {
-        primary_url.to_string()
-    };
-
-    let send_request = |url: String| {
-        let client = client.clone();
-        let cancel_flag = cancel_flag.clone();
-        async move {
-            tokio::select! {
-                res = client.get(&url).send() => Some(res),
-                () = wait_for_cancel(&cancel_flag) => None,
+    let response = if use_mirror {
+        match try_download_mirrors(&client, &cancel_flag, &mirror_urls).await {
+            Ok(res) => res,
+            Err(e) if e.to_string() == "下载已取消" => {
+                let mut st = status_lock.write().await;
+                st.status = "idle".to_string();
+                st.error = Some("下载已取消".to_string());
+                return Err(e);
             }
-        }
-    };
-
-    let mut response = match send_request(download_url.clone()).await {
-        Some(Ok(res)) => res,
-        None => {
-            let mut st = status_lock.write().await;
-            st.status = "idle".to_string();
-            st.error = Some("下载已取消".to_string());
-            return Err(anyhow!("下载已取消"));
-        }
-        Some(Err(e)) => {
-            if use_mirror {
-                let err_msg = format!("发起内核下载请求失败: {e}");
+            Err(e) => {
+                let err_msg = format!("发起内核下载请求失败 (所有加速镜像均不可达): {e}");
                 let mut st = status_lock.write().await;
                 st.status = "error".to_string();
                 st.error = Some(err_msg.clone());
                 return Err(anyhow!(err_msg));
             }
-            eprintln!(
-                "[Kernel] Direct GitHub connection failed ({e}), falling back to acceleration mirror..."
-            );
-            download_url = mirror_url.clone();
-            match send_request(download_url.clone()).await {
-                Some(Ok(res)) => res,
-                None => {
-                    let mut st = status_lock.write().await;
-                    st.status = "idle".to_string();
-                    st.error = Some("下载已取消".to_string());
-                    return Err(anyhow!("下载已取消"));
-                }
-                Some(Err(err2)) => {
-                    let err_msg = format!("发起内核下载请求失败 (官方源与镜像均不可达): {err2}");
-                    let mut st = status_lock.write().await;
-                    st.status = "error".to_string();
-                    st.error = Some(err_msg.clone());
-                    return Err(anyhow!(err_msg));
+        }
+    } else {
+        eprintln!("[Kernel] 正在尝试官方源直连下载: {primary_url}...");
+        let send_res = tokio::select! {
+            res = client.get(primary_url).send() => Some(res),
+            () = wait_for_cancel(&cancel_flag) => None,
+        };
+
+        match send_res {
+            None => {
+                let mut st = status_lock.write().await;
+                st.status = "idle".to_string();
+                st.error = Some("下载已取消".to_string());
+                return Err(anyhow!("下载已取消"));
+            }
+            Some(Ok(res)) if res.status().is_success() => res,
+            Some(res_or_err) => {
+                let official_err = match res_or_err {
+                    Ok(res) => format!("HTTP {}", res.status()),
+                    Err(e) => format!("{e}"),
+                };
+                eprintln!(
+                    "[Kernel] 官方源直连失败 ({official_err})，自动切换至备用加速镜像..."
+                );
+                match try_download_mirrors(&client, &cancel_flag, &mirror_urls).await {
+                    Ok(res) => res,
+                    Err(e) if e.to_string() == "下载已取消" => {
+                        let mut st = status_lock.write().await;
+                        st.status = "idle".to_string();
+                        st.error = Some("下载已取消".to_string());
+                        return Err(e);
+                    }
+                    Err(mirror_err) => {
+                        let err_msg = format!(
+                            "发起内核下载请求失败: 官方源不可达 ({official_err})；备用加速镜像亦均不可达 ({mirror_err})。"
+                        );
+                        let mut st = status_lock.write().await;
+                        st.status = "error".to_string();
+                        st.error = Some(err_msg.clone());
+                        return Err(anyhow!(err_msg));
+                    }
                 }
             }
         }
     };
-
-    if !response.status().is_success() && !use_mirror {
-        eprintln!(
-            "[Kernel] Direct download returned HTTP {}, falling back to mirror...",
-            response.status()
-        );
-        download_url = mirror_url.clone();
-        if let Some(Ok(fallback_res)) = send_request(download_url.clone()).await
-            && fallback_res.status().is_success()
-        {
-            response = fallback_res;
-        }
-    }
 
     if !response.status().is_success() {
         let err_msg = format!("下载失败，HTTP 状态码: {}", response.status());
@@ -791,5 +852,15 @@ mod tests {
         let read = std::fs::read(&extracted).unwrap();
         assert_eq!(read, b"windows binary test");
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_mirror_urls() {
+        let dummy_url = "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/test.tar.gz";
+        let mirrors = get_mirror_urls(dummy_url);
+        assert!(!mirrors.is_empty());
+        assert!(mirrors.iter().any(|m| m.starts_with("https://gh-proxy.com/")));
+        assert!(mirrors.iter().any(|m| m.starts_with("https://ghfast.top/")));
+        assert!(mirrors.iter().all(|m| m.ends_with(dummy_url)));
     }
 }

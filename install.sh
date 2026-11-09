@@ -26,6 +26,7 @@ PURGE=false
 FROM_RELEASE=false
 TARGET_TAG=""
 MIRROR_URL=""
+PROXY_URL=""
 GITHUB_REPO="geekdex/subout"
 CUSTOM_BIN_PATH=""
 
@@ -49,7 +50,8 @@ show_help() {
     echo "      --purge             卸载时连同数据目录、配置与日志一同彻底清理"
     echo "  -t, --tag, --version    指定安装的 GitHub Release 版本标签 (如 v0.1.0)"
     echo "      --from-release      强制从 GitHub Releases 下载预编译文件 (即使在源码目录中)"
-    echo "      --mirror <url>      指定 GitHub 下载镜像代理前缀 (如 https://ghproxy.com/)"
+    echo "      --mirror <url>      指定 GitHub 下载镜像代理前缀 (如 https://gh-proxy.com/)"
+    echo "      --proxy <url>       指定 subout 系统服务启动时使用之上游 HTTP 代理 (如 http://192.168.1.10:7890)"
     echo "  -h, --help              显示此帮助信息"
     echo
     echo "示例:"
@@ -121,6 +123,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --mirror)
             MIRROR_URL="$2"
+            shift 2
+            ;;
+        --proxy)
+            PROXY_URL="$2"
             shift 2
             ;;
         -h|--help)
@@ -628,7 +634,7 @@ else
         # Fallback without progress-bar for dumb terminals
         if ! curl -fsSL "$DOWNLOAD_URL" -o "${TMP_DIR}/${ARCHIVE_NAME}"; then
             echo -e "${RED}错误: 从 GitHub Releases 下载预编译文件失败。${NC}"
-            echo -e "请检查网络或配置镜像代理 (--mirror https://ghproxy.com/)。"
+            echo -e "请检查网络或配置镜像代理 (--mirror https://gh-proxy.com/)。"
             exit 1
         fi
     fi
@@ -708,6 +714,17 @@ else
 
     if [[ "$TARGET_OS" == "linux" ]]; then
         if command -v systemctl >/dev/null 2>&1; then
+            EXTRA_SERVICE_ENV=""
+            if [[ -n "$MIRROR_URL" ]]; then
+                EXTRA_SERVICE_ENV="${EXTRA_SERVICE_ENV}Environment=\"SUBOUT_GITHUB_MIRROR=${MIRROR_URL}\"\n"
+            fi
+            if [[ -n "$PROXY_URL" ]]; then
+                EXTRA_SERVICE_ENV="${EXTRA_SERVICE_ENV}Environment=\"HTTP_PROXY=${PROXY_URL}\"\nEnvironment=\"HTTPS_PROXY=${PROXY_URL}\"\n"
+            elif [[ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]]; then
+                DETECTED_PROXY="${HTTPS_PROXY:-${https_proxy:-}}"
+                EXTRA_SERVICE_ENV="${EXTRA_SERVICE_ENV}Environment=\"HTTP_PROXY=${DETECTED_PROXY}\"\nEnvironment=\"HTTPS_PROXY=${DETECTED_PROXY}\"\n"
+            fi
+
             cat << SERVICE_EOF | $SUDO tee "$SERVICE_FILE" >/dev/null
 [Unit]
 Description=Subout Proxy Subscription Manager & Sing-box Web Panel
@@ -724,7 +741,7 @@ TimeoutStopSec=15
 Restart=always
 RestartSec=3s
 LimitNOFILE=65535
-
+$(echo -e -n "$EXTRA_SERVICE_ENV")
 # State, Logs, and Runtime Directory Management
 StateDirectory=subout
 LogsDirectory=subout
