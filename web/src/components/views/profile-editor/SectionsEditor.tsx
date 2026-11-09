@@ -32,11 +32,12 @@ import {
   DnsServerItem,
   InboundItem,
   OutboundItem,
-  HttpClientItem,
   RouteRuleItem,
   DnsRuleItem,
   OFFICIAL_RULE_SET_PRESETS,
   collectMissingRuleSetTags,
+  ensureRuleSetsInConfig,
+  ensureDnsServers,
 } from "./types";
 import { TagListInput } from "./TagListInput";
 import { CollapsibleToolbar } from "./CollapsibleToolbar";
@@ -77,9 +78,6 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
   const ruleSets: RuleSetItem[] = Array.isArray(route.rule_set)
     ? route.rule_set
     : [];
-  const httpClients: HttpClientItem[] = Array.isArray(config.http_clients)
-    ? config.http_clients
-    : [];
 
   const defaultTargetTag =
     outboundTags.find((t) => t !== "direct") || outboundTags[0] || "proxy";
@@ -97,8 +95,24 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
     onChange({ ...config, route: nextRoute as SingBoxVisualConfig["route"] });
   };
 
-  const appendRouteRule = (newRule: RouteRuleItem) => {
-    updateRoute({ rules: [...rules, newRule] });
+  const appendRouteRule = (
+    newRule: RouteRuleItem,
+    extraRuleSets?: string[],
+  ) => {
+    const nextConfig = {
+      ...config,
+      route: {
+        ...route,
+        rules: [...rules, newRule],
+      },
+    };
+    if (extraRuleSets && extraRuleSets.length > 0) {
+      onChange(
+        ensureRuleSetsInConfig(nextConfig, extraRuleSets, defaultTargetTag),
+      );
+    } else {
+      onChange(nextConfig);
+    }
   };
 
   const addRuleSet = (preset?: { tag: string; url: string }) => {
@@ -121,41 +135,12 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
 
   const handleAutoCompleteMissingRuleSets = () => {
     if (missingRuleSetTags.length === 0) return;
-    const nextRuleSets = [...ruleSets];
-    const nextHttpClients = [...httpClients];
-    if (!nextHttpClients.some((c) => c.tag === "proxy")) {
-      nextHttpClients.push(
-        { tag: "direct" },
-        { tag: "proxy", detour: defaultTargetTag },
-      );
-    }
-
-    for (const tag of missingRuleSetTags) {
-      if (nextRuleSets.some((r) => r.tag === tag)) continue;
-      const preset = OFFICIAL_RULE_SET_PRESETS.find((p) => p.tag === tag);
-      const isGeoip = tag.startsWith("geoip-");
-      const url =
-        preset?.url ||
-        (isGeoip
-          ? `https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/${tag}.srs`
-          : `https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/${tag}.srs`);
-      nextRuleSets.push({
-        type: "remote",
-        tag,
-        format: "binary",
-        url,
-        http_client: "proxy",
-      });
-    }
-
-    onChange({
-      ...config,
-      http_clients: nextHttpClients,
-      route: {
-        ...route,
-        rule_set: nextRuleSets,
-      },
-    });
+    const nextConfig = ensureRuleSetsInConfig(
+      config,
+      missingRuleSetTags,
+      defaultTargetTag,
+    );
+    onChange(nextConfig);
   };
 
   const updateRuleSetAt = (idx: number, nextItem: RuleSetItem) => {
@@ -224,15 +209,18 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
             variant="secondary"
             size="sm"
             onClick={() =>
-              appendRouteRule({
-                type: "logical",
-                mode: "or",
-                outbound: "direct",
-                rules: [
-                  { rule_set: ["geosite-cn"] },
-                  { rule_set: ["geoip-cn"] },
-                ],
-              })
+              appendRouteRule(
+                {
+                  type: "logical",
+                  mode: "or",
+                  outbound: "direct",
+                  rules: [
+                    { rule_set: ["geosite-cn"] },
+                    { rule_set: ["geoip-cn"] },
+                  ],
+                },
+                ["geosite-cn", "geoip-cn"],
+              )
             }
             icon={<GitBranch className="w-3.5 h-3.5 text-sky-400" />}
           >
@@ -242,29 +230,32 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
             variant="secondary"
             size="sm"
             onClick={() =>
-              appendRouteRule({
-                type: "logical",
-                mode: "and",
-                outbound: defaultTargetTag,
-                rules: [
-                  { network: ["tcp", "udp"] },
-                  {
-                    type: "logical",
-                    mode: "or",
-                    rules: [
-                      {
-                        rule_set: [
-                          "geosite-google",
-                          "geosite-github",
-                          "geosite-openai",
-                        ],
-                      },
-                      { domain_suffix: [".io", ".dev", ".ai", ".app"] },
-                      { domain: ["claude.ai"] },
-                    ],
-                  },
-                ],
-              })
+              appendRouteRule(
+                {
+                  type: "logical",
+                  mode: "and",
+                  outbound: defaultTargetTag,
+                  rules: [
+                    { network: ["tcp", "udp"] },
+                    {
+                      type: "logical",
+                      mode: "or",
+                      rules: [
+                        {
+                          rule_set: [
+                            "geosite-google",
+                            "geosite-github",
+                            "geosite-openai",
+                          ],
+                        },
+                        { domain_suffix: [".io", ".dev", ".ai", ".app"] },
+                        { domain: ["claude.ai"] },
+                      ],
+                    },
+                  ],
+                },
+                ["geosite-google", "geosite-github", "geosite-openai"],
+              )
             }
             icon={<GitBranch className="w-3.5 h-3.5 text-indigo-400" />}
           >
@@ -398,10 +389,13 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
           <button
             type="button"
             onClick={() =>
-              appendRouteRule({
-                rule_set: ["geosite-category-ads-all"],
-                action: "reject",
-              })
+              appendRouteRule(
+                {
+                  rule_set: ["geosite-category-ads-all"],
+                  action: "reject",
+                },
+                ["geosite-category-ads-all"],
+              )
             }
             className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
           >
@@ -422,10 +416,13 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
           <button
             type="button"
             onClick={() =>
-              appendRouteRule({
-                rule_set: ["geosite-cn", "geoip-cn"],
-                outbound: "direct",
-              })
+              appendRouteRule(
+                {
+                  rule_set: ["geosite-cn", "geoip-cn"],
+                  outbound: "direct",
+                },
+                ["geosite-cn", "geoip-cn"],
+              )
             }
             className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
           >
@@ -434,10 +431,13 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
           <button
             type="button"
             onClick={() =>
-              appendRouteRule({
-                rule_set: ["geosite-geolocation-!cn"],
-                outbound: defaultTargetTag,
-              })
+              appendRouteRule(
+                {
+                  rule_set: ["geosite-geolocation-!cn"],
+                  outbound: defaultTargetTag,
+                },
+                ["geosite-geolocation-!cn"],
+              )
             }
             className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
           >
@@ -792,6 +792,24 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
   const effectiveServerTags =
     serverTags.length > 0 ? serverTags : ["remote-dns", "local-dns"];
 
+  const defaultProxyDetour =
+    outboundTags.find((t) => t !== "direct") || "proxy";
+
+  const missingRuleSetTags = React.useMemo(
+    () => collectMissingRuleSetTags(config),
+    [config],
+  );
+
+  const handleAutoCompleteMissingRuleSets = () => {
+    if (missingRuleSetTags.length === 0) return;
+    const nextConfig = ensureRuleSetsInConfig(
+      config,
+      missingRuleSetTags,
+      defaultProxyDetour,
+    );
+    onChange(nextConfig);
+  };
+
   const updateDns = (patch: Record<string, unknown>) => {
     const nextDns: Record<string, unknown> = { ...dns, ...patch };
     for (const [k, v] of Object.entries(nextDns)) {
@@ -816,7 +834,23 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
     if (newServer.type === "local" || newServer.type === "fakeip") {
       delete newServer.server;
     }
-    updateDns({ servers: [...servers, newServer] });
+    const isLocalOrDirect =
+      newServer.type === "local" || newServer.tag?.includes("local");
+    const nextRoute = {
+      ...(config.route || {}),
+      ...(!config.route?.default_domain_resolver && isLocalOrDirect
+        ? { default_domain_resolver: tag }
+        : {}),
+    };
+    onChange({
+      ...config,
+      dns: {
+        ...dns,
+        servers: [...servers, newServer],
+        ...(!dns.final ? { final: tag } : {}),
+      },
+      route: nextRoute,
+    });
   };
 
   const updateServerAt = (idx: number, nextItem: DnsServerItem) => {
@@ -833,13 +867,99 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
     updateDns({ servers: moveArrayItem(servers, fromIdx, toIdx) });
   };
 
-  const appendDnsRule = (newRule: DnsRuleItem) => {
-    updateDns({ rules: [...rules, newRule] });
+  const appendDnsRule = (
+    newRule: DnsRuleItem,
+    extraServers?: string[],
+    extraRuleSets?: string[],
+  ) => {
+    let targetServerTag = newRule.server;
+    if (!targetServerTag && (newRule.action === "route" || !newRule.action)) {
+      targetServerTag =
+        serverTags.find((t) => t.includes("local")) ||
+        effectiveServerTags[0] ||
+        "local-dns";
+      newRule = { ...newRule, server: targetServerTag };
+    }
+
+    const tagsToEnsure = [
+      ...(targetServerTag ? [targetServerTag] : []),
+      ...(extraServers || []),
+    ];
+
+    const nextServers =
+      tagsToEnsure.length > 0
+        ? ensureDnsServers(servers, tagsToEnsure, defaultProxyDetour)
+        : servers.length === 0
+          ? ensureDnsServers(servers, ["local-dns"], defaultProxyDetour)
+          : servers;
+
+    const fallbackTag =
+      nextServers.find((s) => s.tag === "local-dns" || s.tag?.includes("local"))
+        ?.tag ||
+      nextServers[0]?.tag ||
+      targetServerTag ||
+      "local-dns";
+
+    const nextDns: SingBoxVisualConfig["dns"] = {
+      ...dns,
+      servers: nextServers,
+      rules: [...rules, newRule],
+      ...(!dns.final && fallbackTag ? { final: fallbackTag } : {}),
+    };
+
+    const localResolverTag =
+      nextServers.find((s) => s.type === "local" || s.tag?.includes("local"))
+        ?.tag ||
+      nextServers.find((s) => s.type !== "fakeip")?.tag ||
+      fallbackTag;
+
+    const nextRoute = {
+      ...(config.route || {}),
+      ...(!config.route?.default_domain_resolver && localResolverTag
+        ? { default_domain_resolver: localResolverTag }
+        : {}),
+    };
+
+    if (extraRuleSets && extraRuleSets.length > 0) {
+      const updatedConfig = ensureRuleSetsInConfig(
+        { ...config, dns: nextDns, route: nextRoute },
+        extraRuleSets,
+        defaultProxyDetour,
+      );
+      onChange(updatedConfig);
+    } else {
+      onChange({ ...config, dns: nextDns, route: nextRoute });
+    }
   };
 
   const addTwoLevelLogicalDnsRule = () => {
-    appendDnsRule({
-      server: effectiveServerTags[0] || "remote-dns",
+    const targetServerTag =
+      serverTags.find(
+        (t) =>
+          t === "remote-dns" ||
+          t.includes("remote") ||
+          t.includes("google") ||
+          t.includes("cf"),
+      ) || "remote-dns";
+
+    const hasLocalServer = servers.some(
+      (s) => s.tag === "local-dns" || s.tag?.includes("local"),
+    );
+
+    const nextServers = ensureDnsServers(
+      servers,
+      [targetServerTag, hasLocalServer ? "" : "local-dns"],
+      defaultProxyDetour,
+    );
+
+    const fallbackTag =
+      nextServers.find((s) => s.tag === "local-dns" || s.tag?.includes("local"))
+        ?.tag ||
+      nextServers[0]?.tag ||
+      targetServerTag;
+
+    const newRule: DnsRuleItem = {
+      server: targetServerTag,
       type: "logical",
       mode: "and",
       rules: [
@@ -874,7 +994,48 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
           ],
         },
       ],
-    });
+    };
+
+    const nextDns: SingBoxVisualConfig["dns"] = {
+      ...dns,
+      servers: nextServers,
+      rules: [...rules, newRule],
+      ...(!dns.final && fallbackTag ? { final: fallbackTag } : {}),
+    };
+
+    const ruleSetTagsToEnsure = [
+      "geosite-google",
+      "geosite-youtube",
+      "geosite-twitter",
+      "geosite-facebook",
+      "geosite-instagram",
+      "geosite-telegram",
+      "geosite-netflix",
+      "geosite-github",
+      "geosite-openai",
+      "geosite-apple",
+      "geosite-jetbrains",
+    ];
+
+    const localResolverTag =
+      nextServers.find((s) => s.type === "local" || s.tag?.includes("local"))
+        ?.tag ||
+      nextServers.find((s) => s.type !== "fakeip")?.tag ||
+      fallbackTag;
+
+    const nextRoute = {
+      ...(config.route || {}),
+      ...(!config.route?.default_domain_resolver && localResolverTag
+        ? { default_domain_resolver: localResolverTag }
+        : {}),
+    };
+
+    const updatedConfig = ensureRuleSetsInConfig(
+      { ...config, dns: nextDns, route: nextRoute },
+      ruleSetTagsToEnsure,
+      defaultProxyDetour,
+    );
+    onChange(updatedConfig);
   };
 
   return (
@@ -883,6 +1044,18 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
       <CollapsibleToolbar
         title="DNS 服务器与解析分流工具箱"
         subtitle="上半部分可一键添加常用 DNS 服务器、普通规则与双层嵌套逻辑规则，下半部分管理列表与调整顺序"
+        headerActions={
+          missingRuleSetTags.length > 0 ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleAutoCompleteMissingRuleSets}
+              icon={<Wand2 className="w-3.5 h-3.5" />}
+            >
+              一键补齐已引用规则集 ({missingRuleSetTags.length})
+            </Button>
+          ) : undefined
+        }
       >
         {/* Row 1: DNS Rule Structure Builders */}
         <div className="flex flex-wrap items-center gap-2 pb-2.5 border-b border-slate-800/80">
@@ -892,12 +1065,21 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
           <Button
             variant="primary"
             size="sm"
-            onClick={() =>
-              appendDnsRule({
-                domain_suffix: [".cn"],
-                server: effectiveServerTags[0] || "local-dns",
-              })
-            }
+            onClick={() => {
+              const targetTag =
+                serverTags.find(
+                  (t) => t === "local-dns" || t.includes("local"),
+                ) ||
+                effectiveServerTags[0] ||
+                "local-dns";
+              appendDnsRule(
+                {
+                  domain_suffix: [".cn"],
+                  server: targetTag,
+                },
+                [targetTag],
+              );
+            }}
             icon={<Plus className="w-3.5 h-3.5" />}
           >
             新增普通规则
@@ -905,17 +1087,27 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
           <Button
             variant="secondary"
             size="sm"
-            onClick={() =>
-              appendDnsRule({
-                type: "logical",
-                mode: "or",
-                server: effectiveServerTags[0] || "local-dns",
-                rules: [
-                  { rule_set: ["geosite-cn"] },
-                  { domain_suffix: [".cn"] },
-                ],
-              })
-            }
+            onClick={() => {
+              const targetTag =
+                serverTags.find(
+                  (t) => t === "local-dns" || t.includes("local"),
+                ) ||
+                effectiveServerTags[0] ||
+                "local-dns";
+              appendDnsRule(
+                {
+                  type: "logical",
+                  mode: "or",
+                  server: targetTag,
+                  rules: [
+                    { rule_set: ["geosite-cn"] },
+                    { domain_suffix: [".cn"] },
+                  ],
+                },
+                [targetTag],
+                ["geosite-cn"],
+              );
+            }}
             icon={<GitBranch className="w-3.5 h-3.5 text-sky-400" />}
           >
             新增单层逻辑组合 (AND/OR)
@@ -937,6 +1129,9 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                   tag: "google",
                   type: "tls",
                   server: "8.8.8.8",
+                  ...(defaultProxyDetour && defaultProxyDetour !== "direct"
+                    ? { detour: defaultProxyDetour }
+                    : {}),
                 });
               }
               if (!nextServers.some((s) => s.tag === "local")) {
@@ -946,9 +1141,21 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                   server: "223.5.5.5",
                 });
               }
-              updateDns({
-                servers: nextServers,
-                strategy: dns.strategy || "ipv4_only",
+              const nextRoute = {
+                ...(config.route || {}),
+                ...(!config.route?.default_domain_resolver
+                  ? { default_domain_resolver: "local" }
+                  : {}),
+              };
+              onChange({
+                ...config,
+                dns: {
+                  ...dns,
+                  servers: nextServers,
+                  strategy: dns.strategy || "ipv4_only",
+                  ...(!dns.final ? { final: "local" } : {}),
+                },
+                route: nextRoute,
               });
             }}
             className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 border border-emerald-500/30 transition-colors"
@@ -964,6 +1171,9 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                   tag: "google",
                   type: "tls",
                   server: "8.8.8.8",
+                  ...(defaultProxyDetour && defaultProxyDetour !== "direct"
+                    ? { detour: defaultProxyDetour }
+                    : {}),
                 });
               }
               if (!nextServers.some((s) => s.tag === "local")) {
@@ -981,15 +1191,27 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                   inet6_range: "2001:2::/48",
                 });
               }
-              updateDns({
-                servers: nextServers,
-                rules: [
-                  ...rules,
-                  {
-                    query_type: ["A", "AAAA"],
-                    server: "remote",
-                  },
-                ],
+              const nextRoute = {
+                ...(config.route || {}),
+                ...(!config.route?.default_domain_resolver
+                  ? { default_domain_resolver: "local" }
+                  : {}),
+              };
+              onChange({
+                ...config,
+                dns: {
+                  ...dns,
+                  servers: nextServers,
+                  rules: [
+                    ...rules,
+                    {
+                      query_type: ["A", "AAAA"],
+                      server: "remote",
+                    },
+                  ],
+                  ...(!dns.final ? { final: "local" } : {}),
+                },
+                route: nextRoute,
               });
             }}
             className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-500/30 transition-colors"
@@ -1005,6 +1227,9 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                   tag: "google",
                   type: "tls",
                   server: "8.8.8.8",
+                  ...(defaultProxyDetour && defaultProxyDetour !== "direct"
+                    ? { detour: defaultProxyDetour }
+                    : {}),
                 });
               }
               if (!nextServers.some((s) => s.tag === "local")) {
@@ -1014,7 +1239,8 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                   server: "223.5.5.5",
                 });
               }
-              updateDns({
+              const nextDns: SingBoxVisualConfig["dns"] = {
+                ...dns,
                 servers: nextServers,
                 rules: [
                   ...rules,
@@ -1037,7 +1263,24 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                     server: "google",
                   },
                 ],
-              });
+                ...(!dns.final ? { final: "local" } : {}),
+              };
+              const nextRoute = {
+                ...(config.route || {}),
+                ...(!config.route?.default_domain_resolver
+                  ? { default_domain_resolver: "local" }
+                  : {}),
+              };
+              const updatedConfig = ensureRuleSetsInConfig(
+                { ...config, dns: nextDns, route: nextRoute },
+                [
+                  "geosite-geolocation-cn",
+                  "geosite-geolocation-!cn",
+                  "geoip-cn",
+                ],
+                defaultProxyDetour,
+              );
+              onChange(updatedConfig);
             }}
             className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 border border-sky-500/30 transition-colors"
           >
@@ -1060,15 +1303,20 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
           </button>
           <button
             type="button"
-            onClick={() =>
-              appendDnsRule({
-                rule_set: ["geosite-cn"],
-                server:
-                  serverTags.find((t) => t.includes("local")) ||
-                  effectiveServerTags[0] ||
-                  "local-dns",
-              })
-            }
+            onClick={() => {
+              const targetTag =
+                serverTags.find(
+                  (t) => t === "local-dns" || t.includes("local"),
+                ) || "local-dns";
+              appendDnsRule(
+                {
+                  rule_set: ["geosite-cn"],
+                  server: targetTag,
+                },
+                [targetTag],
+                ["geosite-cn"],
+              );
+            }}
             className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
           >
             + 国内域名直连解析 (geosite-cn)
@@ -1076,10 +1324,14 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
           <button
             type="button"
             onClick={() =>
-              appendDnsRule({
-                rule_set: ["geosite-category-ads-all"],
-                action: "reject",
-              })
+              appendDnsRule(
+                {
+                  rule_set: ["geosite-category-ads-all"],
+                  action: "reject",
+                },
+                servers.length === 0 ? ["local-dns"] : undefined,
+                ["geosite-category-ads-all"],
+              )
             }
             className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
           >
@@ -1087,14 +1339,23 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
           </button>
           <button
             type="button"
-            onClick={() =>
-              appendDnsRule({
-                query_type: ["A", "AAAA"],
-                server:
-                  serverTags.find((t) => t.includes("fakeip")) || "fakeip-dns",
-                rewrite_ttl: 1,
-              })
-            }
+            onClick={() => {
+              const targetTag =
+                serverTags.find(
+                  (t) => t === "fakeip-dns" || t.includes("fakeip"),
+                ) || "fakeip-dns";
+              const hasFallback = servers.some(
+                (s) => s.tag === "local-dns" || s.tag?.includes("local"),
+              );
+              appendDnsRule(
+                {
+                  query_type: ["A", "AAAA"],
+                  server: targetTag,
+                  rewrite_ttl: 1,
+                },
+                [targetTag, hasFallback ? "" : "local-dns"],
+              );
+            }}
             className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70 transition-colors"
           >
             + A/AAAA 查询走 FakeIP
@@ -1119,7 +1380,6 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
               addServer({
                 tag: "local-dns",
                 type: "local",
-                detour: "direct",
               })
             }
             className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70"
@@ -1493,9 +1753,51 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
           kind="dns"
           platform={platform}
           rules={rules}
-          onChange={(nextRules) =>
-            updateDns({ rules: nextRules as DnsRuleItem[] })
-          }
+          onChange={(nextRules) => {
+            const referencedServers = new Set<string>();
+            const walk = (rList: (RouteRuleItem | DnsRuleItem)[]) => {
+              for (const r of rList) {
+                const s = (r as DnsRuleItem).server;
+                if (s && typeof s === "string" && s.trim()) {
+                  referencedServers.add(s.trim());
+                }
+                if (r.rules) walk(r.rules);
+              }
+            };
+            walk(nextRules);
+            const missingServers = Array.from(referencedServers).filter(
+              (tag) => !servers.some((s) => s.tag === tag),
+            );
+            if (missingServers.length > 0) {
+              const nextServers = ensureDnsServers(
+                servers,
+                missingServers,
+                defaultProxyDetour,
+              );
+              const fallbackTag =
+                nextServers.find(
+                  (s) => s.tag === "local-dns" || s.tag?.includes("local"),
+                )?.tag || nextServers[0]?.tag;
+              const nextRoute = {
+                ...(config.route || {}),
+                ...(!config.route?.default_domain_resolver && fallbackTag
+                  ? { default_domain_resolver: fallbackTag }
+                  : {}),
+              };
+              onChange({
+                ...config,
+                dns: {
+                  ...dns,
+                  servers: nextServers,
+                  rules: nextRules as DnsRuleItem[],
+                  ...(!dns.final && fallbackTag ? { final: fallbackTag } : {}),
+                },
+                route: nextRoute,
+              });
+            } else {
+              updateDns({ rules: nextRules as DnsRuleItem[] });
+            }
+          }}
           outboundTags={outboundTags}
           dnsServerTags={effectiveServerTags}
           inboundTags={inboundTags}
@@ -2575,15 +2877,20 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
           <Button
             variant="secondary"
             size="sm"
-            onClick={() =>
-              addOutbound({
+            onClick={() => {
+              const nextOutbounds = [...outbounds];
+              if (!existingTags.has("direct")) {
+                nextOutbounds.push({ type: "direct", tag: "direct" });
+              }
+              nextOutbounds.push({
                 type: "selector",
                 tag: existingTags.has("proxy")
                   ? `selector-${outbounds.length + 1}`
                   : "proxy",
                 outbounds: ["direct"],
-              })
-            }
+              });
+              updateOutbounds(nextOutbounds);
+            }}
             icon={<Plus className="w-3.5 h-3.5" />}
           >
             新增手动选择组 (selector)
@@ -2591,8 +2898,12 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
           <Button
             variant="secondary"
             size="sm"
-            onClick={() =>
-              addOutbound({
+            onClick={() => {
+              const nextOutbounds = [...outbounds];
+              if (!existingTags.has("direct")) {
+                nextOutbounds.push({ type: "direct", tag: "direct" });
+              }
+              nextOutbounds.push({
                 type: "urltest",
                 tag: existingTags.has("AUTO-Test")
                   ? `urltest-${outbounds.length + 1}`
@@ -2601,8 +2912,9 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                 url: "http://cp.cloudflare.com/generate_204",
                 interval: "3m",
                 tolerance: 50,
-              })
-            }
+              });
+              updateOutbounds(nextOutbounds);
+            }}
             icon={<Plus className="w-3.5 h-3.5" />}
           >
             新增自动测速组 (urltest)

@@ -833,6 +833,140 @@ export function collectMissingRuleSetTags(
 }
 
 /**
+ * Ensures specified rule sets exist in route.rule_set, and that proxy HTTP client exists.
+ */
+export function ensureRuleSetsInConfig(
+  baseConfig: SingBoxVisualConfig,
+  tagsToEnsure: string[],
+  defaultProxyDetour = "proxy",
+): SingBoxVisualConfig {
+  const currentRuleSets = Array.isArray(baseConfig.route?.rule_set)
+    ? baseConfig.route.rule_set
+    : [];
+  const existingRuleSetTags = new Set(
+    currentRuleSets.map((r) => r.tag).filter(Boolean),
+  );
+  const toAdd = tagsToEnsure.filter((t) => t && !existingRuleSetTags.has(t));
+  if (toAdd.length === 0) return baseConfig;
+
+  const nextRuleSets = [...currentRuleSets];
+  const currentHttpClients = Array.isArray(baseConfig.http_clients)
+    ? baseConfig.http_clients
+    : [];
+  const nextHttpClients = [...currentHttpClients];
+  if (!nextHttpClients.some((c) => c.tag === "proxy")) {
+    nextHttpClients.push(
+      { tag: "direct" },
+      { tag: "proxy", detour: defaultProxyDetour },
+    );
+  }
+
+  for (const tag of toAdd) {
+    const preset = OFFICIAL_RULE_SET_PRESETS.find((p) => p.tag === tag);
+    const isGeoip = tag.startsWith("geoip-");
+    const url =
+      preset?.url ||
+      (isGeoip
+        ? `https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/${tag}.srs`
+        : `https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/${tag}.srs`);
+    nextRuleSets.push({
+      type: "remote",
+      tag,
+      format: "binary",
+      url,
+      http_client: "proxy",
+    });
+  }
+
+  return {
+    ...baseConfig,
+    http_clients: nextHttpClients,
+    route: {
+      ...(baseConfig.route || {}),
+      rule_set: nextRuleSets,
+    },
+  };
+}
+
+/**
+ * Ensures specified DNS server tags exist in servers list with proper configurations.
+ */
+export function ensureDnsServers(
+  currentServers: DnsServerItem[],
+  tagsToEnsure: string[],
+  defaultProxyDetour = "proxy",
+): DnsServerItem[] {
+  const nextServers = [...currentServers];
+  const existingTags = new Set(nextServers.map((s) => s.tag).filter(Boolean));
+
+  for (const rawTag of tagsToEnsure) {
+    const tag = rawTag?.trim();
+    if (!tag || existingTags.has(tag)) continue;
+
+    if (tag === "remote-dns" || tag.includes("remote")) {
+      nextServers.push({
+        tag,
+        type: "https",
+        server: "1.1.1.1",
+        ...(defaultProxyDetour && defaultProxyDetour !== "direct"
+          ? { detour: defaultProxyDetour }
+          : {}),
+      });
+      existingTags.add(tag);
+    } else if (tag === "local-dns" || tag.includes("local")) {
+      nextServers.push({
+        tag,
+        type: "local",
+      });
+      existingTags.add(tag);
+    } else if (tag === "fakeip-dns" || tag.includes("fakeip")) {
+      nextServers.push({
+        tag,
+        type: "fakeip",
+        inet4_range: "198.18.0.0/15",
+        inet6_range: "fc00::/18",
+      });
+      existingTags.add(tag);
+    } else if (
+      tag === "google" ||
+      tag === "google-dns" ||
+      tag.includes("google")
+    ) {
+      nextServers.push({
+        tag,
+        type: "tls",
+        server: "8.8.8.8",
+        ...(defaultProxyDetour && defaultProxyDetour !== "direct"
+          ? { detour: defaultProxyDetour }
+          : {}),
+      });
+      existingTags.add(tag);
+    } else {
+      nextServers.push({
+        tag,
+        type: "udp",
+        server: "223.5.5.5",
+      });
+      existingTags.add(tag);
+    }
+  }
+
+  // Sing-box best practice: If remote or fakeip servers are introduced,
+  // ensure there is at least one local fallback DNS server.
+  if (
+    nextServers.some((s) => s.type === "fakeip" || s.tag === "remote-dns") &&
+    !nextServers.some((s) => s.type === "local" || s.tag?.includes("local"))
+  ) {
+    nextServers.push({
+      tag: "local-dns",
+      type: "local",
+    });
+  }
+
+  return nextServers;
+}
+
+/**
  * Serializes SingBoxVisualConfig state into a clean, schema-compliant JSON object.
  * Preserves empty sections as `{}` or `[]` when the config is an empty skeleton.
  */

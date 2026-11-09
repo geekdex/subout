@@ -474,4 +474,105 @@ describe("ProfileEditor Visual Configuration Component", () => {
       screen.getAllByText(/仅 Linux 平台支持 auto_redirect/).length,
     ).toBeGreaterThan(0);
   });
+
+  it("ensures DNS servers list is automatically populated when clicking 常用 DNS 规则快捷键 on an empty profile", () => {
+    const emptyProfile: ConfigProfile = {
+      id: 5,
+      name: "DNS 测试配置",
+      platform: "linux",
+      description: "测试快捷添加常用 DNS 规则",
+      token: "tok-dns-test-12345",
+      version_code: 2026110901,
+      is_running_config: false,
+      content: JSON.stringify({
+        $schema: "https://sing-box.sagernet.org/schema.json",
+        log: {},
+        dns: {},
+        inbounds: [],
+        outbounds: [{ type: "direct", tag: "direct" }],
+        route: {},
+      }),
+    };
+
+    render(
+      <ToastProvider>
+        <ProfileEditor
+          profile={emptyProfile}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />
+      </ToastProvider>,
+    );
+
+    // Switch to DNS tab
+    fireEvent.click(screen.getByText("DNS 与解析规则 (dns)"));
+
+    // 1. Click "+ 海外常见域名双层逻辑分流 (A/AAAA/CNAME + OR 规则组 → remote-dns)"
+    fireEvent.click(
+      screen.getByText(
+        /\+ 海外常见域名双层逻辑分流 \(A\/AAAA\/CNAME \+ OR 规则组 → remote-dns\)/,
+      ),
+    );
+
+    const previewEl = screen.getByTestId("json-preview-content");
+    let previewJson = JSON.parse(previewEl.textContent || "{}");
+
+    // Verify dns.servers is NOT empty: has remote-dns and fallback local-dns
+    expect(previewJson.dns.servers).toBeDefined();
+    expect(previewJson.dns.servers.length).toBeGreaterThanOrEqual(2);
+    const remoteServer = previewJson.dns.servers.find(
+      (s: { tag: string }) => s.tag === "remote-dns",
+    );
+    expect(remoteServer).toBeDefined();
+    expect(remoteServer.type).toBe("https");
+    expect(remoteServer.server).toBe("1.1.1.1");
+    const localServer = previewJson.dns.servers.find(
+      (s: { tag: string }) => s.tag === "local-dns",
+    );
+    expect(localServer).toBeDefined();
+    expect(localServer.type).toBe("local");
+    expect(previewJson.dns.final).toBe("local-dns");
+
+    // Verify dns.rules has the logical rule
+    expect(previewJson.dns.rules).toHaveLength(1);
+    expect(previewJson.dns.rules[0].server).toBe("remote-dns");
+
+    // Verify referenced rule sets were auto-populated in route.rule_set
+    expect(previewJson.route.rule_set).toBeDefined();
+    expect(
+      previewJson.route.rule_set.some(
+        (r: { tag: string }) => r.tag === "geosite-google",
+      ),
+    ).toBe(true);
+
+    // 2. Click "+ 国内域名直连解析 (geosite-cn)"
+    fireEvent.click(screen.getByText("+ 国内域名直连解析 (geosite-cn)"));
+    previewJson = JSON.parse(previewEl.textContent || "{}");
+    expect(previewJson.dns.rules).toHaveLength(2);
+    expect(previewJson.dns.rules[1].server).toBe("local-dns");
+    expect(previewJson.dns.rules[1].rule_set).toContain("geosite-cn");
+    expect(
+      previewJson.route.rule_set.some(
+        (r: { tag: string }) => r.tag === "geosite-cn",
+      ),
+    ).toBe(true);
+
+    // 3. Click "+ A/AAAA 查询走 FakeIP"
+    fireEvent.click(screen.getByText("+ A/AAAA 查询走 FakeIP"));
+    previewJson = JSON.parse(previewEl.textContent || "{}");
+    expect(previewJson.dns.rules).toHaveLength(3);
+    const fakeIpRule = previewJson.dns.rules[2];
+    expect(fakeIpRule.server).toBe("fakeip-dns");
+    const fakeIpServer = previewJson.dns.servers.find(
+      (s: { tag: string }) => s.tag === "fakeip-dns",
+    );
+    expect(fakeIpServer).toBeDefined();
+    expect(fakeIpServer.type).toBe("fakeip");
+    expect(fakeIpServer.inet4_range).toBe("198.18.0.0/15");
+
+    // Verify UI reflects the servers: server tags are visible in the server list
+    expect(screen.getAllByDisplayValue("remote-dns").length).toBeGreaterThan(0);
+    expect(screen.getAllByDisplayValue("local-dns").length).toBeGreaterThan(0);
+    expect(screen.getAllByDisplayValue("fakeip-dns").length).toBeGreaterThan(0);
+  });
 });

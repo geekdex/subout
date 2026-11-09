@@ -533,9 +533,7 @@ pub async fn download_and_install_kernel(
                     Ok(res) => format!("HTTP {}", res.status()),
                     Err(e) => format!("{e}"),
                 };
-                eprintln!(
-                    "[Kernel] 官方源直连失败 ({official_err})，自动切换至备用加速镜像..."
-                );
+                eprintln!("[Kernel] 官方源直连失败 ({official_err})，自动切换至备用加速镜像...");
                 match try_download_mirrors(&client, &cancel_flag, &mirror_urls).await {
                     Ok(res) => res,
                     Err(e) if e.to_string() == "下载已取消" => {
@@ -856,10 +854,15 @@ mod tests {
 
     #[test]
     fn test_get_mirror_urls() {
-        let dummy_url = "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/test.tar.gz";
+        let dummy_url =
+            "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/test.tar.gz";
         let mirrors = get_mirror_urls(dummy_url);
         assert!(!mirrors.is_empty());
-        assert!(mirrors.iter().any(|m| m.starts_with("https://gh-proxy.com/")));
+        assert!(
+            mirrors
+                .iter()
+                .any(|m| m.starts_with("https://gh-proxy.com/"))
+        );
         assert!(mirrors.iter().any(|m| m.starts_with("https://ghfast.top/")));
         assert!(mirrors.iter().all(|m| m.ends_with(dummy_url)));
     }
