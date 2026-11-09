@@ -162,6 +162,7 @@ describe("ProfileEditor Visual Configuration Component", () => {
 
     // Switch to Route tab to verify Linux desktop process matching fields
     fireEvent.click(screen.getByText("路由与分流 (route)"));
+    fireEvent.click(screen.getByText("全部展开"));
     expect(screen.getByText("进程名称 (process_name)")).toBeDefined();
     expect(screen.getByText("进程完整路径 (process_path)")).toBeDefined();
     expect(screen.getByText("进程路径正则 (process_path_regex)")).toBeDefined();
@@ -181,6 +182,7 @@ describe("ProfileEditor Visual Configuration Component", () => {
 
     // Switch to Route tab on Android profile to verify package_name and package_name_regex
     fireEvent.click(screen.getByText("路由与分流 (route)"));
+    fireEvent.click(screen.getByText("全部展开"));
     expect(screen.getByText("Android 应用包名 (package_name)")).toBeDefined();
     expect(
       screen.getByText("Android 包名正则 (package_name_regex)"),
@@ -318,12 +320,12 @@ describe("ProfileEditor Visual Configuration Component", () => {
     expect(initialJson.outbounds).toEqual([]);
     expect(initialJson.route).toEqual({});
 
-    // Collapsible top toolbar on Inbounds (Step 1) can be collapsed and expanded
-    const collapseBtn = screen.getByText("收起工具栏");
-    fireEvent.click(collapseBtn);
-    expect(screen.getByText("展开工具栏")).toBeDefined();
-    fireEvent.click(screen.getByText("展开工具栏"));
+    // Collapsible top toolbar on Inbounds (Step 1) is collapsed by default and can be expanded and collapsed
+    const expandBtn = screen.getByText("展开工具栏");
+    fireEvent.click(expandBtn);
     expect(screen.getByText("收起工具栏")).toBeDefined();
+    fireEvent.click(screen.getByText("收起工具栏"));
+    expect(screen.getByText("展开工具栏")).toBeDefined();
 
     // Switch to Step 3: Outbounds tab, toggle the master switch to import nodes and node groups, and verify they are displayed
     fireEvent.click(screen.getByText("出站与策略组 (outbounds)"));

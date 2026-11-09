@@ -460,8 +460,8 @@ impl PlatformStrategy for WindowsPlatform {
     }
 
     fn effective_tun_stack<'a>(&self, configured_stack: &'a str) -> &'a str {
-        if configured_stack == "system" {
-            "mixed"
+        if configured_stack.is_empty() {
+            "system"
         } else {
             configured_stack
         }

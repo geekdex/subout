@@ -208,6 +208,8 @@ pub struct ServiceStatusInfo {
     pub running_config_id: Option<i64>,
 }
 
+type CachedResourceUsage = (std::time::Instant, u32, f64, u64);
+
 pub struct SingBoxServiceManager {
     child: Arc<RwLock<Option<tokio::process::Child>>>,
     started_at: Arc<RwLock<Option<u64>>>,
@@ -222,6 +224,7 @@ pub struct SingBoxServiceManager {
     current_log_disabled: Arc<RwLock<bool>>,
     current_log_output: Arc<RwLock<Option<String>>>,
     system_proxy_active: Arc<RwLock<bool>>,
+    cached_resource_usage: Arc<RwLock<Option<CachedResourceUsage>>>,
 }
 
 impl Default for SingBoxServiceManager {
@@ -246,6 +249,7 @@ impl SingBoxServiceManager {
             current_log_disabled: Arc::new(RwLock::new(false)),
             current_log_output: Arc::new(RwLock::new(None)),
             system_proxy_active: Arc::new(RwLock::new(false)),
+            cached_resource_usage: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -652,7 +656,17 @@ impl SingBoxServiceManager {
         let system_proxy_unsupported_reason = platform.system_proxy_unsupported_reason();
 
         let (cpu_usage, memory_bytes) = if is_run && let Some(p) = pid {
-            platform.get_process_resource_usage(p)
+            let mut cache_guard = self.cached_resource_usage.write().await;
+            if let Some((instant, cached_pid, cpu, mem)) = *cache_guard
+                && cached_pid == p
+                && instant.elapsed() < std::time::Duration::from_millis(2000)
+            {
+                (cpu, mem)
+            } else {
+                let usage = platform.get_process_resource_usage(p);
+                *cache_guard = Some((std::time::Instant::now(), p, usage.0, usage.1));
+                usage
+            }
         } else {
             (0.0, 0)
         };
@@ -1520,6 +1534,7 @@ impl SingBoxServiceManager {
         *self.started_at.write().await = None;
         *self.ready.write().await = false;
         *self.last_error.write().await = None;
+        *self.cached_resource_usage.write().await = None;
         Ok(())
     }
 

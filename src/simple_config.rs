@@ -484,6 +484,16 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         if !iface_name.is_empty() {
             tun_obj["interface_name"] = json!(iface_name);
         }
+        if effective_auto_route {
+            tun_obj["route_exclude_address"] = json!([
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "192.168.0.0/16",
+                "169.254.0.0/16",
+                "fc00::/7",
+                "fe80::/10"
+            ]);
+        }
         if platform.is_linux() && effective_auto_route {
             tun_obj["auto_redirect"] = json!(true);
         }
@@ -542,10 +552,6 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         }),
         json!({
             "protocol": "dns",
-            "action": "hijack-dns"
-        }),
-        json!({
-            "port": 53,
             "action": "hijack-dns"
         }),
     ];

@@ -977,9 +977,14 @@ export function validateExplicitPlatformConstraints(
           `inbounds[${i}]: Android 应用分流字段 (include_package / exclude_package) 仅适用于 Android 平台，当前平台 (${platUpper}) 不支持，请清空该项`,
         );
       }
-      if ("stack" in inb && inb.stack !== undefined && inb.stack !== "") {
+      if (
+        "stack" in inb &&
+        inb.stack !== undefined &&
+        inb.stack !== "" &&
+        !["system", "gvisor", "mixed"].includes(String(inb.stack))
+      ) {
         errors.push(
-          `inbounds[${i}].stack: 官方 Schema 不允许 stack 字段，请移除该项`,
+          `inbounds[${i}].stack: 无效的 TUN 堆栈类型 '${inb.stack}'，官方 Schema 仅支持 'system', 'gvisor', 'mixed'`,
         );
       }
     }

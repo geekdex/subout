@@ -793,9 +793,13 @@ impl PlatformStrategy for LinuxPlatform {
                 && output.status.success()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let (cpu, mem) = crate::platform::parse_ps_resource_output(&stdout, pid);
-                if mem > 0 || cpu > 0.0 {
-                    return (cpu, mem);
+                let (raw_cpu, mem) = crate::platform::parse_ps_resource_output(&stdout, pid);
+                let num_cpus = std::thread::available_parallelism()
+                    .map_or(1, std::num::NonZero::get)
+                    .max(1) as f64;
+                let normalized_cpu = (raw_cpu / num_cpus).min(100.0);
+                if mem > 0 || normalized_cpu > 0.0 {
+                    return (normalized_cpu, mem);
                 }
             }
 

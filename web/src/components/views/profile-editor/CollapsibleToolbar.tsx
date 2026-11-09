@@ -12,7 +12,7 @@ interface CollapsibleToolbarProps {
 export const CollapsibleToolbar: React.FC<CollapsibleToolbarProps> = ({
   title,
   subtitle,
-  defaultOpen = true,
+  defaultOpen = false,
   headerActions,
   children,
 }) => {

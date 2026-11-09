@@ -324,7 +324,8 @@ mod tests {
         assert!(!macos.is_windows());
         assert_eq!(macos.default_tun_interface_name(), "");
         assert!(macos.default_tun_strict_route());
-        assert_eq!(macos.effective_tun_stack("system"), "mixed");
+        assert_eq!(macos.effective_tun_stack("system"), "system");
+        assert_eq!(macos.effective_tun_stack("mixed"), "mixed");
         assert_eq!(macos.effective_tun_stack("gvisor"), "gvisor");
         assert_eq!(macos.kernel_binary_name(), "sing-box");
         assert_eq!(
@@ -360,7 +361,7 @@ mod tests {
         assert!(windows.is_windows());
         assert_eq!(windows.default_tun_interface_name(), "subout-tun");
         assert!(windows.default_tun_strict_route());
-        assert_eq!(windows.effective_tun_stack("system"), "mixed");
+        assert_eq!(windows.effective_tun_stack("system"), "system");
         assert_eq!(windows.kernel_binary_name(), "sing-box.exe");
 
         let mut inbound = json!({

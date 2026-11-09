@@ -651,7 +651,7 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
             <div className="space-y-2">
               {ruleSets.map((rs, idx) => (
                 <div
-                  key={`${rs.tag}-${idx}`}
+                  key={`ruleset-${idx}`}
                   className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
                 >
                   <div className="sm:col-span-3">
@@ -801,11 +801,17 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
   };
 
   const addServer = (preset?: Partial<DnsServerItem>) => {
+    let tag = preset?.tag;
+    if (!tag) {
+      tag = `dns-${servers.length + 1}`;
+    } else if (servers.some((s) => s.tag === tag)) {
+      tag = `${tag}-${servers.length + 1}`;
+    }
     const newServer: DnsServerItem = {
       type: "udp",
-      tag: preset?.tag || `dns-${servers.length + 1}`,
       server: "223.5.5.5",
       ...preset,
+      tag,
     };
     if (newServer.type === "local" || newServer.type === "fakeip") {
       delete newServer.server;
@@ -1112,6 +1118,19 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
             onClick={() =>
               addServer({
                 tag: "local-dns",
+                type: "local",
+                detour: "direct",
+              })
+            }
+            className="px-2 py-1 rounded-md text-[11px] bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/70"
+          >
+            + 本地系统 DNS (local)
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              addServer({
+                tag: "local-dns",
                 type: "udp",
                 server: "223.5.5.5",
               })
@@ -1306,7 +1325,7 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
 
                 return (
                   <div
-                    key={`${srv.tag || idx}-${idx}`}
+                    key={`dns-server-${idx}`}
                     className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
                   >
                     <div className="sm:col-span-3">
@@ -1706,7 +1725,7 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
               const isTun = inb.type === "tun";
               return (
                 <div
-                  key={`${inb.tag || idx}-${idx}`}
+                  key={`inbound-${idx}`}
                   className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-3"
                 >
                   <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
@@ -1945,30 +1964,27 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                         )}
                       </div>
 
-                      {"stack" in inb &&
-                        inb.stack !== undefined &&
-                        inb.stack !== "" && (
-                          <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 flex items-center justify-between gap-2">
-                            <span className="text-xs text-rose-200">
-                              检测到旧版字段{" "}
-                              <code className="font-mono">
-                                stack: &quot;{String(inb.stack)}&quot;
-                              </code>
-                              ，不符合当前官方 Schema 规范，请移除后再保存。
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const copy = { ...inb };
-                                delete copy.stack;
-                                updateInboundAt(idx, copy);
-                              }}
-                              className="px-2 py-1 rounded text-[11px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30 shrink-0"
-                            >
-                              移除 stack 字段
-                            </button>
-                          </div>
-                        )}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-slate-300 block">
+                          TUN 协议栈类型 (stack)
+                        </label>
+                        <select
+                          value={(inb.stack as string) || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateInboundAt(idx, {
+                              ...inb,
+                              stack: val || undefined,
+                            });
+                          }}
+                          className="w-full text-xs bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="">未指定 (系统默认)</option>
+                          <option value="system">system (系统网络协议栈 - 性能好开销低)</option>
+                          <option value="gvisor">gvisor (用户态沙盒协议栈 - 跨平台隔离)</option>
+                          <option value="mixed">mixed (混合协议栈 - TCP系统/UDP gVisor)</option>
+                        </select>
+                      </div>
 
                       {(isAndroid ||
                         Boolean(
@@ -2701,7 +2717,7 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
 
                   return (
                     <div
-                      key={`${item.tag || idx}-${idx}`}
+                      key={`outbound-custom-${idx}`}
                       className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-3"
                     >
                       <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
@@ -3481,7 +3497,7 @@ export const BasicDirectTabPanel: React.FC<BasicDirectTabPanelProps> = ({
           <div className="space-y-2">
             {(config.http_clients || []).map((hc, idx) => (
               <div
-                key={`${hc.tag || idx}-${idx}`}
+                key={`http-client-${idx}`}
                 className="p-3 rounded-lg bg-slate-950/70 border border-slate-800 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
               >
                 <div className="sm:col-span-4">

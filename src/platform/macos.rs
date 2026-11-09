@@ -694,7 +694,12 @@ impl PlatformStrategy for MacOsPlatform {
                 && output.status.success()
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                return crate::platform::parse_ps_resource_output(&stdout, pid);
+                let (raw_cpu, mem) = crate::platform::parse_ps_resource_output(&stdout, pid);
+                let num_cpus = std::thread::available_parallelism()
+                    .map_or(1, std::num::NonZero::get)
+                    .max(1) as f64;
+                let normalized_cpu = (raw_cpu / num_cpus).min(100.0);
+                return (normalized_cpu, mem);
             }
         }
         (0.0, 0)
@@ -703,19 +708,34 @@ impl PlatformStrategy for MacOsPlatform {
     fn enable_system_proxy(&self, port: u16, sudo_pass: Option<&str>) {
         let services = get_macos_network_services();
         let port_str = port.to_string();
+        let bypass_domains = [
+            "127.0.0.1",
+            "localhost",
+            "192.168.0.0/16",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "*.local",
+            "timestamp.apple.com",
+            "sequoia.apple.com",
+            "seed-sequoia.sugg.apple.com",
+        ];
         for svc in services {
             run_macos_netsetup(&["-setwebproxy", &svc, "127.0.0.1", &port_str], sudo_pass);
             run_macos_netsetup(
                 &["-setsecurewebproxy", &svc, "127.0.0.1", &port_str],
                 sudo_pass,
             );
-            run_macos_netsetup(
-                &["-setsocksfirewallproxy", &svc, "127.0.0.1", &port_str],
-                sudo_pass,
-            );
+            let mut bypass_args = vec!["-setproxybypassdomains", &svc];
+            bypass_args.extend_from_slice(&bypass_domains);
+            run_macos_netsetup(&bypass_args, sudo_pass);
+
             run_macos_netsetup(&["-setwebproxystate", &svc, "on"], sudo_pass);
             run_macos_netsetup(&["-setsecurewebproxystate", &svc, "on"], sudo_pass);
-            run_macos_netsetup(&["-setsocksfirewallproxystate", &svc, "on"], sudo_pass);
+
+            // macOS safe proxy rule: disable global SOCKS firewall proxy by default to prevent
+            // intercepting system daemon background sockets (mDNSResponder, trustd, AirDrop, etc.)
+            // which can cause socket buffer loops and kernel panic in uipc_mbuf.
+            run_macos_netsetup(&["-setsocksfirewallproxystate", &svc, "off"], sudo_pass);
         }
     }
 
@@ -801,8 +821,8 @@ impl PlatformStrategy for MacOsPlatform {
     }
 
     fn effective_tun_stack<'a>(&self, configured_stack: &'a str) -> &'a str {
-        if configured_stack == "system" {
-            "mixed"
+        if configured_stack.is_empty() {
+            "system"
         } else {
             configured_stack
         }

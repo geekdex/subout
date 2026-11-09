@@ -583,9 +583,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
   inboundTags,
   ruleSetTags,
 }) => {
-  const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({
-    "0": true,
-  });
+  const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({});
 
   const ruleSetSuggestions = React.useMemo(() => {
     const seen = new Set<string>();
@@ -761,7 +759,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
         {children.map((child, cIdx) => {
           const isChildLogical = child.type === "logical";
           const childKey = `${pathPrefix}-${cIdx}`;
-          const isChildExpanded = expandedMap[childKey] ?? true;
+          const isChildExpanded = expandedMap[childKey] ?? false;
 
           return (
             <div
@@ -999,7 +997,7 @@ export const RuleTreeEditor: React.FC<RuleTreeEditorProps> = ({
         {rules.map((rule, idx) => {
           const isLogical = rule.type === "logical";
           const key = String(idx);
-          const isExpanded = expandedMap[key] ?? true;
+          const isExpanded = expandedMap[key] ?? false;
           const actionSummary = summarizeAction(rule, kind);
 
           return (

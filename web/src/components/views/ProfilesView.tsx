@@ -408,7 +408,6 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
           nodeGroups={nodeGroups}
           onClose={() => setEditingProfile(null)}
           onSaved={() => {
-            setEditingProfile(null);
             onRefresh();
           }}
         />
