@@ -11,3 +11,4 @@ web/dist
 .cargo
 /sing-box-docs
 .agents
+.DS_Store
