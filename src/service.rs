@@ -1434,6 +1434,10 @@ impl SingBoxServiceManager {
             let tun_dns_ip =
                 get_tun_dns_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.2".to_string());
             platform.enable_tun_dns(&tun_dns_ip, cached_pass.as_deref());
+            self.append_log(&format!(
+                "🌐 TUN 模式已接管系统 DNS (主: {tun_dns_ip}，兜底: 223.5.5.5)，停止服务时自动还原"
+            ))
+            .await;
         }
 
         let summary = get_inbounds_summary_from_config(&config_path);

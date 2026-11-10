@@ -434,9 +434,31 @@ impl PlatformStrategy for WindowsPlatform {
         refresh_wininet_proxy();
     }
 
-    fn enable_tun_dns(&self, _dns_ip: &str, _sudo_pass: Option<&str>) {}
+    fn enable_tun_dns(&self, dns_ip: &str, _sudo_pass: Option<&str>) {
+        // Mirrors the macOS strategy: sing-box 1.14 only hijacks port 53 traffic
+        // that flows through the TUN, but Windows keeps resolving via the physical
+        // adapters' DNS (typically the LAN router), whose on-link subnet route beats
+        // the TUN's /1 split routes. Point active physical adapters at the TUN DNS
+        // (hijacked while sing-box runs) with a public resolver as secondary
+        // fallback so DNS still resolves if sing-box ever crashes.
+        for alias in get_windows_active_physical_adapters() {
+            run_windows_powershell(&format!(
+                "Set-DnsClientServerAddress -InterfaceAlias '{alias}' -ServerAddresses '{dns_ip}','223.5.5.5'"
+            ));
+        }
+        run_windows_powershell("Clear-DnsClientCache");
+    }
 
-    fn disable_tun_dns(&self, _sudo_pass: Option<&str>) {}
+    fn disable_tun_dns(&self, _sudo_pass: Option<&str>) {
+        // Only reset adapters whose DNS we took over (contains TUN/FakeIP ranges),
+        // so user-configured static DNS on other adapters is never clobbered.
+        for alias in get_windows_active_physical_adapters() {
+            run_windows_powershell(&format!(
+                "$d = (Get-DnsClientServerAddress -InterfaceAlias '{alias}' -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses -join ' '; if ($d -match '172\\.19\\.|172\\.18\\.|198\\.18\\.') {{ Set-DnsClientServerAddress -InterfaceAlias '{alias}' -ResetServerAddresses }}"
+            ));
+        }
+        run_windows_powershell("Clear-DnsClientCache");
+    }
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
@@ -665,6 +687,50 @@ pub fn filter_conflicting_processes(
     }
 
     results
+}
+
+/// Names of currently connected physical network adapters (excludes Wintun TUN,
+/// Hyper-V vSwitch and other virtual adapters so we never touch their DNS).
+pub fn get_windows_active_physical_adapters() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let Ok(output) = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty Name",
+            ])
+            .output()
+        else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+fn run_windows_powershell(script: &str) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = script;
+    }
 }
 
 pub fn refresh_wininet_proxy() {

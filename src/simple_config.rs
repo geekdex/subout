@@ -484,16 +484,11 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         if !iface_name.is_empty() {
             tun_obj["interface_name"] = json!(iface_name);
         }
-        if effective_auto_route {
-            tun_obj["route_exclude_address"] = json!([
-                "10.0.0.0/8",
-                "172.16.0.0/12",
-                "192.168.0.0/16",
-                "169.254.0.0/16",
-                "fc00::/7",
-                "fe80::/10"
-            ]);
-        }
+        // Deliberately do NOT set route_exclude_address for private ranges:
+        // excluding the LAN subnet would also bypass TUN DNS hijacking for the
+        // LAN router's DNS (the macOS/Windows system resolver default), letting
+        // polluted answers reach applications. LAN traffic is kept direct by
+        // the `ip_is_private -> direct` route rule instead.
         if platform.is_linux() && effective_auto_route {
             tun_obj["auto_redirect"] = json!(true);
         }

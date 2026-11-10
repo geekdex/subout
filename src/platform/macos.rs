@@ -774,11 +774,25 @@ impl PlatformStrategy for MacOsPlatform {
         }
     }
 
-    fn enable_tun_dns(&self, _dns_ip: &str, sudo_pass: Option<&str>) {
-        // sing-box 1.14+ with `auto_route: true` natively configures per-interface TUN DNS
-        // (`dns_mode: "hijack"` by default). Clean up any residual 172.19.x DNS on physical
-        // services from older versions so physical interface DNS is never polluted.
-        self.disable_tun_dns(sudo_pass);
+    fn enable_tun_dns(&self, dns_ip: &str, sudo_pass: Option<&str>) {
+        // sing-box 1.14 `dns_mode: hijack` only intercepts port 53 traffic that
+        // actually flows through the TUN. On macOS the system resolver keeps using
+        // the primary service's DNS (typically the LAN router), whose on-link /24
+        // route always beats the TUN's /1 split routes, so those queries bypass the
+        // TUN entirely and can return polluted answers. Point the physical services
+        // at the TUN DNS (hijacked while sing-box runs) with a public resolver as
+        // secondary fallback so DNS still resolves if sing-box ever crashes.
+        let services = get_macos_network_services();
+        for svc in services {
+            run_macos_netsetup(&["-setdnsservers", &svc, dns_ip, "223.5.5.5"], sudo_pass);
+        }
+        let _ = std::process::Command::new("dscacheutil")
+            .arg("-flushcache")
+            .output();
+        let _ = std::process::Command::new("killall")
+            .arg("-HUP")
+            .arg("mDNSResponder")
+            .output();
     }
 
     fn disable_tun_dns(&self, sudo_pass: Option<&str>) {
@@ -797,6 +811,13 @@ impl PlatformStrategy for MacOsPlatform {
                 }
             }
         }
+        let _ = std::process::Command::new("dscacheutil")
+            .arg("-flushcache")
+            .output();
+        let _ = std::process::Command::new("killall")
+            .arg("-HUP")
+            .arg("mDNSResponder")
+            .output();
     }
 
     fn sanitize_inbound(&self, inbound: &mut Value) {

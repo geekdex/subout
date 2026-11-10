@@ -1596,7 +1596,10 @@ mod tests {
 
         assert!(formatted.contains("\"query_type\""), "{formatted}");
         assert!(!formatted.contains("属性 \"\""), "{formatted}");
-        assert!(formatted.contains("位置 dns.rules[0].query_type"), "{formatted}");
+        assert!(
+            formatted.contains("位置 dns.rules[0].query_type"),
+            "{formatted}"
+        );
         assert!(
             !formatted.contains("singbox_val_7376"),
             "temp path should be stripped: {formatted}"
