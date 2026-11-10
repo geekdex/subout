@@ -264,6 +264,11 @@ pub async fn update_config(
     let normalized_content =
         serde_json::to_string_pretty(&validated_val).unwrap_or_else(|_| payload.content.clone());
 
+    // Explicit-correction contract: compute (but do not persist) what the runtime
+    // sanitize pipeline would correct in this config, so the UI can tell the user
+    // exactly which fields the program adjusts relative to what they wrote.
+    let (_, sanitizations) = crate::generator::sanitize_runtime_config_with_diff(&validated_val);
+
     db::update_config_profile(
         &conn,
         id,
@@ -299,7 +304,8 @@ pub async fn update_config(
 
     Ok(Json(serde_json::json!({
         "status": "success",
-        "message": "配置已保存"
+        "message": "配置已保存",
+        "sanitizations": sanitizations
     })))
 }
 

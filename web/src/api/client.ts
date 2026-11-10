@@ -1,5 +1,6 @@
 import {
   ConfigProfile,
+  UpdateConfigResult,
   ServiceStatus,
   KernelInfo,
   KernelDownloadStatus,
@@ -368,13 +369,13 @@ export const api = {
       content?: string;
       config_json?: string;
     },
-  ): Promise<ConfigProfile> {
+  ): Promise<UpdateConfigResult> {
     const { config_json, ...rest } = payload;
     const body = {
       ...rest,
       content: payload.content || config_json,
     };
-    return request<ConfigProfile>(`/api/configs/${id}`, {
+    return request<UpdateConfigResult>(`/api/configs/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
     });

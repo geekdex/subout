@@ -1,5 +1,19 @@
 export type PlatformType = "linux" | "macos" | "windows" | "android";
 
+/** One explicit correction the sanitize pipeline applied to a user config. */
+export interface SanitizeChange {
+  path: string;
+  action: "removed" | "changed" | "added";
+  before?: string;
+  after?: string;
+}
+
+export interface UpdateConfigResult {
+  status: string;
+  message: string;
+  sanitizations?: SanitizeChange[];
+}
+
 export interface ConfigProfile {
   id: number;
   name: string;

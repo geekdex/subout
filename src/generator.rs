@@ -3,6 +3,117 @@ use anyhow::Result;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
+/// One explicit correction the sanitize pipeline applied to a user config.
+/// Surfaced to the UI on save so the user can always see what the program
+/// changed relative to what they wrote (WYSIWYG contract).
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+pub struct SanitizeChange {
+    /// JSON path of the change, e.g. `dns.servers[0].detour`
+    pub path: String,
+    /// `removed` | `changed` | `added`
+    pub action: String,
+    /// Original value (compact JSON), absent for `added`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    /// New value (compact JSON), absent for `removed`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+}
+
+const SANITIZE_DIFF_LIMIT: usize = 100;
+
+fn compact(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_default()
+}
+
+/// Recursively diff two JSON trees and list every leaf difference.
+/// Used to make sanitize-time corrections explicit; does not interpret intent.
+pub fn compute_json_diff(before: &Value, after: &Value) -> Vec<SanitizeChange> {
+    let mut changes = Vec::new();
+    diff_walk(before, after, String::new(), &mut changes);
+    changes.truncate(SANITIZE_DIFF_LIMIT);
+    changes
+}
+
+fn diff_walk(before: &Value, after: &Value, path: String, changes: &mut Vec<SanitizeChange>) {
+    if changes.len() >= SANITIZE_DIFF_LIMIT {
+        return;
+    }
+    match (before, after) {
+        (Value::Object(b), Value::Object(a)) => {
+            for (key, b_val) in b {
+                let child_path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                match a.get(key) {
+                    Some(a_val) => diff_walk(b_val, a_val, child_path, changes),
+                    None => changes.push(SanitizeChange {
+                        path: child_path,
+                        action: "removed".to_string(),
+                        before: Some(compact(b_val)),
+                        after: None,
+                    }),
+                }
+            }
+            for (key, a_val) in a {
+                if !b.contains_key(key) {
+                    let child_path = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    changes.push(SanitizeChange {
+                        path: child_path,
+                        action: "added".to_string(),
+                        before: None,
+                        after: Some(compact(a_val)),
+                    });
+                }
+            }
+        }
+        (Value::Array(b), Value::Array(a)) => {
+            let len = b.len().max(a.len());
+            for idx in 0..len {
+                let child_path = format!("{path}[{idx}]");
+                match (b.get(idx), a.get(idx)) {
+                    (Some(b_val), Some(a_val)) => diff_walk(b_val, a_val, child_path, changes),
+                    (Some(b_val), None) => changes.push(SanitizeChange {
+                        path: child_path,
+                        action: "removed".to_string(),
+                        before: Some(compact(b_val)),
+                        after: None,
+                    }),
+                    (None, Some(a_val)) => changes.push(SanitizeChange {
+                        path: child_path,
+                        action: "added".to_string(),
+                        before: None,
+                        after: Some(compact(a_val)),
+                    }),
+                    (None, None) => unreachable!(),
+                }
+            }
+        }
+        (b, a) if b != a => changes.push(SanitizeChange {
+            path,
+            action: "changed".to_string(),
+            before: Some(compact(b)),
+            after: Some(compact(a)),
+        }),
+        _ => {}
+    }
+}
+
+/// Run the runtime sanitize pipeline and report exactly what it corrected,
+/// so the caller can surface the changes to the user instead of hiding them.
+pub fn sanitize_runtime_config_with_diff(config: &Value) -> (Value, Vec<SanitizeChange>) {
+    let mut sanitized = config.clone();
+    sanitize_runtime_config(&mut sanitized);
+    let changes = compute_json_diff(config, &sanitized);
+    (sanitized, changes)
+}
+
 /// Generate the running config from the currently active `base_config` sections
 /// stored in the database. Each saved config is self-contained — the outbounds
 /// list already includes the full node definitions and group definitions, so
@@ -775,6 +886,91 @@ pub fn sync_config_with_latest_resources(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_compute_json_diff_detects_removed_changed_added() {
+        let before = json!({
+            "dns": {
+                "servers": [
+                    {"tag": "local", "detour": "direct"},
+                    {"tag": "remote"}
+                ],
+                "independent_cache": true
+            },
+            "log": {"level": "debug"}
+        });
+        let after = json!({
+            "dns": {
+                "servers": [
+                    {"tag": "local"},
+                    {"tag": "remote", "inet4_range": "198.18.0.0/15"}
+                ]
+            },
+            "log": {"level": "info"}
+        });
+
+        let changes = compute_json_diff(&before, &after);
+        let find = |path: &str| {
+            changes
+                .iter()
+                .find(|c| c.path == path)
+                .unwrap_or_else(|| panic!("missing change for {path} in {changes:?}"))
+        };
+
+        assert_eq!(find("dns.independent_cache").action, "removed");
+        assert_eq!(find("dns.servers[0].detour").action, "removed");
+        assert_eq!(find("dns.servers[1].inet4_range").action, "added");
+        let changed = find("log.level");
+        assert_eq!(changed.action, "changed");
+        assert_eq!(changed.before.as_deref(), Some("\"debug\""));
+        assert_eq!(changed.after.as_deref(), Some("\"info\""));
+    }
+
+    #[test]
+    fn test_sanitize_runtime_config_with_diff_reports_changes() {
+        let original = json!({
+            "log": {},
+            "dns": {
+                "servers": [{"tag": "local", "type": "udp", "server": "223.5.5.5", "detour": "direct"}],
+                "independent_cache": true
+            },
+            "inbounds": [],
+            "outbounds": [],
+            "route": {}
+        });
+
+        let (sanitized, changes) = sanitize_runtime_config_with_diff(&original);
+
+        // Sanitized output must carry the corrections…
+        assert_eq!(
+            sanitized["log"]["level"].as_str(),
+            Some("info"),
+            "missing log default"
+        );
+        assert!(
+            sanitized["dns"]["servers"][0].get("detour").is_none(),
+            "detour:direct must be stripped"
+        );
+        // …and the diff must report exactly those corrections (no noise).
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.path == "log.level" && c.action == "added"),
+            "log.level addition missing from diff: {changes:?}"
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.path == "dns.servers[0].detour" && c.action == "removed"),
+            "detour removal missing from diff: {changes:?}"
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.path == "dns.independent_cache" && c.action == "removed"),
+            "independent_cache removal missing from diff: {changes:?}"
+        );
+    }
 
     #[test]
     fn test_sanitize_log_defaults() {

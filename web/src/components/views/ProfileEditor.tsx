@@ -17,11 +17,17 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Drawer } from "../ui/Drawer";
+import { Dialog } from "../ui/Dialog";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { Input } from "../ui/Input";
 import { CopyButton } from "../ui/CopyButton";
-import { ConfigProfile, NodeGroup, NodeItem } from "../../types/api";
+import {
+  ConfigProfile,
+  NodeGroup,
+  NodeItem,
+  SanitizeChange,
+} from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import { getErrorMessage } from "../../utils/format";
@@ -50,6 +56,43 @@ interface ProfileEditorProps {
 type EditorTabKey = "inbounds" | "dns" | "outbounds" | "route" | "basic";
 
 export const JSON_PREVIEW_STORAGE_KEY = "subout_profile_editor_json_preview";
+
+const SANITIZE_ACTION_LABELS: Record<SanitizeChange["action"], string> = {
+  removed: "移除",
+  changed: "调整",
+  added: "补充",
+};
+
+function SanitizeChangeRow({ change }: { change: SanitizeChange }) {
+  const actionColor =
+    change.action === "removed"
+      ? "text-rose-400"
+      : change.action === "added"
+        ? "text-emerald-400"
+        : "text-amber-400";
+  return (
+    <li className="py-1.5 border-b border-slate-800/60 last:border-0">
+      <div className="flex items-start gap-2">
+        <span
+          className={`text-[10px] font-bold shrink-0 mt-0.5 ${actionColor}`}
+        >
+          [{SANITIZE_ACTION_LABELS[change.action]}]
+        </span>
+        <div className="min-w-0">
+          <code className="text-xs text-slate-200 break-all">
+            {change.path}
+          </code>
+          {(change.before || change.after) && (
+            <div className="text-[10px] text-slate-500 mt-0.5 break-all font-mono">
+              {change.before && <div>原值: {change.before}</div>}
+              {change.after && <div>现为: {change.after}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
 
 function readPersistedJsonPreviewState(): boolean {
   try {
@@ -85,6 +128,8 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   const [validating, setValidating] = useState(false);
   const [syncingNodes, setSyncingNodes] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sanitizations, setSanitizations] = useState<SanitizeChange[]>([]);
+  const [sanitizeDialogOpen, setSanitizeDialogOpen] = useState(false);
 
   const { success, error } = useToast();
   const isAndroid = profile.platform === "android";
@@ -339,7 +384,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         // Proceed to updateConfig which also enforces schema_validator on the backend
       }
 
-      await api.updateConfig(profile.id, {
+      const res = await api.updateConfig(profile.id, {
         name: name.trim(),
         platform: profile.platform,
         description: description.trim() || undefined,
@@ -348,7 +393,12 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
       });
       setSchemaErrors([]);
       setSchemaValidatedOk(true);
-      success("配置已通过官方 Schema 校验并保存到数据库");
+      if (res.sanitizations && res.sanitizations.length > 0) {
+        setSanitizations(res.sanitizations);
+        setSanitizeDialogOpen(true);
+      } else {
+        success("配置已通过官方 Schema 校验并保存到数据库");
+      }
       onSaved();
     } catch (err: unknown) {
       const msg = getErrorMessage(err);
@@ -700,6 +750,25 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
           )}
         </div>
       </div>
+
+      <Dialog
+        open={sanitizeDialogOpen}
+        onClose={() => setSanitizeDialogOpen(false)}
+        title="程序已按内核规范修正以下字段"
+        description="以下修正在保存时自动应用，保证配置可被 sing-box 1.14 正常加载。原始意图均已保留。"
+        size="lg"
+        footer={
+          <Button variant="primary" onClick={() => setSanitizeDialogOpen(false)}>
+            我已知晓
+          </Button>
+        }
+      >
+        <ul className="max-h-[50vh] overflow-auto px-1">
+          {sanitizations.map((change, idx) => (
+            <SanitizeChangeRow key={`${change.path}-${idx}`} change={change} />
+          ))}
+        </ul>
+      </Dialog>
     </Drawer>
   );
 };
