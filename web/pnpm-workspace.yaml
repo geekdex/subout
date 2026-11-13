@@ -5,5 +5,5 @@ supportedArchitectures:
   cpu:
     - arm64
     - x64
-onlyBuiltDependencies:
-  - esbuild
+allowBuilds:
+  esbuild: true
