@@ -9,8 +9,41 @@ permissions:
   contents: write
 
 jobs:
+  build-web:
+    name: Build Web UI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.2.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'web/pnpm-*.yaml'
+
+      - name: Build Web UI
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Upload Web UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
   build:
     name: Build - ${{ matrix.target }}
+    needs: build-web
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,23 +78,11 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: Download Web UI artifact
+        uses: actions/download-artifact@v4
         with:
-          version: 12.2.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'web/pnpm-lock.yaml'
-
-      - name: Build Web UI
-        run: |
-          cd web
-          pnpm install --frozen-lockfile
-          pnpm run build
+          name: web-dist
+          path: web/dist
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -80,6 +101,8 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build release binary
+        env:
+          SUBOUT_SKIP_WEB_BUILD: "1"
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Codesign binary (macOS)

@@ -7,6 +7,7 @@ fn main() {
     println!("cargo:rerun-if-changed=web/package.json");
     println!("cargo:rerun-if-changed=web/dist/index.html");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=SUBOUT_SKIP_WEB_BUILD");
 
     let dest_dir = Path::new("web/dist");
     if !dest_dir.exists() {
@@ -15,8 +16,9 @@ fn main() {
     let index_path = dest_dir.join("index.html");
 
     // Try building the frontend if pnpm / npm is available and web/package.json exists
+    let skip_web_build = std::env::var_os("SUBOUT_SKIP_WEB_BUILD").is_some();
     let web_dir = Path::new("web");
-    if web_dir.join("package.json").exists() {
+    if !skip_web_build && web_dir.join("package.json").exists() {
         let should_build = !index_path.exists() || is_web_src_newer(&index_path);
         if should_build {
             let pnpm_cmd = if cfg!(target_os = "windows") {
