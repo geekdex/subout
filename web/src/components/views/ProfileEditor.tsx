@@ -758,7 +758,10 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         description="以下修正在保存时自动应用，保证配置可被 sing-box 1.14 正常加载。原始意图均已保留。"
         size="lg"
         footer={
-          <Button variant="primary" onClick={() => setSanitizeDialogOpen(false)}>
+          <Button
+            variant="primary"
+            onClick={() => setSanitizeDialogOpen(false)}
+          >
             我已知晓
           </Button>
         }

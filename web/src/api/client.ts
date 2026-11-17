@@ -507,9 +507,31 @@ export const api = {
     }
     return [];
   },
-  async saveNode(payload: Partial<NodeItem>): Promise<NodeItem> {
+  async saveNode(payload: {
+    tag: string;
+    node_type: string;
+    server: string;
+    port: number;
+    raw_json: string;
+  }): Promise<NodeItem> {
     return request<NodeItem>("/api/nodes", {
       method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async updateNode(
+    id: number,
+    payload: {
+      tag?: string;
+      node_type?: string;
+      server?: string;
+      port?: number;
+      raw_json?: string;
+      enabled?: boolean;
+    },
+  ): Promise<NodeItem> {
+    return request<NodeItem>(`/api/nodes/${id}`, {
+      method: "PUT",
       body: JSON.stringify(payload),
     });
   },

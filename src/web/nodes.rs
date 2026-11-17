@@ -67,13 +67,20 @@ pub async fn add_custom_node(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<CustomNodeRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<(StatusCode, Json<db::Node>), (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|status| (status, "未授权".to_string()))?;
     let conn =
         get_db_conn(&state.db_path).map_err(|status| (status, "数据库连接失败".to_string()))?;
 
+    create_custom_node_in_db(&conn, &payload).map(|node| (StatusCode::CREATED, Json(node)))
+}
+
+fn create_custom_node_in_db(
+    conn: &rusqlite::Connection,
+    payload: &CustomNodeRequest,
+) -> Result<db::Node, (StatusCode, String)> {
     if let Err(err_msg) = validate_node_json(
         &payload.tag,
         &payload.node_type,
@@ -84,8 +91,22 @@ pub async fn add_custom_node(
         return Err((StatusCode::BAD_REQUEST, format!("节点校验失败: {err_msg}")));
     }
 
+    let duplicate_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE tag = ?)",
+            [&payload.tag],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if duplicate_exists {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("节点 Tag '{}' 已存在，名称必须唯一", payload.tag),
+        ));
+    }
+
     db::save_node(
-        &conn,
+        conn,
         None,
         &payload.tag,
         &payload.node_type,
@@ -102,15 +123,25 @@ pub async fn add_custom_node(
         )
     })?;
 
+    let inserted_id = conn.last_insert_rowid();
+    let _ = db::refresh_node_group_version_code(conn);
     let _ = db::log_history(
-        &conn,
+        conn,
         "节点管理",
         "添加自定义节点",
         &format!("添加自定义节点: {}", payload.tag),
         Some(&payload.raw_json),
     );
 
-    Ok(StatusCode::CREATED)
+    db::get_node_by_id(conn, inserted_id)
+        .ok()
+        .flatten()
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "保存节点后读取详情失败".to_string(),
+            )
+        })
 }
 
 pub async fn update_node(
@@ -118,32 +149,50 @@ pub async fn update_node(
     headers: HeaderMap,
     Path(id): Path<i64>,
     Json(payload): Json<UpdateNodeRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<db::Node>, (StatusCode, String)> {
     check_auth(&state, &headers)
         .await
         .map_err(|status| (status, "未授权".to_string()))?;
     let conn =
         get_db_conn(&state.db_path).map_err(|status| (status, "数据库连接失败".to_string()))?;
 
+    update_node_in_db(&conn, id, &payload).map(Json)
+}
+
+fn update_node_in_db(
+    conn: &rusqlite::Connection,
+    id: i64,
+    payload: &UpdateNodeRequest,
+) -> Result<db::Node, (StatusCode, String)> {
+    let old_node = db::get_node_by_id(conn, id)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "查询节点失败".to_string(),
+            )
+        })?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "节点不存在".to_string()))?;
+
     if let Some(enabled) = payload.enabled {
-        let tag: String = conn
-            .query_row("SELECT tag FROM nodes WHERE id = ?", [id], |r| r.get(0))
-            .unwrap_or_else(|_| id.to_string());
-        db::update_node_status(&conn, id, enabled).map_err(|_| {
+        db::update_node_status(conn, id, enabled).map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "更新启用状态失败".to_string(),
             )
         })?;
         let _ = db::log_history(
-            &conn,
+            conn,
             "节点管理",
             if enabled {
                 "启用节点"
             } else {
                 "禁用节点"
             },
-            &format!("{}节点: {}", if enabled { "启用" } else { "禁用" }, tag),
+            &format!(
+                "{}节点: {}",
+                if enabled { "启用" } else { "禁用" },
+                old_node.tag
+            ),
             None,
         );
     }
@@ -159,27 +208,40 @@ pub async fn update_node(
             return Err((StatusCode::BAD_REQUEST, format!("节点校验失败: {err_msg}")));
         }
 
-        let old_node = db::get_node_by_id(&conn, id).ok().flatten();
+        if old_node.tag != *tag {
+            let duplicate_exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM nodes WHERE tag = ? AND id != ?)",
+                    rusqlite::params![tag, id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(false);
+            if duplicate_exists {
+                return Err((
+                    StatusCode::CONFLICT,
+                    format!("节点 Tag '{tag}' 已存在，名称必须唯一"),
+                ));
+            }
+        }
+
         let mut detail_parts = Vec::new();
-        if let Some(ref old) = old_node {
-            if old.tag != *tag {
-                detail_parts.push(format!("标签: {} → {}", old.tag, tag));
-            }
-            if old.node_type != *node_type {
-                detail_parts.push(format!("类型: {} → {}", old.node_type, node_type));
-            }
-            if old.server != *server {
-                detail_parts.push(format!("地址: {} → {}", old.server, server));
-            }
-            if old.port != i64::from(port) {
-                detail_parts.push(format!("端口: {} → {}", old.port, port));
-            }
-            let old_json: Value = serde_json::from_str(&old.raw_json).unwrap_or(Value::Null);
-            let new_json: Value = serde_json::from_str(raw_json).unwrap_or(Value::Null);
-            let diff_str = diff_json(&old_json, &new_json);
-            if diff_str != "没有检测到实际改动" {
-                detail_parts.push(format!("配置变动: {diff_str}"));
-            }
+        if old_node.tag != *tag {
+            detail_parts.push(format!("标签: {} → {}", old_node.tag, tag));
+        }
+        if old_node.node_type != *node_type {
+            detail_parts.push(format!("类型: {} → {}", old_node.node_type, node_type));
+        }
+        if old_node.server != *server {
+            detail_parts.push(format!("地址: {} → {}", old_node.server, server));
+        }
+        if old_node.port != i64::from(port) {
+            detail_parts.push(format!("端口: {} → {}", old_node.port, port));
+        }
+        let old_json: Value = serde_json::from_str(&old_node.raw_json).unwrap_or(Value::Null);
+        let new_json: Value = serde_json::from_str(raw_json).unwrap_or(Value::Null);
+        let diff_str = diff_json(&old_json, &new_json);
+        if diff_str != "没有检测到实际改动" {
+            detail_parts.push(format!("配置变动: {diff_str}"));
         }
         let detail = if detail_parts.is_empty() {
             format!("更新节点 '{tag}' (无关键字段变化)")
@@ -187,18 +249,57 @@ pub async fn update_node(
             format!("更新节点 '{}': {}", tag, detail_parts.join(", "))
         };
 
-        db::update_node_details(&conn, id, tag, node_type, server, port, raw_json).map_err(
+        db::update_node_details(conn, id, tag, node_type, server, port, raw_json).map_err(
             |_| {
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::CONFLICT,
                     "修改节点失败，名称 tag 必须唯一".to_string(),
                 )
             },
         )?;
-        let _ = db::log_history(&conn, "节点管理", "更新节点详情", &detail, Some(raw_json));
+
+        if old_node.tag != *tag {
+            rename_tag_in_outbound_groups(conn, &old_node.tag, tag);
+        }
+        let _ = db::refresh_node_group_version_code(conn);
+        let _ = db::log_history(conn, "节点管理", "更新节点详情", &detail, Some(raw_json));
+    } else if payload.enabled.is_some() {
+        let _ = db::refresh_node_group_version_code(conn);
     }
 
-    Ok(StatusCode::OK)
+    db::get_node_by_id(conn, id).ok().flatten().ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "更新节点后读取详情失败".to_string(),
+        )
+    })
+}
+
+fn rename_tag_in_outbound_groups(conn: &rusqlite::Connection, old_tag: &str, new_tag: &str) {
+    let Ok(groups) = db::get_outbound_groups(conn) else {
+        return;
+    };
+    for group in groups {
+        let Some(static_nodes_str) = group.static_nodes.as_deref() else {
+            continue;
+        };
+        let Ok(mut tags) = serde_json::from_str::<Vec<String>>(static_nodes_str) else {
+            continue;
+        };
+        let mut changed = false;
+        for t in &mut tags {
+            if t == old_tag {
+                *t = new_tag.to_string();
+                changed = true;
+            }
+        }
+        if changed && let Ok(new_json) = serde_json::to_string(&tags) {
+            let _ = conn.execute(
+                "UPDATE outbound_groups SET static_nodes = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                rusqlite::params![new_json, group.id],
+            );
+        }
+    }
 }
 
 pub async fn delete_node(
@@ -263,6 +364,19 @@ pub fn validate_node_json(
     port: u16,
     raw_json: &str,
 ) -> Result<(), String> {
+    if tag.trim().is_empty() {
+        return Err("节点名称 (tag) 不能为空".to_string());
+    }
+    if node_type.trim().is_empty() {
+        return Err("协议类型 (type) 不能为空".to_string());
+    }
+    if server.trim().is_empty() {
+        return Err("服务器地址 (server) 不能为空".to_string());
+    }
+    if port == 0 {
+        return Err("端口必须在 1 到 65535 之间".to_string());
+    }
+
     let val: serde_json::Value =
         serde_json::from_str(raw_json).map_err(|e| format!("JSON 语法错误: {e}"))?;
     let obj = val
@@ -1419,5 +1533,97 @@ mod tests {
             Some(-1)
         };
         assert_eq!(primary_fallback, Some(30));
+    }
+
+    #[test]
+    fn test_create_and_update_custom_node_with_vless_reality() {
+        let conn = db::init_db(":memory:").unwrap();
+
+        let raw_json = serde_json::json!({
+            "type": "vless",
+            "tag": "us_self",
+            "server": "170.106.76.11",
+            "server_port": 443,
+            "uuid": "c04d6b79-0803-4cf1-8d76-3cc759ef79a0",
+            "flow": "xtls-rprx-vision",
+            "tls": {
+                "enabled": true,
+                "server_name": "www.bing.com",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                },
+                "reality": {
+                    "enabled": true,
+                    "public_key": "hDeF0usWcAOgKqZiygeQG8yPQGurjEhXXRNewBVkuy8",
+                    "short_id": "b803b45ccaced487"
+                }
+            }
+        })
+        .to_string();
+
+        let create_req = CustomNodeRequest {
+            tag: "us_self".to_string(),
+            node_type: "vless".to_string(),
+            server: "170.106.76.11".to_string(),
+            port: 443,
+            raw_json: raw_json.clone(),
+        };
+
+        let created = create_custom_node_in_db(&conn, &create_req).unwrap();
+        assert_eq!(created.tag, "us_self");
+        assert_eq!(created.node_type, "vless");
+        assert_eq!(created.server, "170.106.76.11");
+        assert_eq!(created.port, 443);
+        assert!(created.is_custom);
+
+        // Duplicate tag must be rejected with 409 Conflict instead of overwriting
+        let dup_res = create_custom_node_in_db(&conn, &create_req);
+        assert!(matches!(dup_res, Err((StatusCode::CONFLICT, _))));
+
+        // Reference the tag in a static outbound group
+        conn.execute(
+            "INSERT INTO outbound_groups (tag, group_type, match_type, static_nodes) VALUES ('manual-grp', 'selector', 'static', '[\"us_self\"]')",
+            [],
+        )
+        .unwrap();
+
+        // Update node tag and port
+        let updated_json = serde_json::json!({
+            "type": "vless",
+            "tag": "us_self_v2",
+            "server": "170.106.76.11",
+            "server_port": 8443,
+            "uuid": "c04d6b79-0803-4cf1-8d76-3cc759ef79a0",
+            "flow": "xtls-rprx-vision"
+        })
+        .to_string();
+
+        let update_req = UpdateNodeRequest {
+            tag: Some("us_self_v2".to_string()),
+            node_type: Some("vless".to_string()),
+            server: Some("170.106.76.11".to_string()),
+            port: Some(8443),
+            raw_json: Some(updated_json),
+            enabled: None,
+        };
+
+        let updated = update_node_in_db(&conn, created.id, &update_req).unwrap();
+        assert_eq!(updated.tag, "us_self_v2");
+        assert_eq!(updated.port, 8443);
+
+        // Verify static_nodes in outbound_groups was updated to the new tag
+        let static_nodes: String = conn
+            .query_row(
+                "SELECT static_nodes FROM outbound_groups WHERE tag = 'manual-grp'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(static_nodes, r#"["us_self_v2"]"#);
+
+        // Updating non-existent node returns 404
+        let missing_res = update_node_in_db(&conn, 99999, &update_req);
+        assert!(matches!(missing_res, Err((StatusCode::NOT_FOUND, _))));
     }
 }

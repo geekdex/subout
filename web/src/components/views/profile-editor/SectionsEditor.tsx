@@ -2282,9 +2282,15 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                           className="w-full text-xs bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500"
                         >
                           <option value="">未指定 (系统默认)</option>
-                          <option value="system">system (系统网络协议栈 - 性能好开销低)</option>
-                          <option value="gvisor">gvisor (用户态沙盒协议栈 - 跨平台隔离)</option>
-                          <option value="mixed">mixed (混合协议栈 - TCP系统/UDP gVisor)</option>
+                          <option value="system">
+                            system (系统网络协议栈 - 性能好开销低)
+                          </option>
+                          <option value="gvisor">
+                            gvisor (用户态沙盒协议栈 - 跨平台隔离)
+                          </option>
+                          <option value="mixed">
+                            mixed (混合协议栈 - TCP系统/UDP gVisor)
+                          </option>
                         </select>
                       </div>
 

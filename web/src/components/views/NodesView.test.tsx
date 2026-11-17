@@ -16,6 +16,8 @@ vi.mock("../../api/client", () => ({
     testNodeLatency: vi.fn(),
     testAllNodesLatency: vi.fn(),
     pingNodesStream: vi.fn(),
+    saveNode: vi.fn(),
+    updateNode: vi.fn(),
     deleteNode: vi.fn(),
     batchDeleteNodes: vi.fn(),
   },
@@ -444,5 +446,146 @@ describe("NodesView Component", () => {
     // API calls should NOT have been made
     expect(api.testNodeLatency).not.toHaveBeenCalled();
     expect(api.pingNodesStream).not.toHaveBeenCalled();
+  });
+
+  it("adds a custom node by pasting sing-box JSON", async () => {
+    const onRefresh = vi.fn();
+    vi.mocked(api.saveNode).mockResolvedValueOnce({
+      id: 99,
+      subscription_id: null,
+      is_custom: true,
+      tag: "us_self",
+      node_type: "vless",
+      server: "170.106.76.11",
+      port: 443,
+      raw_json: "{}",
+      enabled: true,
+    });
+
+    renderWithToast(<NodesView nodes={mockNodes} onRefresh={onRefresh} />);
+
+    // Open Add Node modal
+    const addBtn = screen.getByRole("button", { name: /添加节点/i });
+    fireEvent.click(addBtn);
+
+    expect(screen.getByText("添加自定义节点")).toBeDefined();
+
+    // Switch to JSON tab
+    const jsonTabBtn = screen.getByRole("button", {
+      name: /粘贴 \/ 编辑 JSON/i,
+    });
+    fireEvent.click(jsonTabBtn);
+
+    const vlessRealityJson = JSON.stringify(
+      {
+        type: "vless",
+        tag: "us_self",
+        server: "170.106.76.11",
+        server_port: 443,
+        uuid: "c04d6b79-0803-4cf1-8d76-3cc759ef79a0",
+        flow: "xtls-rprx-vision",
+        tls: {
+          enabled: true,
+          server_name: "www.bing.com",
+          utls: {
+            enabled: true,
+            fingerprint: "chrome",
+          },
+          reality: {
+            enabled: true,
+            public_key: "hDeF0usWcAOgKqZiygeQG8yPQGurjEhXXRNewBVkuy8",
+            short_id: "b803b45ccaced487",
+          },
+        },
+      },
+      null,
+      2,
+    );
+
+    const textarea = screen.getByLabelText("节点 Outbound JSON");
+    fireEvent.change(textarea, { target: { value: vlessRealityJson } });
+
+    expect(
+      screen.getByText(
+        /JSON 校验通过 · VLESS · us_self \(170\.106\.76\.11:443\)/,
+      ),
+    ).toBeDefined();
+
+    // Click submit button inside modal
+    const submitBtns = screen.getAllByRole("button", { name: /^添加节点$/i });
+    fireEvent.click(submitBtns[submitBtns.length - 1]);
+
+    await waitFor(() => {
+      expect(api.saveNode).toHaveBeenCalledTimes(1);
+    });
+
+    const callArg = vi.mocked(api.saveNode).mock.calls[0][0];
+    expect(callArg.tag).toBe("us_self");
+    expect(callArg.node_type).toBe("vless");
+    expect(callArg.server).toBe("170.106.76.11");
+    expect(callArg.port).toBe(443);
+    expect(JSON.parse(callArg.raw_json).tls.reality.public_key).toBe(
+      "hDeF0usWcAOgKqZiygeQG8yPQGurjEhXXRNewBVkuy8",
+    );
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it("edits an existing node via visual form while preserving raw JSON fields", async () => {
+    const onRefresh = vi.fn();
+    const editableNodes: NodeItem[] = [
+      {
+        id: 3,
+        subscription_id: null,
+        is_custom: true,
+        tag: "Custom-VPS",
+        node_type: "vless",
+        server: "vps.example.com",
+        port: 443,
+        raw_json: JSON.stringify({
+          type: "vless",
+          tag: "Custom-VPS",
+          server: "vps.example.com",
+          server_port: 443,
+          uuid: "11111111-2222-3333-4444-555555555555",
+          multiplex: { enabled: true },
+        }),
+        enabled: true,
+      },
+    ];
+
+    vi.mocked(api.updateNode).mockResolvedValueOnce({
+      ...editableNodes[0],
+      tag: "Custom-VPS-Updated",
+      port: 8443,
+    });
+
+    renderWithToast(<NodesView nodes={editableNodes} onRefresh={onRefresh} />);
+
+    const editBtn = screen.getByRole("button", { name: /^编辑$/i });
+    fireEvent.click(editBtn);
+
+    expect(screen.getByText("编辑节点配置")).toBeDefined();
+
+    const tagInput = screen.getByPlaceholderText("例如: us_self");
+    fireEvent.change(tagInput, { target: { value: "Custom-VPS-Updated" } });
+
+    const portInput = screen.getByPlaceholderText("例如: 443");
+    fireEvent.change(portInput, { target: { value: "8443" } });
+
+    const saveBtn = screen.getByRole("button", { name: /保存修改/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(api.updateNode).toHaveBeenCalledTimes(1);
+    });
+
+    const [updatedId, payload] = vi.mocked(api.updateNode).mock.calls[0];
+    expect(updatedId).toBe(3);
+    expect(payload.tag).toBe("Custom-VPS-Updated");
+    expect(payload.port).toBe(8443);
+    const parsedRaw = JSON.parse(payload.raw_json || "{}");
+    // Unknown/advanced fields like multiplex must be preserved
+    expect(parsedRaw.multiplex).toEqual({ enabled: true });
+    expect(onRefresh).toHaveBeenCalled();
   });
 });

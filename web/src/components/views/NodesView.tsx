@@ -11,6 +11,8 @@ import {
   Radio,
   StopCircle,
   Eye,
+  Pencil,
+  Plus,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -26,6 +28,7 @@ import { Table, Column } from "../ui/Table";
 import { Dialog } from "../ui/Dialog";
 import { Select } from "../ui/Select";
 import { CopyButton } from "../ui/CopyButton";
+import { NodeEditorModal } from "./NodeEditorModal";
 import { NodeItem, Subscription, SPEED_TEST_ENDPOINTS } from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
@@ -70,6 +73,10 @@ export const NodesView: React.FC<NodesViewProps> = ({
   const [detailNode, setDetailNode] = useState<NodeItem | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<"info" | "json">("info");
+
+  // Add / Edit Node Modal states
+  const [editorModalOpen, setEditorModalOpen] = useState(false);
+  const [editingNode, setEditingNode] = useState<NodeItem | null>(null);
 
   // Reset to page 1 when filtering or changing page size
   useEffect(() => {
@@ -665,6 +672,19 @@ export const NodesView: React.FC<NodesViewProps> = ({
             <Button
               variant="ghost"
               size="sm"
+              disabled={testingBatchActive}
+              onClick={() => {
+                setEditingNode(node);
+                setEditorModalOpen(true);
+              }}
+              icon={<Pencil className="w-3.5 h-3.5 text-amber-400" />}
+              title="编辑节点配置"
+            >
+              编辑
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               loading={isTestingThis}
               disabled={testingBatchActive || serviceRunning}
               onClick={() => handleTestLatency(node)}
@@ -837,6 +857,20 @@ export const NodesView: React.FC<NodesViewProps> = ({
                 全量测速
               </Button>
             )}
+
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={testingBatchActive}
+              onClick={() => {
+                setEditingNode(null);
+                setEditorModalOpen(true);
+              }}
+              icon={<Plus className="w-4 h-4" />}
+              title="可视化添加或粘贴 JSON 添加自定义节点"
+            >
+              添加节点
+            </Button>
           </div>
         </div>
       </div>
@@ -1054,16 +1088,30 @@ export const NodesView: React.FC<NodesViewProps> = ({
         footer={
           <>
             {detailNode && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  handleTestLatency(detailNode);
-                }}
-                icon={<Zap className="w-3.5 h-3.5 text-sky-400" />}
-              >
-                立即测速
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setDetailModalOpen(false);
+                    setEditingNode(detailNode);
+                    setEditorModalOpen(true);
+                  }}
+                  icon={<Pencil className="w-3.5 h-3.5 text-amber-400" />}
+                >
+                  编辑节点
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    handleTestLatency(detailNode);
+                  }}
+                  icon={<Zap className="w-3.5 h-3.5 text-sky-400" />}
+                >
+                  立即测速
+                </Button>
+              </>
             )}
             <Button
               variant="ghost"
@@ -1248,6 +1296,14 @@ export const NodesView: React.FC<NodesViewProps> = ({
           </div>
         )}
       </Dialog>
+
+      {/* Add / Edit Node Modal */}
+      <NodeEditorModal
+        open={editorModalOpen}
+        node={editingNode}
+        onClose={() => setEditorModalOpen(false)}
+        onSaved={onRefresh}
+      />
     </div>
   );
 };
