@@ -1681,6 +1681,63 @@ describe("ConfigEditorView - groupImportModal 交互", () => {
       expect(serialized[0]._table_address).toBeUndefined();
     });
 
+    it("TUN 入站支持配置排除路由网段 (route_exclude_address) 并正确序列化", async () => {
+      const wrapper = await mountConfigEditor();
+      await enterEditMode(wrapper);
+
+      // 1. parseInbounds 正确将 route_exclude_address 解析到 _table_route_exclude_address
+      wrapper.vm.parseInbounds([
+        {
+          type: "tun",
+          tag: "tun-in",
+          route_exclude_address: ["100.64.0.0/10", "10.222.222.1/32"],
+        },
+      ]);
+      await flushPromises();
+
+      expect(
+        wrapper.vm.configData.inbounds[0]._table_route_exclude_address,
+      ).toBe("100.64.0.0/10, 10.222.222.1/32");
+
+      // 2. 编辑弹窗 editItem 时正确回显到 tempFields.route_exclude_address
+      wrapper.vm.editItem(
+        wrapper.vm.configData.inbounds[0],
+        "inbound",
+        (parsed) => {
+          wrapper.vm.configData.inbounds[0] = parsed;
+        },
+        0,
+      );
+      await flushPromises();
+
+      expect(wrapper.vm.itemModal.tempFields.route_exclude_address).toBe(
+        "100.64.0.0/10, 10.222.222.1/32",
+      );
+
+      // 3. 弹窗追加 CGNAT 网段去重与清空后保存
+      wrapper.vm.appendInboundRouteExcludeCidr("100.64.0.0/10");
+      expect(wrapper.vm.itemModal.tempFields.route_exclude_address).toBe(
+        "100.64.0.0/10, 10.222.222.1/32",
+      );
+      wrapper.vm.appendInboundRouteExcludeCidr("192.168.0.0/16");
+      wrapper.vm.syncVisualToItemData();
+      expect(wrapper.vm.itemModal.itemData.route_exclude_address).toEqual([
+        "100.64.0.0/10",
+        "10.222.222.1/32",
+        "192.168.0.0/16",
+      ]);
+
+      // 4. 表格快捷追加 CGNAT 与 serializeInbounds 正确序列化
+      wrapper.vm.configData.inbounds[0]._table_route_exclude_address = "";
+      wrapper.vm.appendTableRouteExcludeCidr(
+        wrapper.vm.configData.inbounds[0],
+        "100.64.0.0/10",
+      );
+      const serialized = wrapper.vm.serializeInbounds();
+      expect(serialized[0].route_exclude_address).toEqual(["100.64.0.0/10"]);
+      expect(serialized[0]._table_route_exclude_address).toBeUndefined();
+    });
+
     it("入站连接切换协议类型时，智能更新默认端口与标签 (mixed -> socks -> http)", async () => {
       const wrapper = await mountConfigEditor();
       await enterEditMode(wrapper);

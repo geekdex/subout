@@ -860,6 +860,57 @@
                                 <div
                                   style="
                                     display: flex;
+                                    gap: 0.5rem;
+                                    align-items: center;
+                                  "
+                                >
+                                  <span
+                                    style="
+                                      width: 60px;
+                                      color: var(--text-muted);
+                                      flex-shrink: 0;
+                                      text-align: right;
+                                    "
+                                    >排除网段:</span
+                                  >
+                                  <input
+                                    v-model="inb._table_route_exclude_address"
+                                    type="text"
+                                    class="input-control table-input"
+                                    style="
+                                      flex: 1;
+                                      min-width: 80px;
+                                      padding: 0.15rem 0.3rem;
+                                    "
+                                    placeholder="例如: 100.64.0.0/10 (逗号分隔，留空不排除)"
+                                    @input="
+                                      onTableInboundRouteExcludeAddressChange(
+                                        inb,
+                                      )
+                                    "
+                                  />
+                                  <button
+                                    type="button"
+                                    class="btn btn-secondary table-btn"
+                                    style="
+                                      padding: 0.15rem 0.4rem;
+                                      font-size: 0.75rem;
+                                      white-space: nowrap;
+                                    "
+                                    title="追加 CGNAT 网段 (100.64.0.0/10，适用于节点小宝 / Tailscale 等组网)"
+                                    @click="
+                                      appendTableRouteExcludeCidr(
+                                        inb,
+                                        '100.64.0.0/10',
+                                      )
+                                    "
+                                  >
+                                    CGNAT
+                                  </button>
+                                </div>
+                                <div
+                                  style="
+                                    display: flex;
                                     gap: 1rem;
                                     padding-left: 65px;
                                   "
@@ -2929,6 +2980,63 @@
                     地址时触发 <code>permission denied</code>；若网络环境支持
                     IPv6 并需要接管防止泄漏，请选用
                     <b>推荐双栈</b>。你也可以直接编辑输入任意合法的 CIDR 网段。
+                  </small>
+                </div>
+                <div class="input-group" style="margin-top: 1rem">
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      flex-wrap: wrap;
+                      gap: 0.5rem;
+                      margin-bottom: 0.4rem;
+                    "
+                  >
+                    <label style="margin-bottom: 0; font-weight: 500">
+                      排除路由网段 (route_exclude_address)
+                    </label>
+                    <div
+                      style="display: flex; gap: 0.4rem; align-items: center"
+                    >
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.6rem; font-size: 0.75rem"
+                        title="追加 CGNAT 网段 (100.64.0.0/10)，适用于节点小宝 / Tailscale 等异地组网"
+                        @click="appendInboundRouteExcludeCidr('100.64.0.0/10')"
+                      >
+                        + 100.64.0.0/10 (组网/CGNAT)
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="padding: 0.2rem 0.5rem; font-size: 0.75rem"
+                        title="清空排除路由网段"
+                        @click="itemModal.tempFields.route_exclude_address = ''"
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    v-model="itemModal.tempFields.route_exclude_address"
+                    type="text"
+                    class="input-control"
+                    placeholder="例如: 100.64.0.0/10, 10.222.222.1/32 (支持逗号或换行分隔，留空则不排除)"
+                  />
+                  <small
+                    style="
+                      color: var(--text-muted);
+                      margin-top: 4px;
+                      display: block;
+                      line-height: 1.4;
+                    "
+                  >
+                    💡 <b>最佳实践建议</b>：填入的 CIDR 网段会在内核层面绕过
+                    TUN 接管（包括 <code>auto_route</code> 与
+                    <code>auto_redirect</code>），直接走系统默认路由表。使用节点小宝、Tailscale
+                    等异地组网时建议加入 <code>100.64.0.0/10</code>。
                   </small>
                 </div>
                 <div
@@ -7797,8 +7905,41 @@ const itemModal = reactive({
     package_name: "",
     user: "",
     address: "",
+    route_exclude_address: "",
   },
 });
+
+const parseCommaSeparatedList = (raw) =>
+  String(raw || "")
+    .trim()
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+const formatCommaSeparatedList = (val) => {
+  if (Array.isArray(val)) return val.join(", ");
+  if (typeof val === "string") return val;
+  return "";
+};
+
+const syncTableInboundListField = (inb, fieldKey, tableKey) => {
+  const items = parseCommaSeparatedList(inb[tableKey]);
+  if (items.length > 0) {
+    inb[fieldKey] = items;
+  } else {
+    delete inb[fieldKey];
+  }
+};
+
+const appendInboundRouteExcludeCidr = (cidr) => {
+  const items = parseCommaSeparatedList(
+    itemModal.tempFields.route_exclude_address,
+  );
+  if (!items.includes(cidr)) {
+    items.push(cidr);
+  }
+  itemModal.tempFields.route_exclude_address = items.join(", ");
+};
 
 const applyRecommendedInboundIp = (preset) => {
   if (preset === "ipv4") {
@@ -7893,15 +8034,24 @@ const switchDnsRuleType = (mode) => {
 };
 
 const onTableInboundAddressChange = (inb) => {
-  const raw = (inb._table_address || "").trim();
-  if (raw) {
-    inb.address = raw
-      .split(/[\n,]+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  } else {
-    delete inb.address;
+  syncTableInboundListField(inb, "address", "_table_address");
+};
+
+const onTableInboundRouteExcludeAddressChange = (inb) => {
+  syncTableInboundListField(
+    inb,
+    "route_exclude_address",
+    "_table_route_exclude_address",
+  );
+};
+
+const appendTableRouteExcludeCidr = (inb, cidr) => {
+  const items = parseCommaSeparatedList(inb._table_route_exclude_address);
+  if (!items.includes(cidr)) {
+    items.push(cidr);
   }
+  inb._table_route_exclude_address = items.join(", ");
+  onTableInboundRouteExcludeAddressChange(inb);
 };
 
 const applyTableRecommendedIp = (inb, preset) => {
@@ -8093,13 +8243,10 @@ const parseInbounds = (json, notifyOnRemove = false) => {
 
   list.forEach((inb) => {
     if (inb && typeof inb === "object" && inb.type === "tun") {
-      if (Array.isArray(inb.address)) {
-        inb._table_address = inb.address.join(", ");
-      } else if (typeof inb.address === "string") {
-        inb._table_address = inb.address;
-      } else {
-        inb._table_address = "";
-      }
+      inb._table_address = formatCommaSeparatedList(inb.address);
+      inb._table_route_exclude_address = formatCommaSeparatedList(
+        inb.route_exclude_address,
+      );
     }
   });
 
@@ -8257,16 +8404,16 @@ const serializeInbounds = () => {
       }
       if (inb.type === "tun") {
         if (inb._table_address !== undefined) {
-          const raw = inb._table_address.trim();
-          if (raw) {
-            inb.address = raw
-              .split(/[\n,]+/)
-              .map((s) => s.trim())
-              .filter((s) => s.length > 0);
-          } else {
-            delete inb.address;
-          }
+          syncTableInboundListField(inb, "address", "_table_address");
           delete inb._table_address;
+        }
+        if (inb._table_route_exclude_address !== undefined) {
+          syncTableInboundListField(
+            inb,
+            "route_exclude_address",
+            "_table_route_exclude_address",
+          );
+          delete inb._table_route_exclude_address;
         }
       }
     }
@@ -9438,8 +9585,11 @@ const onInboundTypeChange = (inb) => {
     delete inb.auto_redirect;
     delete inb.address;
     delete inb._table_address;
+    delete inb.route_exclude_address;
+    delete inb._table_route_exclude_address;
     if (itemModal.show && itemModal.itemType === "inbound") {
       itemModal.tempFields.address = "";
+      itemModal.tempFields.route_exclude_address = "";
     }
   }
 };
@@ -9622,14 +9772,23 @@ const editItem = (item, type, onSaveCallback, idx = -1) => {
       itemModal.itemData.type = "mixed";
     }
     if (itemModal.itemData.address) {
-      const addr = itemModal.itemData.address;
-      itemModal.tempFields.address = Array.isArray(addr)
-        ? addr.join(", ")
-        : String(addr);
+      itemModal.tempFields.address = formatCommaSeparatedList(
+        itemModal.itemData.address,
+      );
     } else if (itemModal.itemData._table_address) {
       itemModal.tempFields.address = itemModal.itemData._table_address;
     } else {
       itemModal.tempFields.address = "";
+    }
+    if (itemModal.itemData.route_exclude_address) {
+      itemModal.tempFields.route_exclude_address = formatCommaSeparatedList(
+        itemModal.itemData.route_exclude_address,
+      );
+    } else if (itemModal.itemData._table_route_exclude_address) {
+      itemModal.tempFields.route_exclude_address =
+        itemModal.itemData._table_route_exclude_address;
+    } else {
+      itemModal.tempFields.route_exclude_address = "";
     }
   }
   if (type === "dns_server" && !itemModal.itemData.type) {
@@ -9889,17 +10048,26 @@ const syncVisualToItemData = () => {
         delete itemModal.itemData.auto_redirect;
       }
       if (itemModal.tempFields.address !== undefined) {
-        const rawAddr = itemModal.tempFields.address.trim();
-        if (rawAddr) {
-          itemModal.itemData.address = rawAddr
-            .split(/[\n,]+/)
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-          itemModal.itemData._table_address =
-            itemModal.itemData.address.join(", ");
+        const addrList = parseCommaSeparatedList(itemModal.tempFields.address);
+        if (addrList.length > 0) {
+          itemModal.itemData.address = addrList;
+          itemModal.itemData._table_address = addrList.join(", ");
         } else {
           delete itemModal.itemData.address;
           delete itemModal.itemData._table_address;
+        }
+      }
+      if (itemModal.tempFields.route_exclude_address !== undefined) {
+        const excludeList = parseCommaSeparatedList(
+          itemModal.tempFields.route_exclude_address,
+        );
+        if (excludeList.length > 0) {
+          itemModal.itemData.route_exclude_address = excludeList;
+          itemModal.itemData._table_route_exclude_address =
+            excludeList.join(", ");
+        } else {
+          delete itemModal.itemData.route_exclude_address;
+          delete itemModal.itemData._table_route_exclude_address;
         }
       }
     } else {
@@ -9911,6 +10079,8 @@ const syncVisualToItemData = () => {
       delete itemModal.itemData.auto_redirect;
       delete itemModal.itemData.address;
       delete itemModal.itemData._table_address;
+      delete itemModal.itemData.route_exclude_address;
+      delete itemModal.itemData._table_route_exclude_address;
     }
   }
   if (itemModal.itemType === "route_ruleset") {
