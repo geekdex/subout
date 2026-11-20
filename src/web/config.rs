@@ -516,6 +516,7 @@ pub async fn validate_full_config(
     if let Some(hc) = payload.http_clients {
         config["http_clients"] = hc;
     }
+    generator::sanitize_runtime_config(&mut config);
 
     let temp_file_path = crate::paths::AppPaths::get().temp_file_path("singbox_val", ".json");
 
@@ -778,23 +779,23 @@ pub async fn create_history_config(
                 "servers": [
                     {
                         "tag": "dns-remote",
-                        "address": "tls://1.1.1.1",
-                        "address_resolver": "dns-direct"
+                        "type": "tls",
+                        "server": "1.1.1.1",
+                        "domain_resolver": "dns-direct"
                     },
                     {
                         "tag": "dns-direct",
-                        "address": "local",
-                        "detour": "direct"
+                        "type": "local"
                     }
                 ]
             },
             "inbounds": [],
             "outbounds": [
-                { "type": "direct", "tag": "direct" },
-                { "type": "block", "tag": "block" }
+                { "type": "direct", "tag": "direct" }
             ],
             "route": {
                 "auto_detect_interface": true,
+                "default_domain_resolver": "dns-direct",
                 "default_http_client": "direct"
             },
             "http_clients": [
@@ -909,7 +910,12 @@ pub async fn update_history_config(
         return Err((StatusCode::BAD_REQUEST, format!("配置语法错误: {err_msg}")));
     }
 
-    let content_str = serde_json::to_string(&payload.content)
+    // 保存前同步迁移旧版 DNS 格式，确保历史配置与生成/运行配置保持一致。
+    let mut content = payload.content.clone();
+    if let Some(dns) = content.get_mut("dns") {
+        generator::sanitize_dns_value(dns);
+    }
+    let content_str = serde_json::to_string(&content)
         .map_err(|_| (StatusCode::BAD_REQUEST, "序列化配置失败".to_string()))?;
 
     if let Some(detail) = payload.detail {
@@ -952,7 +958,7 @@ pub async fn update_history_config(
             "http_clients",
         ];
         for sec in &sections {
-            if let Some(sec_val) = payload.content.get(*sec)
+            if let Some(sec_val) = content.get(*sec)
                 && let Ok(sec_str) = serde_json::to_string(sec_val)
             {
                 let _ = db::save_base_config_section(&conn, sec, &sec_str);

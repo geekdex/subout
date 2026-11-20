@@ -1,7 +1,7 @@
 use crate::db;
 use anyhow::Result;
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// Generate the running config from the currently active `base_config` sections
 /// stored in the database. Each saved config is self-contained — the outbounds
@@ -93,33 +93,281 @@ pub fn sanitize_outbounds_value(outbounds: &mut Value) {
     }
 }
 
-pub fn sanitize_dns_value(dns: &mut Value) {
-    if let Some(obj) = dns.as_object_mut() {
-        // `independent_cache` is deprecated in sing-box 1.14.0 and removed in 1.16.0
-        obj.remove("independent_cache");
+/// A parsed legacy DNS server `address`, expressed with the fields of the
+/// sing-box 1.12+ typed DNS server format.
+#[derive(Default)]
+struct LegacyDnsAddress {
+    server_type: String,
+    server: Option<String>,
+    server_port: Option<u16>,
+    path: Option<String>,
+    interface: Option<String>,
+    /// `rcode://...` legacy servers have no typed equivalent and are migrated
+    /// into a `predefined` DNS rule instead.
+    rcode: Option<String>,
+}
 
-        if !obj.contains_key("strategy")
-            || obj
-                .get("strategy")
-                .and_then(|s| s.as_str())
-                .is_none_or(|s| s.trim().is_empty())
-        {
-            obj.insert("strategy".to_string(), json!("prefer_ipv4"));
+/// Split a plain `host[:port]` (or `[ipv6]:port`) legacy address.
+fn split_host_port(s: &str) -> (String, Option<u16>) {
+    if let Some(rest) = s.strip_prefix('[')
+        && let Some(end) = rest.find(']')
+    {
+        let host = rest[..end].to_string();
+        let port = rest[end + 1..]
+            .strip_prefix(':')
+            .and_then(|p| p.parse::<u16>().ok());
+        return (host, port);
+    }
+    if let Some((host, port)) = s.rsplit_once(':')
+        && let Ok(port) = port.parse::<u16>()
+    {
+        return (host.to_string(), Some(port));
+    }
+    (s.to_string(), None)
+}
+
+/// Parse a legacy DNS server `address` string into typed server fields.
+/// See <https://sing-box.sagernet.org/migration/#migrate-to-new-dns-server-formats>
+fn parse_legacy_dns_address(address: &str) -> LegacyDnsAddress {
+    let s = address.trim();
+    let lower = s.to_ascii_lowercase();
+
+    match lower.as_str() {
+        "local" => {
+            return LegacyDnsAddress {
+                server_type: "local".to_string(),
+                ..Default::default()
+            };
         }
-        if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
-            for server in servers {
-                if let Some(srv_obj) = server.as_object_mut() {
-                    // Detouring to an empty direct outbound triggers sing-box fatal error
-                    if srv_obj.get("detour").and_then(|d| d.as_str()) == Some("direct") {
-                        srv_obj.remove("detour");
+        "fakeip" => {
+            return LegacyDnsAddress {
+                server_type: "fakeip".to_string(),
+                ..Default::default()
+            };
+        }
+        _ => {}
+    }
+
+    if let Some(rest) = lower.strip_prefix("dhcp://") {
+        return LegacyDnsAddress {
+            server_type: "dhcp".to_string(),
+            interface: if rest.is_empty() || rest == "auto" {
+                None
+            } else {
+                Some(rest.to_string())
+            },
+            ..Default::default()
+        };
+    }
+
+    if let Some(rcode) = lower.strip_prefix("rcode://") {
+        return LegacyDnsAddress {
+            server_type: "local".to_string(),
+            rcode: Some(rcode.to_ascii_uppercase()),
+            ..Default::default()
+        };
+    }
+
+    // scheme://host[:port][/path]
+    if let Some(pos) = s.find("://") {
+        let scheme = &lower[..pos];
+        let server_type = match scheme {
+            "https" | "http" => "https",
+            "h3" => "h3",
+            "tls" => "tls",
+            "tcp" => "tcp",
+            "quic" => "quic",
+            // Unknown schemes (and plain UDP) fall back to UDP rather than being dropped.
+            _ => "udp",
+        };
+        let mut parsed = LegacyDnsAddress {
+            server_type: server_type.to_string(),
+            ..Default::default()
+        };
+        if let Ok(url) = url::Url::parse(s) {
+            parsed.server = url
+                .host_str()
+                .map(|h| h.trim_matches(|c| c == '[' || c == ']').to_string())
+                .filter(|h| !h.is_empty());
+            parsed.server_port = url.port();
+            let path = url.path();
+            if !path.is_empty() && path != "/" {
+                parsed.path = Some(path.to_string());
+            }
+        } else {
+            let (host, port) = split_host_port(&s[pos + 3..]);
+            parsed.server = Some(host);
+            parsed.server_port = port;
+        }
+        return parsed;
+    }
+
+    // Plain `host` / `ip[:port]` is treated as UDP.
+    let (host, port) = split_host_port(s);
+    LegacyDnsAddress {
+        server_type: "udp".to_string(),
+        server: Some(host),
+        server_port: port,
+        ..Default::default()
+    }
+}
+
+/// Migrate legacy (`address`-based) DNS servers to the typed format required
+/// by sing-box 1.12+, and make sure domain-address servers have a usable
+/// resolver. This is the single place that keeps generated configs compatible
+/// with sing-box 1.14+, where the legacy format was removed entirely.
+fn migrate_legacy_dns_servers(obj: &mut Map<String, Value>) {
+    // Configs without a server list have nothing to migrate; leave them intact.
+    if !obj.contains_key("servers") {
+        return;
+    }
+
+    // Legacy `dns.fakeip` ranges are now carried by the fakeip server itself.
+    let legacy_fakeip = obj.remove("fakeip");
+
+    let old_servers = obj
+        .remove("servers")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+
+    let mut new_servers = Vec::with_capacity(old_servers.len());
+    // (tag, rcode) of legacy `rcode://` servers, migrated into DNS rules below.
+    let mut rcode_servers: Vec<(String, String)> = Vec::new();
+    // Legacy per-server `client_subnet` values, migrated into matching rules.
+    let mut client_subnets: Vec<(String, Value)> = Vec::new();
+    // Legacy per-server `strategy`, promoted to the dns-wide default.
+    let mut server_strategy: Option<Value> = None;
+
+    for mut server in old_servers {
+        let Some(srv) = server.as_object_mut() else {
+            new_servers.push(server);
+            continue;
+        };
+
+        if let Some(address) = srv.remove("address").and_then(|v| v.as_str().map(str::to_string)) {
+            let parsed = parse_legacy_dns_address(&address);
+
+            if let Some(rcode) = parsed.rcode {
+                if let Some(tag) = srv.get("tag").and_then(|t| t.as_str()) {
+                    rcode_servers.push((tag.to_string(), rcode));
+                }
+                continue; // no typed equivalent: removed, rule added below
+            }
+
+            srv.insert("type".to_string(), json!(parsed.server_type));
+            if let Some(v) = parsed.server {
+                srv.insert("server".to_string(), json!(v));
+            }
+            if let Some(v) = parsed.server_port {
+                srv.insert("server_port".to_string(), json!(v));
+            }
+            if let Some(v) = parsed.path {
+                srv.insert("path".to_string(), json!(v));
+            }
+            if let Some(v) = parsed.interface {
+                srv.insert("interface".to_string(), json!(v));
+            }
+
+            if srv.get("type").and_then(|t| t.as_str()) == Some("fakeip")
+                && let Some(ranges) = legacy_fakeip.as_ref()
+            {
+                for key in ["inet4_range", "inet6_range"] {
+                    if let Some(v) = ranges.get(key) {
+                        srv.entry(key.to_string()).or_insert_with(|| v.clone());
                     }
-                    if srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
-                        if !srv_obj.contains_key("inet4_range") {
-                            srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
-                        }
-                        if !srv_obj.contains_key("inet6_range") {
-                            srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
-                        }
+                }
+            }
+        }
+
+        // `address_resolver` was renamed to `domain_resolver`.
+        if let Some(resolver) = srv.remove("address_resolver")
+            && !srv.contains_key("domain_resolver")
+        {
+            srv.insert("domain_resolver".to_string(), resolver);
+        }
+
+        // These fields are no longer valid on a DNS server object.
+        if let Some(strategy) = srv.remove("strategy")
+            && server_strategy.is_none()
+        {
+            server_strategy = Some(strategy);
+        }
+        if let Some(subnet) = srv.remove("client_subnet")
+            && let Some(tag) = srv.get("tag").and_then(|t| t.as_str())
+        {
+            client_subnets.push((tag.to_string(), subnet));
+        }
+
+        new_servers.push(server);
+    }
+
+    obj.insert("servers".to_string(), json!(new_servers));
+
+    if let Some(strategy) = server_strategy
+        && !obj.contains_key("strategy")
+    {
+        obj.insert("strategy".to_string(), strategy);
+    }
+
+    // Migrate `rcode://` servers and per-server client subnets into DNS rules.
+    if (!rcode_servers.is_empty() || !client_subnets.is_empty())
+        && let Some(rules) = obj.get_mut("rules").and_then(|r| r.as_array_mut())
+    {
+        for rule in rules.iter_mut() {
+            let Some(rule_obj) = rule.as_object_mut() else {
+                continue;
+            };
+            let Some(tag) = rule_obj
+                .get("server")
+                .and_then(|s| s.as_str())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            if let Some((_, rcode)) = rcode_servers.iter().find(|(t, _)| t == &tag) {
+                rule_obj.remove("server");
+                rule_obj.insert("action".to_string(), json!("predefined"));
+                rule_obj.insert("rcode".to_string(), json!(rcode));
+            }
+            if let Some((_, subnet)) = client_subnets.iter().find(|(t, _)| t == &tag) {
+                rule_obj.insert("client_subnet".to_string(), subnet.clone());
+            }
+        }
+    }
+
+}
+
+pub fn sanitize_dns_value(dns: &mut Value) {
+    let Some(obj) = dns.as_object_mut() else {
+        return;
+    };
+
+    // `independent_cache` is deprecated in sing-box 1.14.0 and removed in 1.16.0
+    obj.remove("independent_cache");
+
+    migrate_legacy_dns_servers(obj);
+
+    if !obj.contains_key("strategy")
+        || obj
+            .get("strategy")
+            .and_then(|s| s.as_str())
+            .is_none_or(|s| s.trim().is_empty())
+    {
+        obj.insert("strategy".to_string(), json!("prefer_ipv4"));
+    }
+    if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
+        for server in servers {
+            if let Some(srv_obj) = server.as_object_mut() {
+                // Detouring to an empty direct outbound triggers sing-box fatal error
+                if srv_obj.get("detour").and_then(|d| d.as_str()) == Some("direct") {
+                    srv_obj.remove("detour");
+                }
+                if srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
+                    if !srv_obj.contains_key("inet4_range") {
+                        srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
+                    }
+                    if !srv_obj.contains_key("inet6_range") {
+                        srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
                     }
                 }
             }
@@ -302,7 +550,7 @@ pub fn sanitize_runtime_config(config: &mut Value) {
     }
 
     // sing-box 1.14 将 "missing route.default_domain_resolver" 从废弃警告升级为启动错误。
-    // 若配置了 DNS 服务器但未指定解析器，自动指向首个非 fakeip 的服务器。
+    // 沿用原有逻辑：若未指定解析器，自动指向首个非 fakeip 的服务器。
     // （先取出 owned 值，避免与 route 的可变借用冲突）
     let resolver_tag = root
         .get("dns")
@@ -542,6 +790,12 @@ pub fn sync_config_with_latest_resources(
     // 7. Repair route and DNS rules referencing missing tags
     let mut updated_config = base_config.clone();
     let mut repaired_tags = Vec::new();
+
+    // 自动更新路径会把该配置直接落盘作为运行配置，因此在这里也做一次 DNS
+    // 格式迁移，避免旧版 address 格式被写入 sing-box.json 导致启动失败。
+    if let Some(dns) = updated_config.get_mut("dns") {
+        sanitize_dns_value(dns);
+    }
 
     if let Some(obj) = updated_config.as_object_mut() {
         obj.insert("outbounds".to_string(), json!(outbounds_list));
@@ -1007,5 +1261,195 @@ mod tests {
         let http_clients = cfg["http_clients"].as_array().unwrap();
         assert!(http_clients[0].get("detour").is_none());
         assert_eq!(http_clients[1]["detour"], "proxy");
+    }
+
+    #[test]
+    fn test_migrate_legacy_dns_server_formats() {
+        let mut dns = json!({
+            "strategy": "prefer_ipv4",
+            "fakeip": { "enabled": true, "inet4_range": "198.18.0.0/15" },
+            "servers": [
+                { "tag": "dns-local", "address": "local" },
+                { "tag": "dns-udp", "address": "223.5.5.5" },
+                { "tag": "dns-udp-port", "address": "1.1.1.1:5353" },
+                { "tag": "dns-tls", "address": "tls://1.1.1.1", "address_resolver": "dns-local" },
+                { "tag": "dns-https", "address": "https://1.1.1.1/dns-query" },
+                { "tag": "dns-h3", "address": "h3://1.1.1.1/dns-query" },
+                { "tag": "dns-quic", "address": "quic://1.1.1.1" },
+                { "tag": "dns-tcp", "address": "tcp://1.1.1.1" },
+                { "tag": "dns-dhcp", "address": "dhcp://en0" },
+                { "tag": "dns-fakeip", "address": "fakeip" }
+            ]
+        });
+        sanitize_dns_value(&mut dns);
+
+        let servers = dns["servers"].as_array().unwrap();
+        assert!(servers.iter().all(|s| s.get("address").is_none()));
+        assert!(servers.iter().all(|s| s.get("address_resolver").is_none()));
+        assert!(dns.get("fakeip").is_none());
+
+        let get = |tag: &str| -> &Value {
+            servers
+                .iter()
+                .find(|s| s.get("tag").and_then(|t| t.as_str()) == Some(tag))
+                .unwrap()
+        };
+        assert_eq!(get("dns-local")["type"], "local");
+        assert_eq!(get("dns-udp")["type"], "udp");
+        assert_eq!(get("dns-udp")["server"], "223.5.5.5");
+        assert_eq!(get("dns-udp-port")["server_port"], 5353);
+        assert_eq!(get("dns-tls")["type"], "tls");
+        assert_eq!(get("dns-tls")["domain_resolver"], "dns-local");
+        assert_eq!(get("dns-https")["type"], "https");
+        assert_eq!(get("dns-https")["server"], "1.1.1.1");
+        assert_eq!(get("dns-https")["path"], "/dns-query");
+        assert_eq!(get("dns-h3")["type"], "h3");
+        assert_eq!(get("dns-quic")["type"], "quic");
+        assert_eq!(get("dns-tcp")["type"], "tcp");
+        assert_eq!(get("dns-dhcp")["interface"], "en0");
+        assert_eq!(get("dns-fakeip")["type"], "fakeip");
+        assert_eq!(get("dns-fakeip")["inet4_range"], "198.18.0.0/15");
+    }
+
+    #[test]
+    fn test_migrate_legacy_dns_never_invents_resolvers() {
+        // Only the configured `address_resolver` is translated into
+        // `domain_resolver`; nothing is added when the user did not configure one.
+        let mut dns = json!({
+            "servers": [
+                { "tag": "dns-remote", "address": "https://cloudflare-dns.com/dns-query" },
+                { "tag": "dns-direct", "address": "223.5.5.5" }
+            ]
+        });
+        sanitize_dns_value(&mut dns);
+        assert!(dns["servers"][0].get("domain_resolver").is_none());
+        assert_eq!(dns["servers"].as_array().unwrap().len(), 2);
+
+        // Even when no resolver exists at all, the configured servers are kept
+        // as-is (sing-box will surface a validation error the user must fix).
+        let mut dns = json!({
+            "servers": [
+                { "tag": "dns-remote", "type": "https", "server": "cloudflare-dns.com" }
+            ]
+        });
+        sanitize_dns_value(&mut dns);
+        assert_eq!(dns["servers"].as_array().unwrap().len(), 1);
+        assert!(dns["servers"][0].get("domain_resolver").is_none());
+    }
+
+    #[test]
+    fn test_migrate_legacy_dns_preserves_configured_resolver_only() {
+        // A legacy `address_resolver` is a faithful translation, not an addition.
+        let mut dns = json!({
+            "servers": [
+                {
+                    "tag": "dns-remote",
+                    "address": "https://dns.google/dns-query",
+                    "address_resolver": "dns-direct"
+                },
+                { "tag": "dns-direct", "address": "223.5.5.5" }
+            ]
+        });
+        sanitize_dns_value(&mut dns);
+        assert_eq!(
+            dns["servers"][0]["domain_resolver"].as_str(),
+            Some("dns-direct")
+        );
+    }
+
+    #[test]
+    fn test_sanitize_runtime_config_migrates_legacy_dns_end_to_end() {
+        let mut cfg = json!({
+            "dns": {
+                "servers": [
+                    { "tag": "dns-remote", "address": "tls://1.1.1.1", "address_resolver": "dns-direct" },
+                    { "tag": "dns-direct", "address": "local" }
+                ]
+            },
+            "outbounds": [ { "type": "direct", "tag": "direct" } ],
+            "route": {}
+        });
+        sanitize_runtime_config(&mut cfg);
+
+        let servers = cfg["dns"]["servers"].as_array().unwrap();
+        assert!(servers.iter().all(|s| s.get("address").is_none()));
+        assert_eq!(servers[0]["type"], "tls");
+        assert_eq!(servers[0]["server"], "1.1.1.1");
+        assert_eq!(servers[0]["domain_resolver"], "dns-direct");
+        assert_eq!(servers[1]["type"], "local");
+        // 沿用原有逻辑：首个非 fakeip 的服务器被选为默认解析器
+        assert_eq!(cfg["route"]["default_domain_resolver"], "dns-remote");
+    }
+
+    #[test]
+    fn test_generated_config_passes_singbox_check_without_deprecated_flags() {
+        // The exact legacy template that used to trigger:
+        //   "legacy DNS server formats are deprecated in sing-box 1.12.0 and removed in 1.14.0"
+        let legacy = json!({
+            "log": { "level": "info", "timestamp": true },
+            "dns": {
+                "strategy": "prefer_ipv4",
+                "servers": [
+                    { "tag": "dns-remote", "address": "tls://1.1.1.1", "address_resolver": "dns-direct" },
+                    { "tag": "dns-direct", "address": "local" }
+                ]
+            },
+            "inbounds": [],
+            "outbounds": [
+                { "type": "direct", "tag": "direct" },
+                { "type": "block", "tag": "block" }
+            ],
+            "route": { "auto_detect_interface": true, "default_http_client": "direct" },
+            "experimental": {}
+        });
+
+        let generated = generate_config_with_base(
+            legacy["log"].clone(),
+            legacy["dns"].clone(),
+            legacy["inbounds"].clone(),
+            legacy["outbounds"].clone(),
+            legacy["route"].clone(),
+            legacy["experimental"].clone(),
+            None,
+        )
+        .unwrap();
+
+        let path = std::env::temp_dir().join(format!("subout-migrated-{}.json", std::process::id()));
+        std::fs::write(&path, serde_json::to_string_pretty(&generated).unwrap()).unwrap();
+
+        let output = std::process::Command::new("sing-box")
+            .args(["check", "-c", &path.to_string_lossy()])
+            .output();
+        let _ = std::fs::remove_file(&path);
+
+        // Skip gracefully when sing-box is not installed in the test environment.
+        let Ok(output) = output else { return };
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "sing-box check failed on generated config:\n{stderr}\nconfig: {generated}"
+        );
+    }
+
+    #[test]
+    fn test_migrate_legacy_rcode_dns_server_to_rule() {
+        let mut dns = json!({
+            "servers": [
+                { "tag": "dns-block", "address": "rcode://refused" },
+                { "tag": "dns-local", "address": "local" }
+            ],
+            "rules": [
+                { "domain": ["ads.example.com"], "server": "dns-block" }
+            ]
+        });
+        sanitize_dns_value(&mut dns);
+
+        let servers = dns["servers"].as_array().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["tag"], "dns-local");
+        let rules = dns["rules"].as_array().unwrap();
+        assert_eq!(rules[0]["action"], "predefined");
+        assert_eq!(rules[0]["rcode"], "REFUSED");
+        assert!(rules[0].get("server").is_none());
     }
 }

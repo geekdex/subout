@@ -1376,7 +1376,13 @@ const handleStartService = async (customSudoPass = null) => {
         errLower.includes("tunsetiff") ||
         errLower.includes("operation not permitted") ||
         errLower.includes("permission denied");
-      if (isPermissionErr && !isWindows) {
+      // root 运行时密码不会被使用；带密码重试过仍失败则不再弹窗，避免无限循环
+      if (
+        isPermissionErr &&
+        !isWindows &&
+        !systemModeInfo.value?.is_root &&
+        !(typeof customSudoPass === "string" && customSudoPass.trim())
+      ) {
         setSessionSudoPassword("");
         if (systemModeInfo.value) {
           systemModeInfo.value.has_saved_sudo = false;
@@ -1486,7 +1492,13 @@ const handleRestartService = async (customSudoPass = null) => {
         errLower.includes("tunsetiff") ||
         errLower.includes("operation not permitted") ||
         errLower.includes("permission denied");
-      if (isPermissionErr && !isWindows) {
+      // root 运行时密码不会被使用；带密码重试过仍失败则不再弹窗，避免无限循环
+      if (
+        isPermissionErr &&
+        !isWindows &&
+        !systemModeInfo.value?.is_root &&
+        !(typeof customSudoPass === "string" && customSudoPass.trim())
+      ) {
         setSessionSudoPassword("");
         if (systemModeInfo.value) {
           systemModeInfo.value.has_saved_sudo = false;

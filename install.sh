@@ -749,9 +749,11 @@ StateDirectory=subout
 LogsDirectory=subout
 RuntimeDirectory=subout
 
-# Grant network capabilities for TUN mode
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+# subout runs as root and needs full capabilities (network for TUN, DAC for
+# arbitrary config/cache paths, etc.). Do NOT set CapabilityBoundingSet here:
+# a whitelist would strip CAP_DAC_OVERRIDE/CAP_DAC_READ_SEARCH and turn root into
+# a restricted user that cannot write files owned by other users (e.g. a
+# sing-box-owned cache.db), causing "permission denied" at runtime.
 
 [Install]
 WantedBy=multi-user.target
