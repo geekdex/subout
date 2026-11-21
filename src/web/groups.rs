@@ -4,6 +4,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
 
 use crate::db;
 use crate::web::{AppState, check_auth, get_db_conn, subscriptions::BatchDeleteRequest};
@@ -50,6 +51,106 @@ fn resolve_static_nodes_if_dynamic(
         }
     }
     payload.static_nodes.clone()
+}
+
+/// Parse the group tags referenced inside a `static_nodes` JSON array.
+fn referenced_group_tags(static_nodes: Option<&str>) -> Vec<String> {
+    let tags: Vec<String> = static_nodes
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    tags
+}
+
+/// Build a directed graph of outbound groups: group tag -> tags of other groups
+/// that appear in its member list. Only references that point to an existing
+/// group are edges (system outbounds and node tags are ignored).
+fn build_group_graph(conn: &rusqlite::Connection) -> HashMap<String, Vec<String>> {
+    let groups = db::get_outbound_groups(conn).unwrap_or_default();
+    let group_tags: HashSet<String> = groups.iter().map(|g| g.tag.clone()).collect();
+    let mut graph = HashMap::new();
+    for group in groups {
+        let refs: Vec<String> = referenced_group_tags(group.static_nodes.as_deref())
+            .into_iter()
+            .filter(|tag| group_tags.contains(tag))
+            .collect();
+        graph.insert(group.tag, refs);
+    }
+    graph
+}
+
+/// Return the cycle path (starting and ending at `start_tag`) if following
+/// group-member references from `start_tag` leads back to itself.
+/// `candidate_refs` are the members of the group being saved, which may not be
+/// persisted yet, so they override whatever is in the graph for `start_tag`.
+fn find_cycle_from(
+    start_tag: &str,
+    graph: &HashMap<String, Vec<String>>,
+    candidate_refs: &[String],
+) -> Option<Vec<String>> {
+    // The group being saved may not be persisted yet (add) or may have changed
+    // members (update), so override its edges with the candidate member list.
+    let mut effective = graph.clone();
+    effective.insert(start_tag.to_string(), candidate_refs.to_vec());
+
+    // A cycle through `start_tag` exists iff some node reachable from it has an
+    // edge back to `start_tag`. A single global `visited` makes this O(V+E)
+    // rather than enumerating every simple path (which the backtracking DFS
+    // would do, exponentially in dense graphs). `parent` reconstructs the path
+    // for a human-readable error message.
+    let mut parent: HashMap<String, String> = HashMap::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut stack = vec![start_tag.to_string()];
+    visited.insert(start_tag.to_string());
+
+    while let Some(current) = stack.pop()
+        && let Some(refs) = effective.get(&current)
+    {
+        for next in refs {
+            if next == start_tag {
+                // Rebuild: start_tag -> ... -> current -> start_tag.
+                let mut chain = vec![current.clone()];
+                let mut node = current.clone();
+                while node != start_tag {
+                    let Some(p) = parent.get(&node).cloned() else {
+                        break;
+                    };
+                    chain.push(p.clone());
+                    node = p;
+                }
+                chain.reverse();
+                chain.push(start_tag.to_string());
+                return Some(chain);
+            }
+            if visited.insert(next.clone()) {
+                parent.insert(next.clone(), current.clone());
+                stack.push(next.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Validate that saving a group (with the given final member list) would not
+/// introduce a circular outbound dependency. Returns an error response if so.
+fn check_no_cycle(
+    conn: &rusqlite::Connection,
+    tag: &str,
+    final_static_nodes: Option<&str>,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let graph = build_group_graph(conn);
+    let candidate_refs = referenced_group_tags(final_static_nodes);
+    if let Some(cycle) = find_cycle_from(tag, &graph, &candidate_refs) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!(
+                    "保存分组失败：出站组之间存在循环依赖（{}），sing-box 将无法启动，请移除相关成员引用。",
+                    cycle.join(" -> ")
+                )
+            })),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn get_groups(
@@ -146,6 +247,8 @@ pub async fn add_group(
     }
 
     let final_static_nodes = resolve_static_nodes_if_dynamic(&conn, &payload);
+
+    check_no_cycle(&conn, tag, final_static_nodes.as_deref())?;
 
     db::save_outbound_group(
         &conn,
@@ -249,6 +352,8 @@ pub async fn update_group(
     }
 
     let final_static_nodes = resolve_static_nodes_if_dynamic(&conn, &payload);
+
+    check_no_cycle(&conn, tag, final_static_nodes.as_deref())?;
 
     conn.execute(
         "UPDATE outbound_groups SET tag = ?, group_type = ?, url = ?, interval = ?, tolerance = ?, static_nodes = ?, node_types = ?, subscriptions = ?, include_keywords = ?, exclude_keywords = ? WHERE id = ?",
@@ -423,5 +528,153 @@ mod tests {
         let static_nodes_json = resolve_static_nodes_if_dynamic(&conn, &req).unwrap();
         let parsed: Vec<String> = serde_json::from_str(&static_nodes_json).unwrap();
         assert_eq!(parsed, vec!["HK-Node-01"]);
+    }
+
+    #[test]
+    fn test_find_cycle_from_direct_and_indirect() {
+        // A -> B, B -> A (direct two-node cycle)
+        let graph = HashMap::from([
+            ("A".to_string(), vec!["B".to_string()]),
+            ("B".to_string(), vec!["A".to_string()]),
+        ]);
+        let cycle = find_cycle_from("A", &graph, &["B".to_string()]);
+        assert_eq!(
+            cycle,
+            Some(vec!["A".to_string(), "B".to_string(), "A".to_string()])
+        );
+
+        // A -> B -> C -> A (indirect cycle)
+        let graph = HashMap::from([
+            ("A".to_string(), vec!["B".to_string()]),
+            ("B".to_string(), vec!["C".to_string()]),
+            ("C".to_string(), vec!["A".to_string()]),
+        ]);
+        let cycle = find_cycle_from("A", &graph, &["B".to_string()]);
+        assert_eq!(
+            cycle,
+            Some(vec![
+                "A".to_string(),
+                "B".to_string(),
+                "C".to_string(),
+                "A".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_find_cycle_from_no_cycle() {
+        // A -> B, B -> (nothing): candidate B introduces no cycle
+        let graph = HashMap::from([("A".to_string(), vec![]), ("B".to_string(), vec![])]);
+        let cycle = find_cycle_from("A", &graph, &["B".to_string()]);
+        assert!(cycle.is_none());
+
+        // Self reference is a cycle
+        let graph = HashMap::from([("A".to_string(), vec![])]);
+        let cycle = find_cycle_from("A", &graph, &["A".to_string()]);
+        assert_eq!(cycle, Some(vec!["A".to_string(), "A".to_string()]));
+
+        // Referencing only a node tag (not a group) never cycles
+        let graph = HashMap::from([("A".to_string(), vec![])]);
+        let cycle = find_cycle_from("A", &graph, &["some-node".to_string()]);
+        assert!(cycle.is_none());
+
+        // A diamond DAG (A -> B, A -> C, B -> D, C -> D) has no cycle.
+        let graph = HashMap::from([
+            ("A".to_string(), vec![]),
+            ("B".to_string(), vec!["D".to_string()]),
+            ("C".to_string(), vec!["D".to_string()]),
+            ("D".to_string(), vec![]),
+        ]);
+        let cycle = find_cycle_from("A", &graph, &["B".to_string(), "C".to_string()]);
+        assert!(cycle.is_none());
+
+        // A cycle elsewhere (B -> C -> B) that does not involve the saved group
+        // A must not be reported: saving A did not introduce it.
+        let graph = HashMap::from([
+            ("A".to_string(), vec![]),
+            ("B".to_string(), vec!["C".to_string()]),
+            ("C".to_string(), vec!["B".to_string()]),
+        ]);
+        let cycle = find_cycle_from("A", &graph, &["B".to_string()]);
+        assert!(cycle.is_none());
+    }
+
+    #[test]
+    fn test_find_cycle_from_reports_actual_cycle_path() {
+        // Saving D with members [A], where A -> B -> C -> D, closes
+        // D -> A -> B -> C -> D. Verify the reported path is exact.
+        let graph = HashMap::from([
+            ("A".to_string(), vec!["B".to_string()]),
+            ("B".to_string(), vec!["C".to_string()]),
+            ("C".to_string(), vec!["D".to_string()]),
+            ("D".to_string(), vec![]),
+        ]);
+        let cycle = find_cycle_from("D", &graph, &["A".to_string()]);
+        assert_eq!(
+            cycle,
+            Some(vec![
+                "D".to_string(),
+                "A".to_string(),
+                "B".to_string(),
+                "C".to_string(),
+                "D".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_check_no_cycle_rejects_mutual_group_references() {
+        let conn = db::init_db(":memory:").unwrap();
+        db::save_outbound_group(
+            &conn,
+            "group-cf",
+            "urltest",
+            None,
+            None,
+            None,
+            Some("[\"group-gh\"]"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        db::save_outbound_group(
+            &conn,
+            "group-gh",
+            "urltest",
+            None,
+            None,
+            None,
+            Some("[\"node-1\"]"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Saving group-gh with a member that references group-cf would close
+        // the cycle group-cf -> group-gh -> group-cf.
+        let err = check_no_cycle(
+            &conn,
+            "group-gh",
+            Some("[\"node-1\", \"group-cf\"]".to_string()).as_deref(),
+        )
+        .unwrap_err();
+        let (status, body) = err;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let msg = body.0;
+        assert!(msg.to_string().contains("循环依赖"));
+
+        // Saving group-gh with only plain node members is fine.
+        assert!(
+            check_no_cycle(
+                &conn,
+                "group-gh",
+                Some("[\"node-1\"]".to_string()).as_deref()
+            )
+            .is_ok()
+        );
     }
 }

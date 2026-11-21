@@ -164,13 +164,7 @@ impl AppPaths {
         }
 
         // Running within source workspace directory containing Cargo.toml and src/main.rs
-        let in_workspace =
-            Path::new("./Cargo.toml").is_file() && Path::new("./src/main.rs").is_file();
-        if in_workspace {
-            return true;
-        }
-
-        false
+        Path::new("./Cargo.toml").is_file() && Path::new("./src/main.rs").is_file()
     }
 
     /// Ensure required directories exist.

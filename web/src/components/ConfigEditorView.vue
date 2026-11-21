@@ -3033,9 +3033,10 @@
                       line-height: 1.4;
                     "
                   >
-                    💡 <b>最佳实践建议</b>：填入的 CIDR 网段会在内核层面绕过
-                    TUN 接管（包括 <code>auto_route</code> 与
-                    <code>auto_redirect</code>），直接走系统默认路由表。使用节点小宝、Tailscale
+                    💡 <b>最佳实践建议</b>：填入的 CIDR 网段会在内核层面绕过 TUN
+                    接管（包括 <code>auto_route</code> 与
+                    <code>auto_redirect</code
+                    >），直接走系统默认路由表。使用节点小宝、Tailscale
                     等异地组网时建议加入 <code>100.64.0.0/10</code>。
                   </small>
                 </div>

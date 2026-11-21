@@ -244,7 +244,10 @@ fn migrate_legacy_dns_servers(obj: &mut Map<String, Value>) {
             continue;
         };
 
-        if let Some(address) = srv.remove("address").and_then(|v| v.as_str().map(str::to_string)) {
+        if let Some(address) = srv
+            .remove("address")
+            .and_then(|v| v.as_str().map(str::to_string))
+        {
             let parsed = parse_legacy_dns_address(&address);
 
             if let Some(rcode) = parsed.rcode {
@@ -334,7 +337,6 @@ fn migrate_legacy_dns_servers(obj: &mut Map<String, Value>) {
             }
         }
     }
-
 }
 
 pub fn sanitize_dns_value(dns: &mut Value) {
@@ -494,7 +496,7 @@ pub fn sanitize_runtime_config(config: &mut Value) {
     let legacy_actions: Vec<(String, String)> = root
         .get("outbounds")
         .and_then(|o| o.as_array())
-        .map(|arr| {
+        .map_or_else(Vec::new, |arr| {
             arr.iter()
                 .filter_map(|o| {
                     let t = o.get("type").and_then(|t| t.as_str())?;
@@ -507,8 +509,7 @@ pub fn sanitize_runtime_config(config: &mut Value) {
                     }
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     if let Some(outbounds) = root.get_mut("outbounds") {
         sanitize_outbounds_value(outbounds);
@@ -707,8 +708,7 @@ pub fn sync_config_with_latest_resources(
             seen_group_tags.insert(group.tag.clone());
             let resolved = db_group_map
                 .get(&group.tag)
-                .map(|(_, r)| r.clone())
-                .unwrap_or_default();
+                .map_or_else(Vec::new, |(_, r)| r.clone());
             let mut g_val = json!({
                 "type": group.group_type,
                 "tag": group.tag,
@@ -1108,7 +1108,7 @@ mod tests {
         );
 
         // Check repaired routes
-        assert!(!repaired.is_empty());
+        assert!(!repaired.is_empty(), "expected some repairs to be reported");
         let route_obj = updated.get("route").unwrap();
         assert_eq!(route_obj.get("final").unwrap().as_str(), Some("direct"));
         let rules = route_obj.get("rules").unwrap().as_array().unwrap();
@@ -1414,7 +1414,8 @@ mod tests {
         )
         .unwrap();
 
-        let path = std::env::temp_dir().join(format!("subout-migrated-{}.json", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("subout-migrated-{}.json", std::process::id()));
         std::fs::write(&path, serde_json::to_string_pretty(&generated).unwrap()).unwrap();
 
         let output = std::process::Command::new("sing-box")

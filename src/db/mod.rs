@@ -769,25 +769,23 @@ pub fn resolve_group_nodes(conn: &Connection, group: &OutboundGroup) -> Result<V
 
     let inc_kws: Vec<String> = group
         .include_keywords
-        .as_ref()
-        .map(|s| {
+        .as_deref()
+        .map_or_else(Vec::new, |s| {
             s.split([',', '，', ' ', '\n', '\t', '\r'])
                 .map(|x| x.trim().to_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     let exc_kws: Vec<String> = group
         .exclude_keywords
-        .as_ref()
-        .map(|s| {
+        .as_deref()
+        .map_or_else(Vec::new, |s| {
             s.split([',', '，', ' ', '\n', '\t', '\r'])
                 .map(|x| x.trim().to_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     // 3. Query all enabled nodes from DB
     let nodes = get_nodes(conn)?;

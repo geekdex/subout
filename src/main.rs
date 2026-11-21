@@ -207,14 +207,11 @@ async fn main() {
             eprintln!("Web server error: {e}");
             std::process::exit(1);
         }
-        std::process::exit(0);
-    } else {
-        if let Err(e) = run(args).await {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-        std::process::exit(0);
+    } else if let Err(e) = run(args).await {
+        eprintln!("{e}");
+        std::process::exit(1);
     }
+    std::process::exit(0);
 }
 
 async fn run(args: CliArgs) -> Result<(), Box<dyn std::error::Error>> {

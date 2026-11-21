@@ -610,9 +610,18 @@ mod tests {
 
     #[test]
     fn test_parse_cim_process_json_empty_and_invalid() {
-        assert!(parse_cim_process_json("").is_empty());
-        assert!(parse_cim_process_json("   \n\t  ").is_empty());
-        assert!(parse_cim_process_json("invalid json").is_empty());
+        assert!(
+            parse_cim_process_json("").is_empty(),
+            "empty input should yield no processes"
+        );
+        assert!(
+            parse_cim_process_json("   \n\t  ").is_empty(),
+            "whitespace-only input should yield no processes"
+        );
+        assert!(
+            parse_cim_process_json("invalid json").is_empty(),
+            "invalid JSON should yield no processes"
+        );
     }
 
     #[test]

@@ -380,8 +380,7 @@ pub async fn run_auto_update_process(
         let next_run_time_str = Local::now()
             .with_timezone(&Local)
             .checked_add_signed(chrono::Duration::seconds((next_run_time - now) as i64))
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_default();
+            .map_or_else(String::new, |dt| dt.format("%Y-%m-%d %H:%M:%S").to_string());
         update_log(&format!(
             "自动更新完成！下次更新预定时间: {next_run_time_str}"
         ));
