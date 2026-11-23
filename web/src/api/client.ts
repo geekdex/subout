@@ -538,9 +538,7 @@ export const api = {
   async deleteNode(id: number): Promise<{ success: boolean }> {
     return request(`/api/nodes/${id}`, { method: "DELETE" });
   },
-  async batchDeleteNodes(
-    ids: number[],
-  ): Promise<{ success: boolean; count: number }> {
+  async batchDeleteNodes(ids: number[]): Promise<void> {
     return request("/api/nodes/batch-delete", {
       method: "POST",
       body: JSON.stringify({ ids }),

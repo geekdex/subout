@@ -432,9 +432,10 @@ export const NodesView: React.FC<NodesViewProps> = ({
   const handleBatchDelete = async () => {
     if (selectedIds.length === 0) return;
     setBatchDeleting(true);
+    const deletedCount = selectedIds.length;
     try {
-      const res = await api.batchDeleteNodes(selectedIds);
-      success("批量删除成功", `已移除 ${res.count} 个节点`);
+      await api.batchDeleteNodes(selectedIds);
+      success("批量删除成功", `已移除 ${deletedCount} 个节点`);
       setSelectedIds([]);
       setBatchDeleteModalOpen(false);
       onRefresh();
@@ -804,33 +805,6 @@ export const NodesView: React.FC<NodesViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {selectedIds.length > 0 && !testingBatchActive && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={serviceRunning}
-                  onClick={handleTestSelected}
-                  icon={<Radio className="w-3.5 h-3.5 text-sky-400" />}
-                  title={
-                    serviceRunning
-                      ? "sing-box 正在运行，请先停止服务后再测速"
-                      : `使用 [${currentEndpoint.name}] 测速选中的 ${selectedIds.length} 个节点`
-                  }
-                >
-                  测速所选 ({selectedIds.length})
-                </Button>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setBatchDeleteModalOpen(true)}
-                  icon={<Trash2 className="w-3.5 h-3.5" />}
-                >
-                  删除所选 ({selectedIds.length})
-                </Button>
-              </>
-            )}
-
             {testingBatchActive ? (
               <Button
                 variant="danger"
@@ -946,12 +920,40 @@ export const NodesView: React.FC<NodesViewProps> = ({
         </div>
 
         {selectedIds.length > 0 && (
-          <div className="text-xs text-slate-400">
-            已选中{" "}
-            <span className="font-semibold text-sky-400">
-              {selectedIds.length}
-            </span>{" "}
-            个节点
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="text-xs text-slate-400 whitespace-nowrap">
+              已选中{" "}
+              <span className="font-semibold text-sky-400">
+                {selectedIds.length}
+              </span>{" "}
+              个节点
+            </span>
+            {!testingBatchActive && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={serviceRunning}
+                  onClick={handleTestSelected}
+                  icon={<Radio className="w-3.5 h-3.5 text-sky-400" />}
+                  title={
+                    serviceRunning
+                      ? "sing-box 正在运行，请先停止服务后再测速"
+                      : `使用 [${currentEndpoint.name}] 测速选中的 ${selectedIds.length} 个节点`
+                  }
+                >
+                  测速所选 ({selectedIds.length})
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setBatchDeleteModalOpen(true)}
+                  icon={<Trash2 className="w-3.5 h-3.5" />}
+                >
+                  删除所选 ({selectedIds.length})
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>

@@ -256,6 +256,28 @@ describe("NodesView Component", () => {
     });
   });
 
+  it("shows the selected count (not undefined) in the batch delete success toast", async () => {
+    const onRefresh = vi.fn();
+    vi.mocked(api.batchDeleteNodes).mockResolvedValueOnce(undefined);
+
+    renderWithToast(<NodesView nodes={mockNodes} onRefresh={onRefresh} />);
+
+    // Select all nodes on the current page
+    fireEvent.click(screen.getByTitle("全选当前页 / 取消全选"));
+
+    // Open the batch delete confirmation modal
+    fireEvent.click(screen.getByText(/删除所选 \(3\)/i));
+    fireEvent.click(screen.getByRole("button", { name: /确认批量删除/i }));
+
+    await waitFor(() => {
+      expect(api.batchDeleteNodes).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("已移除 3 个节点")).toBeDefined();
+    });
+    const deletedIds = vi.mocked(api.batchDeleteNodes).mock.calls[0][0];
+    expect([...deletedIds].sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    expect(screen.queryByText(/undefined/)).toBeNull();
+  });
+
   it("renders subscription column and custom node badge", () => {
     renderWithToast(
       <NodesView
