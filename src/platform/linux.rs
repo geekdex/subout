@@ -4,7 +4,10 @@ use anyhow::anyhow;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::platform::{BoxFuture, PlatformStrategy, get_config_path_variants};
+use crate::platform::{
+    BoxFuture, PlatformStrategy, ResourceConflictKind, ResourceHolderInfo,
+    collect_inbound_listeners, get_config_path_variants,
+};
 use crate::service::ConflictingProcessInfo;
 
 struct RawProc {
@@ -181,6 +184,131 @@ impl PlatformStrategy for LinuxPlatform {
         {
             let _ = pid;
             false
+        }
+    }
+
+    fn detect_resource_conflicts<'a>(
+        &'a self,
+        running_config_path: &'a Path,
+        exclude_pid: Option<u32>,
+    ) -> BoxFuture<'a, Vec<ResourceHolderInfo>> {
+        Box::pin(async move {
+            #[cfg(unix)]
+            {
+                let config: Value = match std::fs::read_to_string(running_config_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                {
+                    Some(c) => c,
+                    None => return Vec::new(),
+                };
+                let mut results = Vec::new();
+                let self_pid = std::process::id();
+
+                // 1) 端口占用：/proc/net/tcp(6) 找 LISTEN socket inode，再反查 PID
+                let fd_entries = collect_socket_fd_entries();
+                for (listen, port) in collect_inbound_listeners(&config) {
+                    let mut inodes = Vec::new();
+                    for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
+                        if let Ok(text) = std::fs::read_to_string(path) {
+                            inodes.extend(parse_listen_inodes(&text, port));
+                        }
+                    }
+                    let holder = find_pid_by_socket_inode(&fd_entries, &inodes, exclude_pid, self_pid);
+                    match holder {
+                        Some((pid, inode)) => {
+                            let (name, cmdline) = read_proc_identity(pid);
+                            results.push(ResourceHolderInfo {
+                                kind: ResourceConflictKind::Port,
+                                resource: format!("{listen}:{port}"),
+                                holder_pid: Some(pid),
+                                holder_name: name.or_else(|| Some("未知进程".to_string())),
+                                holder_cmdline: cmdline,
+                                evidence: format!("/proc/net/tcp inode:{inode}"),
+                            });
+                        }
+                        None if !inodes.is_empty() => {
+                            // 有 LISTEN socket 但反查不到持有者（权限/竞态）——给出自查命令
+                            results.push(ResourceHolderInfo {
+                                kind: ResourceConflictKind::Port,
+                                resource: format!("{listen}:{port}"),
+                                holder_pid: None,
+                                holder_name: None,
+                                holder_cmdline: None,
+                                evidence: format!("ss -tlnp | grep ':{port}'"),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+
+                // 2) TUN 网卡占用：若目标网卡存在且被判定为外部工具持有
+                let tun_name = resolved_tun_interface_name();
+                if let Some(link) = get_linux_cmd_output("ip", &["link", "show", &tun_name])
+                    && link.contains(&tun_name)
+                    && !is_tun_interface_safe_to_delete(&tun_name)
+                {
+                    results.push(ResourceHolderInfo {
+                        kind: ResourceConflictKind::TunInterface,
+                        resource: tun_name.clone(),
+                        holder_pid: None,
+                        holder_name: None,
+                        holder_cmdline: None,
+                        evidence: "ip -d link show".to_string(),
+                    });
+                }
+
+                results
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (running_config_path, exclude_pid);
+                Vec::new()
+            }
+        })
+    }
+
+    fn port_probe_command(&self, port: u16) -> String {
+        if port == 0 {
+            "sudo ss -tlnp".to_string()
+        } else {
+            format!("sudo ss -tlnp | grep ':{port}'")
+        }
+    }
+
+    fn describe_port_holder(&self, port: u16) -> Option<String> {
+        #[cfg(unix)]
+        {
+            let mut inodes = Vec::new();
+            for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
+                if let Ok(text) = std::fs::read_to_string(path) {
+                    inodes.extend(parse_listen_inodes(&text, port));
+                }
+            }
+            if inodes.is_empty() {
+                return None;
+            }
+            let fd_entries = collect_socket_fd_entries();
+            let self_pid = std::process::id();
+            if let Some((pid, _)) =
+                find_pid_by_socket_inode(&fd_entries, &inodes, None, self_pid)
+            {
+                let (name, cmdline) = read_proc_identity(pid);
+                let who = name.unwrap_or_else(|| "未知进程".to_string());
+                return Some(match cmdline {
+                    Some(c) => format!("占用者：{who} (PID {pid})，命令：{c}。"),
+                    None => format!("占用者：{who} (PID {pid})。"),
+                });
+            }
+            // 有 LISTEN socket 但反查不到持有者
+            return Some(format!(
+                "端口存在监听进程但无法读取其身份，可用 `sudo ss -tlnp | grep ':{port}'` 查看；"
+            ));
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = port;
+            None
         }
     }
 
@@ -743,6 +871,8 @@ impl PlatformStrategy for LinuxPlatform {
                     details: msg,
                     pids,
                     can_auto_takeover: true,
+                    resource_conflicts: Vec::new(),
+                    auto_takeover_allowed: true,
                 });
             }
 
@@ -774,6 +904,8 @@ impl PlatformStrategy for LinuxPlatform {
                     details: msg,
                     pids,
                     can_auto_takeover: true,
+                    resource_conflicts: Vec::new(),
+                    auto_takeover_allowed: true,
                 });
             }
 
@@ -888,12 +1020,21 @@ impl PlatformStrategy for LinuxPlatform {
     fn enable_tun_dns(&self, dns_ip: &str, sudo_pass: Option<&str>) {
         // 针对使用 systemd-resolved 的 Linux 环境：
         // 1. 若宿主机全局配置了 DNSOverTLS=yes，systemd-resolved 默认会对所有接口尝试 TLS (853)，
-        //    而 sing-box tun DNS 仅提供标准 DNS (53)，必须显式为 tun0 关闭 DNSOverTLS，防止所有解析超时。
-        // 2. 确保 tun0 设置为默认 DNS 路由 (~.)。
-        let _ = run_linux_admin_cmd("resolvectl", &["dnsovertls", "tun0", "no"], sudo_pass);
-        let _ = run_linux_admin_cmd("resolvectl", &["dns", "tun0", dns_ip], sudo_pass);
-        let _ = run_linux_admin_cmd("resolvectl", &["domain", "tun0", "~."], sudo_pass);
-        let _ = run_linux_admin_cmd("resolvectl", &["default-route", "tun0", "true"], sudo_pass);
+        //    而 sing-box tun DNS 仅提供标准 DNS (53)，必须显式为该 TUN 网卡关闭 DNSOverTLS，防止解析超时。
+        // 2. 确保该网卡设置为默认 DNS 路由 (~.)。
+        // 3. 安全：若目标网卡名被外部程序（如组网工具）占用，跳过写操作，绝不改别人的 DNS。
+        //    网卡名从实际配置解析（配置未指定时用默认 tun0），不再写死 tun0。
+        let iface = resolved_tun_interface_name();
+        if !is_tun_interface_safe_to_delete(&iface) {
+            eprintln!(
+                "[subout] 跳过 enable_tun_dns：网卡 {iface} 疑似由其他程序持有，避免覆盖其 DNS 设置"
+            );
+            return;
+        }
+        let _ = run_linux_admin_cmd("resolvectl", &["dnsovertls", &iface, "no"], sudo_pass);
+        let _ = run_linux_admin_cmd("resolvectl", &["dns", &iface, dns_ip], sudo_pass);
+        let _ = run_linux_admin_cmd("resolvectl", &["domain", &iface, "~."], sudo_pass);
+        let _ = run_linux_admin_cmd("resolvectl", &["default-route", &iface, "true"], sudo_pass);
         let _ = run_linux_admin_cmd("resolvectl", &["flush-caches"], sudo_pass);
     }
 
@@ -1142,17 +1283,207 @@ pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
     let _ = run_linux_admin_cmd("ip", &["route", "flush", "cache"], sudo_pass);
 
     // 3. 检查并删除可能残留的孤儿 tun 虚拟网卡设备（如 tun0 / subout-tun）
-    for iface in &["tun0", "subout-tun"] {
+    //    安全：删除前判断网卡是否由外部程序（如组网工具）持有，避免误删别人的网卡。
+    let configured_tun = resolved_tun_interface_name();
+    let mut candidates = vec![configured_tun.as_str(), "subout-tun", "tun0"];
+    candidates.sort();
+    candidates.dedup();
+    for iface in candidates {
         if let Some(link_out) = get_linux_cmd_output("ip", &["link", "show", iface])
             && link_out.contains(iface)
         {
-            let _ = run_linux_admin_cmd("ip", &["link", "delete", iface], sudo_pass);
+            if is_tun_interface_safe_to_delete(iface) {
+                let _ = run_linux_admin_cmd("ip", &["link", "delete", iface], sudo_pass);
+            } else {
+                eprintln!(
+                    "[subout] 跳过删除网卡 {iface}：检测到该网卡可能由其他程序持有（如组网工具），避免误删"
+                );
+            }
         }
     }
 
     // 4. 若系统启用了 systemd-resolved，还原 tun0 配置并刷新 DNS 解析缓存
-    let _ = run_linux_admin_cmd("resolvectl", &["revert", "tun0"], sudo_pass);
+    //    仅 revert 我们确认由 subout 配置过的网卡，避免改掉其他工具（如组网工具）的 DNS。
+    let tun_iface = resolved_tun_interface_name();
+    if is_tun_interface_safe_to_delete(&tun_iface) {
+        let _ = run_linux_admin_cmd("resolvectl", &["revert", &tun_iface], sudo_pass);
+    } else {
+        eprintln!(
+            "[subout] 跳过 resolvectl revert {tun_iface}：该网卡可能由其他程序持有，避免修改其 DNS"
+        );
+    }
     let _ = run_linux_admin_cmd("resolvectl", &["flush-caches"], sudo_pass);
+}
+
+// ---------------------------------------------------------------------------
+// 通用资源占用诊断（端口 / TUN / DNS / 路由），按实际占用判定，不硬编码工具名。
+// ---------------------------------------------------------------------------
+
+/// 从 /proc/net/tcp 或 /proc/net/tcp6 文本中解析出处于 LISTEN(state=0A)、
+/// 端口等于 target_port 的 socket inode 集合。
+///
+/// 行格式（空白分隔）：
+///   sl local_address rem_address st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode ...
+/// local_address 形如 "0100007F:0820"（小端 IP:十六进制端口）。
+pub fn parse_listen_inodes(proc_net_tcp: &str, target_port: u16) -> Vec<u64> {
+    let mut inodes = Vec::new();
+    let port_hex = format!("{target_port:04X}");
+    for line in proc_net_tcp.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        // 至少要有 sl/local/rem/st/.../inode，inode 通常是第 10 个字段（index 9）
+        if parts.len() < 10 {
+            continue;
+        }
+        if parts[3] != "0A" {
+            continue; // 仅 LISTEN
+        }
+        let local = parts[1];
+        if !local.ends_with(&format!(":{port_hex}")) {
+            continue;
+        }
+        if let Ok(inode) = parts[9].parse::<u64>() {
+            inodes.push(inode);
+        }
+    }
+    inodes
+}
+
+/// 从一组 "socket:[inode]" 形式的 fd 链接文本中找出持有指定 inode 的 PID。
+/// 传入的 fd_entries 为 (pid, readlink 结果) 列表；本函数只做纯解析，便于单测。
+pub fn find_pid_by_socket_inode(
+    fd_entries: &[(u32, String)],
+    inodes: &[u64],
+    exclude_pid: Option<u32>,
+    self_pid: u32,
+) -> Option<(u32, u64)> {
+    for (pid, link) in fd_entries {
+        if *pid == self_pid || Some(*pid) == exclude_pid {
+            continue;
+        }
+        let Some(inner) = link
+            .strip_prefix("socket:[")
+            .and_then(|s| s.strip_suffix(']'))
+        else {
+            continue;
+        };
+        if let Ok(inode) = inner.parse::<u64>()
+            && inodes.contains(&inode)
+        {
+            return Some((*pid, inode));
+        }
+    }
+    None
+}
+
+/// 扫描 /proc/<pid>/fd/*，返回 (pid, socket:[inode]) 列表（仅 socket 类型）。
+/// 权限不足的进程会被跳过——subout 以 root 运行时可读大部分进程。
+pub fn collect_socket_fd_entries_pub() -> Vec<(u32, String)> {
+    collect_socket_fd_entries()
+}
+
+fn collect_socket_fd_entries() -> Vec<(u32, String)> {
+    let mut entries = Vec::new();
+    let Ok(root) = std::fs::read_dir("/proc") else {
+        return entries;
+    };
+    for proc_entry in root.flatten() {
+        let pid_str = proc_entry.file_name();
+        let Ok(pid) = pid_str.to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let fd_dir = proc_entry.path().join("fd");
+        let Ok(fds) = std::fs::read_dir(fd_dir) else {
+            continue;
+        };
+        for fd in fds.flatten() {
+            if let Ok(link) = std::fs::read_link(fd.path()) {
+                let s = link.to_string_lossy().to_string();
+                if s.starts_with("socket:[") {
+                    entries.push((pid, s));
+                }
+            }
+        }
+    }
+    entries
+}
+
+pub fn read_proc_identity_pub(pid: u32) -> (Option<String>, Option<String>) {
+    read_proc_identity(pid)
+}
+
+/// 读取 /proc/<pid>/comm 与 cmdline，得到 (进程名, 命令行)。
+fn read_proc_identity(pid: u32) -> (Option<String>, Option<String>) {
+    let proc_dir = PathBuf::from(format!("/proc/{pid}"));
+    let name = std::fs::read_to_string(proc_dir.join("comm"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let cmdline = std::fs::read_to_string(proc_dir.join("cmdline"))
+        .ok()
+        .map(|s| {
+            s.split('\0')
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|s| !s.is_empty());
+    (name, cmdline)
+}
+
+/// 判断名为 iface 的网卡是否可安全删除/还原。
+/// 规则（保守）：subout 专属名（subout-tun / tun0 且无外部持有者）可动；
+/// 明确由其他程序持有的网卡一律不动。
+///
+/// 判据来自 `ip -d link show dev <iface>` 的文本：
+/// - 网卡不存在 → 无需删除（返回 false 也无害，调用方先确认存在）。
+/// - 文本中出现非 subout 的 owner 标记（如 zerotier/tailscale/NodeBaby 等关键字）→ 视为外部持有。
+/// 这是 best-effort 的启发式：拿不到命令输出时按"安全名"处理，避免影响既有清理逻辑。
+pub fn is_tun_interface_safe_to_delete(iface: &str) -> bool {
+    // subout 专属名：始终可安全删除
+    if iface == "subout-tun" {
+        return true;
+    }
+    // 通用名 tun0：检查是否出现其他工具的 owner 关键字
+    let link_info = get_linux_cmd_output("ip", &["-d", "link", "show", "dev", iface])
+        .unwrap_or_default()
+        .to_lowercase();
+    is_tun_safe_from_link_info(iface, &link_info)
+}
+
+/// 纯函数版归属判定：给定网卡名与 `ip -d link show dev <iface>` 的文本，
+/// 判断是否可安全删除/还原。抽成纯函数以便单测，不依赖真实命令输出。
+pub fn is_tun_safe_from_link_info(iface: &str, link_info: &str) -> bool {
+    if iface == "subout-tun" {
+        return true;
+    }
+    let lower = link_info.to_lowercase();
+    for marker in ["zerotier", "tailscale", "nodebaby", "wireguard", "wg0", "zt0", "tinc"] {
+        if lower.contains(marker) {
+            return false;
+        }
+    }
+    true
+}
+
+/// 解析 running config，得到 subout 实际使用的 tun 网卡名（配置未指定则用平台默认）。
+fn resolved_tun_interface_name() -> String {
+    let config: Value = std::fs::read_to_string(
+        crate::service::SingBoxServiceManager::get_running_config_path(),
+    )
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null);
+    if let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) {
+        for inbound in inbounds {
+            if inbound.get("type").and_then(|t| t.as_str()) == Some("tun")
+                && let Some(name) = inbound.get("interface_name").and_then(|n| n.as_str())
+                && !name.is_empty()
+            {
+                return name.to_string();
+            }
+        }
+    }
+    "tun0".to_string()
 }
 
 #[cfg(test)]
@@ -1170,5 +1501,56 @@ mod tests {
         assert!(sample_rules.contains("lookup 2022"));
         assert!(sample_rules.contains("0x2023"));
         assert!(sample_rules.contains("0x2024"));
+    }
+
+    #[test]
+    fn test_parse_listen_inodes() {
+        // 模拟 /proc/net/tcp：表头 + 若干行，端口 2080 = 0x0820
+        let sample = r"  sl  local_address rem_address   st tx_queue:rx_queue tr:tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:0820 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 11111 1 0000000000000000 100 0 0 10 0
+   1: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 22222 1 0000000000000000 100 0 0 10 0
+   2: 0100007F:0820 0100007F:1234 01 00000000:00000000 00:00000000 00000000  1000        0 33333 1 0000000000000000 100 0 0 10 0
+";
+        // 端口 2080 的 LISTEN(0A) 行有两个 inode：11111；第 2 行端口 8080(0x1F90) 不算；
+        // 第 3 行 state=01 不算。
+        let inodes = super::parse_listen_inodes(sample, 2080);
+        assert_eq!(inodes, vec![11111]);
+        // 端口 8080
+        let inodes2 = super::parse_listen_inodes(sample, 8080);
+        assert_eq!(inodes2, vec![22222]);
+    }
+
+    #[test]
+    fn test_find_pid_by_socket_inode() {
+        let inodes = vec![11111u64];
+        let entries = vec![
+            (100u32, "socket:[99999]".to_string()),
+            (200u32, "socket:[11111]".to_string()),
+            (300u32, "socket:[11111]".to_string()),
+        ];
+        // 排除自身 PID 100，命中 200
+        let found = super::find_pid_by_socket_inode(&entries, &inodes, None, 100);
+        assert_eq!(found, Some((200, 11111)));
+        // 排除 200 后命中 300
+        let found2 = super::find_pid_by_socket_inode(&entries, &inodes, Some(200), 100);
+        assert_eq!(found2, Some((300, 11111)));
+    }
+
+    #[test]
+    fn test_is_tun_safe_from_link_info() {
+        // subout 专属名：任何情况下都安全
+        assert!(super::is_tun_safe_from_link_info("subout-tun", "") );
+        // 干净的 tun0（无外部工具关键字）：安全可删
+        let clean = "3: tun0: <POINTOPOINT,MULTICAST,NOARP,UP> mtu 1500\n    link/none";
+        assert!(super::is_tun_safe_from_link_info("tun0", clean));
+        // 被组网工具占用（节点小宝）：不允许删除/还原
+        let nodebaby = "7: NodeBabyLink: <POINTOPOINT,UP> mtu 1430\n    alias NodeBaby";
+        assert!(!super::is_tun_safe_from_link_info("NodeBabyLink", nodebaby));
+        let zerotier = "5: zt0: <BROADCAST,MULTICAST,UP> mtu 2800\n    zerotier";
+        assert!(!super::is_tun_safe_from_link_info("zt0", zerotier));
+        let tailscale = "6: tailscale0: <POINTOPOINT,UP>\n    tailscale";
+        assert!(!super::is_tun_safe_from_link_info("tailscale0", tailscale));
+        // 大小写不敏感
+        assert!(!super::is_tun_safe_from_link_info("tun0", "Owner: ZEROTIER One"));
     }
 }

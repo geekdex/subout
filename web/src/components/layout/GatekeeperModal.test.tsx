@@ -121,7 +121,7 @@ describe("GatekeeperModal", () => {
     expect(screen.queryByText(/内核门禁警告/)).toBeNull();
 
     // Should show conflict header & details
-    expect(screen.getByText(/检测到系统外部进程\/服务冲突/)).toBeDefined();
+    expect(screen.getByText(/检测到影响 sing-box 运行的系统冲突/)).toBeDefined();
     expect(screen.getByText(/外部独立 sing-box 进程/)).toBeDefined();
     expect(screen.getAllByText(/PID: 12345/).length).toBeGreaterThan(0);
     expect(screen.getByText(/sudo kill -9 12345/)).toBeDefined();
@@ -294,5 +294,83 @@ describe("GatekeeperModal", () => {
     const retryBtn = screen.getByText("重试下载");
     fireEvent.click(retryBtn);
     expect(handleDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the real resource holder and hides takeover button for VPN tool port conflicts", () => {
+    render(
+      <GatekeeperModal
+        kernelInfo={{
+          binary_path: "/usr/bin/sing-box",
+          installed: true,
+          version: "1.14.4",
+          supported_versions: ["1.14.*"],
+          pinned_version: "1.14.4",
+          ready: true,
+          gatekeeper_blocked: false,
+          message: null,
+        }}
+        takeoverDiagnose={{
+          has_conflict: true,
+          conflict_type: "port_occupied_by_external",
+          conflict_name: "端口被外部程序占用",
+          details: "检测到端口被占用。",
+          suggestion: "Subout 不会自动修改配置或关闭这些程序。",
+          suggestion_command: "sudo ss -tlnp | grep ':2080'",
+          pids: [1234],
+          can_auto_takeover: false,
+          auto_takeover_allowed: false,
+          resource_conflicts: [
+            {
+              kind: "port",
+              resource: "127.0.0.1:2080",
+              holder_pid: 1234,
+              holder_name: "NodeBabyLinkService",
+              holder_cmdline: "./NodeBabyLinkService --peerid abc",
+              evidence: "/proc/net/tcp inode:11111",
+            },
+          ],
+        }}
+        downloading={false}
+        onDownloadKernel={vi.fn()}
+        onTakeover={vi.fn()}
+      />,
+    );
+
+    // 泛化标题
+    expect(screen.getByText("检测到影响 sing-box 运行的系统冲突")).toBeDefined();
+    // 点名真实占用进程（不硬编码工具名，显示系统读到的名字）
+    expect(screen.getAllByText(/NodeBabyLinkService/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/127\.0\.0\.1:2080/)).toBeDefined();
+    // 核心防误杀断言：组网工具冲突不能出现"一键接管"按钮
+    expect(screen.queryByText("一键接管并终止冲突进程")).toBeNull();
+  });
+
+  it("shows takeover button for real external sing-box conflicts", () => {
+    render(
+      <GatekeeperModal
+        kernelInfo={{
+          binary_path: "/usr/bin/sing-box",
+          installed: true,
+          version: "1.14.4",
+          supported_versions: ["1.14.*"],
+          pinned_version: "1.14.4",
+          ready: true,
+          gatekeeper_blocked: false,
+          message: null,
+        }}
+        takeoverDiagnose={{
+          has_conflict: true,
+          conflict_type: "running_processes",
+          details: "外部 sing-box 进程。",
+          suggestion: "建议一键接管。",
+          can_auto_takeover: true,
+          auto_takeover_allowed: true,
+        }}
+        downloading={false}
+        onDownloadKernel={vi.fn()}
+        onTakeover={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("一键接管并终止冲突进程")).toBeDefined();
   });
 });

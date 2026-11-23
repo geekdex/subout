@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::platform::{BoxFuture, PlatformStrategy};
+use crate::platform::{BoxFuture, PlatformStrategy, ResourceHolderInfo};
 use crate::service::ConflictingProcessInfo;
 
 pub struct FallbackPlatform;
@@ -41,6 +41,22 @@ impl PlatformStrategy for FallbackPlatform {
         _running_config_path: &Path,
     ) -> Vec<ConflictingProcessInfo> {
         Vec::new()
+    }
+
+    fn detect_resource_conflicts<'a>(
+        &'a self,
+        _running_config_path: &'a Path,
+        _exclude_pid: Option<u32>,
+    ) -> BoxFuture<'a, Vec<ResourceHolderInfo>> {
+        Box::pin(async move { Vec::new() })
+    }
+
+    fn describe_port_holder(&self, _port: u16) -> Option<String> {
+        None
+    }
+
+    fn port_probe_command(&self, _port: u16) -> String {
+        "检查端口占用".to_string()
     }
 
     fn kill_process<'a>(

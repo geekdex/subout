@@ -71,6 +71,25 @@ export interface KernelInfo {
   download_status?: KernelDownloadStatus;
 }
 
+export type ResourceConflictKind =
+  | "port"
+  | "tun_interface"
+  | "dns"
+  | "policy_route";
+
+/** 通用资源占用项：sing-box 所需资源被系统其他程序占用（不硬编码具体工具名）*/
+export interface ResourceConflict {
+  kind: ResourceConflictKind;
+  /** 资源标识，如 "127.0.0.1:2080" / "tun0" */
+  resource: string;
+  holder_pid?: number | null;
+  /** 反查到的真实进程名，如 "NodeBabyLinkService" */
+  holder_name?: string | null;
+  holder_cmdline?: string | null;
+  /** 证据来源，如 "ip -d link show" / "ss -tlnp" */
+  evidence: string;
+}
+
 export interface TakeoverDiagnoseResult {
   has_conflict: boolean;
   conflict_type: string;
@@ -82,6 +101,10 @@ export interface TakeoverDiagnoseResult {
   message?: string;
   pids?: number[];
   can_auto_takeover: boolean;
+  /** 通用资源占用列表（端口/TUN/DNS/路由）*/
+  resource_conflicts?: ResourceConflict[];
+  /** 是否允许显示「一键接管」按钮；组网工具冲突恒为 false，防止误杀 */
+  auto_takeover_allowed?: boolean;
 }
 
 export interface SiteProbeResponse {

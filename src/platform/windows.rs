@@ -2,7 +2,10 @@ use anyhow::Result;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::platform::{BoxFuture, PlatformStrategy};
+use crate::platform::{
+    BoxFuture, PlatformStrategy, ResourceConflictKind, ResourceHolderInfo,
+    collect_inbound_listeners,
+};
 use crate::service::ConflictingProcessInfo;
 
 pub struct WindowsPlatform;
@@ -101,6 +104,117 @@ impl PlatformStrategy for WindowsPlatform {
             let _ = pid;
             false
         }
+    }
+
+    fn port_probe_command(&self, port: u16) -> String {
+        if port == 0 {
+            "netstat -ano -p tcp".to_string()
+        } else {
+            format!("netstat -ano -p tcp | findstr :{port}")
+        }
+    }
+
+    fn describe_port_holder(&self, port: u16) -> Option<String> {
+        let out = std::process::Command::new("netstat")
+            .args(["-ano", "-p", "tcp"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 5 || parts[3] != "LISTENING" {
+                continue;
+            }
+            if !parts[1].ends_with(&format!(":{port}")) {
+                continue;
+            }
+            if let Ok(p) = parts[4].parse::<u32>()
+                && p != std::process::id()
+            {
+                let name = std::process::Command::new("powershell")
+                    .args([
+                        "-NoProfile",
+                        "-Command",
+                        &format!("(Get-CimInstance Win32_Process -Filter 'ProcessId={p}').Name"),
+                    ])
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .filter(|s| !s.is_empty());
+                let who = name.unwrap_or_else(|| "未知进程".to_string());
+                return Some(format!(
+                    "占用者：{who} (PID {p})，可用 `netstat -ano | findstr :{port}` 查看详情。"
+                ));
+            }
+        }
+        None
+    }
+
+    fn detect_resource_conflicts<'a>(
+        &'a self,
+        running_config_path: &'a Path,
+        exclude_pid: Option<u32>,
+    ) -> BoxFuture<'a, Vec<ResourceHolderInfo>> {
+        Box::pin(async move {
+            let config: Value = match std::fs::read_to_string(running_config_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+            {
+                Some(c) => c,
+                None => return Vec::new(),
+            };
+            let mut results = Vec::new();
+            for (listen, port) in collect_inbound_listeners(&config) {
+                // netstat -ano 列出所有连接的 PID；筛 LISTENING 且本地端口匹配
+                let output = std::process::Command::new("netstat")
+                    .args(["-ano", "-p", "tcp"])
+                    .output();
+                if let Ok(out) = output
+                    && out.status.success()
+                {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    for line in text.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() < 5 || parts[3] != "LISTENING" {
+                            continue;
+                        }
+                        let local = parts[1];
+                        if !local.ends_with(&format!(":{port}")) {
+                            continue;
+                        }
+                        if let Ok(p) = parts[4].parse::<u32>()
+                            && Some(p) != exclude_pid
+                            && p != std::process::id()
+                        {
+                            let name = std::process::Command::new("powershell")
+                                .args([
+                                    "-NoProfile",
+                                    "-Command",
+                                    &format!(
+                                        "(Get-CimInstance Win32_Process -Filter 'ProcessId={p}').Name"
+                                    ),
+                                ])
+                                .output()
+                                .ok()
+                                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                                .filter(|s| !s.is_empty());
+                            results.push(ResourceHolderInfo {
+                                kind: ResourceConflictKind::Port,
+                                resource: format!("{listen}:{port}"),
+                                holder_pid: Some(p),
+                                holder_name: name,
+                                holder_cmdline: None,
+                                evidence: "netstat -ano -p tcp".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+            results
+        })
     }
 
     fn detect_conflicting_processes(
@@ -326,6 +440,8 @@ impl PlatformStrategy for WindowsPlatform {
                     details: msg,
                     pids,
                     can_auto_takeover: true,
+                    resource_conflicts: Vec::new(),
+                    auto_takeover_allowed: true,
                 });
             }
 

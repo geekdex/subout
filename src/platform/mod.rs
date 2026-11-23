@@ -14,10 +14,38 @@ use serde::{Deserialize, Serialize};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// 被占用资源的类别：端口 / TUN 网卡 / DNS / 策略路由。
+/// 用于通用地描述"谁占了 sing-box 需要的资源"，不硬编码任何具体工具名。
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceConflictKind {
+    Port,
+    TunInterface,
+    Dns,
+    PolicyRoute,
+}
+
+/// 一个资源占用项：sing-box 需要的某个资源被系统中的其他程序占用。
+/// holder_* 为 None 表示反查失败（此时以 evidence 中的自查命令为准）。
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ResourceHolderInfo {
+    pub kind: ResourceConflictKind,
+    /// 被占用的资源标识，如 "127.0.0.1:2080" / "tun0" / "~." DNS / "table 2022"
+    pub resource: String,
+    pub holder_pid: Option<u32>,
+    /// 从 /proc/<pid>/comm 或等价手段读到的真实进程名
+    pub holder_name: Option<String>,
+    pub holder_cmdline: Option<String>,
+    /// 证据来源，如 "ss -tlnp" / "/proc/net/tcp inode" / "ip link" / "resolvectl status"
+    pub evidence: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TakeoverDiagnoseResult {
     pub has_conflict: bool,
-    pub conflict_type: Option<String>, // "systemd" | "launchd" | "respawn_script" | "running_processes"
+    /// "systemd" | "launchd" | "respawn_script" | "running_processes"
+    /// | "port_occupied_by_external" | "tun_interface_occupied" | "dns_takeover" | "policy_route_conflict"
+    pub conflict_type: Option<String>,
     pub conflict_name: Option<String>,
     pub suggestion_command: Option<String>,
     pub suggestion: Option<String>,
@@ -25,6 +53,18 @@ pub struct TakeoverDiagnoseResult {
     pub details: String,
     pub pids: Vec<u32>,
     pub can_auto_takeover: bool,
+    /// 通用资源占用（端口/TUN/DNS/路由）列表，与具体的 sing-box 进程冲突分开表达。
+    #[serde(default)]
+    pub resource_conflicts: Vec<ResourceHolderInfo>,
+    /// 是否允许显示"一键接管"按钮。组网工具冲突恒为 false，防止误杀用户正常使用的网络工具。
+    #[serde(default = "default_auto_takeover_allowed")]
+    pub auto_takeover_allowed: bool,
+}
+
+fn default_auto_takeover_allowed() -> bool {
+    // 老序列化数据（没有该字段）默认保持可接管，以兼容旧的外部 sing-box 冲突结果；
+    // 构造新结果时必须按冲突类型显式赋值。
+    true
 }
 
 impl TakeoverDiagnoseResult {
@@ -39,8 +79,50 @@ impl TakeoverDiagnoseResult {
             details: "系统环境正常，未发现外部 sing-box 进程或服务争抢端口。".to_string(),
             pids: Vec::new(),
             can_auto_takeover: false,
+            resource_conflicts: Vec::new(),
+            auto_takeover_allowed: true,
         }
     }
+}
+
+/// 从 sing-box 配置中提取所有需要绑定的 TCP 监听地址 (listen, port)。
+/// 供端口预检与各平台资源占用反查共用。
+pub fn collect_inbound_listeners(config: &Value) -> Vec<(String, u16)> {
+    let mut out = Vec::new();
+    let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) else {
+        return out;
+    };
+    for inbound in inbounds {
+        let Some(port) = inbound
+            .get("listen_port")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue; // tun 等无 TCP 端口的入站
+        };
+        if port == 0 || port > u16::MAX as u64 {
+            continue;
+        }
+        // skip_inbound 的入站实际不监听，避免误报
+        if inbound
+            .get("type")
+            .and_then(|t| t.as_str())
+            .map(|t| t == "tun")
+            .unwrap_or(false)
+        {
+            // tun 入站的 listen_port 语义不同，单独在 TUN 检测里处理
+            continue;
+        }
+        let listen = inbound
+            .get("listen")
+            .and_then(|l| l.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("0.0.0.0")
+            .to_string();
+        if !out.iter().any(|(l, p)| l == &listen && *p == port as u16) {
+            out.push((listen, port as u16));
+        }
+    }
+    out
 }
 
 pub fn get_config_path_variants(running_config_path: &Path) -> Vec<String> {
@@ -166,6 +248,19 @@ pub trait PlatformStrategy: Send + Sync {
         managed_pid: Option<u32>,
         running_config_path: &Path,
     ) -> Vec<ConflictingProcessInfo>;
+    /// 通用资源占用诊断：sing-box 需要的端口/TUN 网卡/DNS/路由是否被外部程序占用。
+    /// 按实际占用判定，不硬编码具体工具名；exclude_pid 用于排除 Subout 自己管理的进程。
+    fn detect_resource_conflicts<'a>(
+        &'a self,
+        running_config_path: &'a Path,
+        exclude_pid: Option<u32>,
+    ) -> BoxFuture<'a, Vec<ResourceHolderInfo>>;
+    /// 同步反查占用指定 TCP 端口的进程，返回用于错误提示的中文描述（含真实进程名/PID/命令）。
+    /// 各平台用各自最可靠的方式实现：Linux 读 /proc，macOS 用 lsof，Windows 用 netstat。
+    /// 返回 None 表示无法反查，调用方降级为自查命令提示。不硬编码任何工具名。
+    fn describe_port_holder(&self, port: u16) -> Option<String>;
+    /// 返回当前平台用于自查端口占用的一键复制命令（port=0 表示通用命令）。
+    fn port_probe_command(&self, port: u16) -> String;
     fn kill_process<'a>(
         &'a self,
         pid: u32,

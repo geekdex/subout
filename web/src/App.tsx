@@ -317,6 +317,7 @@ const AppContent: React.FC = () => {
             <DashboardView
               systemInfo={systemInfo}
               serviceStatus={serviceStatus}
+              takeoverDiagnose={takeoverDiagnose}
               configs={configs}
               runningProfile={runningProfile}
               onRefreshConfigs={loadAllData}

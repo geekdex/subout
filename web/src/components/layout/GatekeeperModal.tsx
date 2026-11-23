@@ -16,6 +16,7 @@ import {
   KernelInfo,
   KernelDownloadStatus,
   TakeoverDiagnoseResult,
+  ResourceConflict,
 } from "../../types/api";
 import { SudoModal } from "./SudoModal";
 import { formatBytes } from "../../utils/format";
@@ -59,19 +60,43 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
   const isKernelReady = kernelInfo?.ready ?? false;
   const hasConflict = takeoverDiagnose?.has_conflict ?? false;
 
+  const resourceKindLabel = (c: ResourceConflict) => {
+    switch (c.kind) {
+      case "port":
+        return "端口";
+      case "tun_interface":
+        return "TUN 网卡";
+      case "dns":
+        return "DNS";
+      case "policy_route":
+        return "策略路由";
+      default:
+        return "网络资源";
+    }
+  };
+
   // Conflict render block (reusable)
   const renderConflictBlock = (isStandaloneBanner = false) => {
     if (!hasConflict || !takeoverDiagnose) return null;
 
+    const conflictType = takeoverDiagnose.conflict_type;
     const conflictName =
       takeoverDiagnose.conflict_name ||
-      (takeoverDiagnose.conflict_type === "launchd"
+      (conflictType === "launchd"
         ? "macOS launchd 系统服务"
-        : takeoverDiagnose.conflict_type === "systemd"
+        : conflictType === "systemd"
           ? "Linux systemd 服务"
-          : takeoverDiagnose.conflict_type === "running_processes"
+          : conflictType === "running_processes"
             ? "外部独立 sing-box 进程"
-            : takeoverDiagnose.conflict_type);
+            : conflictType === "port_occupied_by_external"
+              ? "端口被外部程序占用"
+              : conflictType === "tun_interface_occupied"
+                ? "TUN 网卡被外部程序占用"
+                : conflictType === "dns_takeover"
+                  ? "DNS 被外部程序接管"
+                  : conflictType === "policy_route_conflict"
+                    ? "策略路由冲突"
+                    : conflictType);
 
     return (
       <div
@@ -88,7 +113,7 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
               <ShieldAlert className="w-5 h-5 sm:w-5.5 sm:h-5.5" />
             </div>
             <h3 className="text-sm font-bold text-slate-100 break-words">
-              检测到系统外部进程/服务冲突
+              检测到影响 sing-box 运行的系统冲突
             </h3>
             <Badge variant="danger" size="sm">
               {conflictName}
@@ -105,8 +130,45 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
             <p className="break-words break-all">
               {takeoverDiagnose.details ||
                 takeoverDiagnose.message ||
-                "系统中正有其他外部 sing-box 进程在运行，可能占用网络端口或 TUN 虚拟网卡。"}
+                "系统中有其他程序占用了 sing-box 需要的端口、网卡或 DNS，请按提示处理。"}
             </p>
+
+            {/* 通用资源占用列表：点名真实占用者（节点小宝/ZeroTier 等一律按真实进程名显示）*/}
+            {takeoverDiagnose.resource_conflicts &&
+              takeoverDiagnose.resource_conflicts.length > 0 && (
+                <ul className="space-y-1.5 mt-2">
+                  {takeoverDiagnose.resource_conflicts.map((c, idx) => (
+                    <li
+                      key={`${c.kind}-${c.resource}-${idx}`}
+                      className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="danger" size="sm">
+                          {resourceKindLabel(c)}
+                        </Badge>
+                        <span className="font-mono text-rose-200 break-all">
+                          {c.resource}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-slate-300 break-all">
+                        {c.holder_name
+                          ? `占用者：${c.holder_name}${c.holder_pid ? ` (PID ${c.holder_pid})` : ""}`
+                          : c.holder_pid
+                            ? `占用进程 PID ${c.holder_pid}`
+                            : "占用者未知"}
+                      </div>
+                      {c.holder_cmdline && (
+                        <div className="mt-0.5 text-slate-500 font-mono text-[11px] break-all">
+                          {c.holder_cmdline}
+                        </div>
+                      )}
+                      <div className="mt-0.5 text-slate-500 text-[11px]">
+                        依据：{c.evidence}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
             {takeoverDiagnose.suggestion && (
               <p className="text-amber-300/90 font-medium break-words break-all">
@@ -137,8 +199,10 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
             )}
           </div>
 
-          {/* Action Button: Full width on mobile, auto width on desktop */}
-          {takeoverDiagnose.can_auto_takeover && (
+          {/* Action Button: 仅当可安全接管外部 sing-box 时显示；
+              组网工具资源冲突 auto_takeover_allowed=false，禁止显示，避免误杀用户正常网络 */}
+          {takeoverDiagnose.can_auto_takeover &&
+            takeoverDiagnose.auto_takeover_allowed !== false && (
             <div className="pt-1 flex flex-col sm:flex-row justify-end">
               <Button
                 variant="danger"

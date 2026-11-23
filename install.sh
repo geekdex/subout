@@ -747,9 +747,12 @@ StateDirectory=subout
 LogsDirectory=subout
 RuntimeDirectory=subout
 
-# Grant network capabilities for TUN mode
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+# Grant network capabilities for TUN mode.
+# CAP_SYS_PTRACE / CAP_DAC_READ_SEARCH / CAP_DAC_OVERRIDE are required to resolve
+# which process holds a conflicting port by reading /proc/<pid>/fd (socket inode).
+# Without them, port/TUN conflict diagnosis can only report "unknown holder".
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
 
 [Install]
 WantedBy=multi-user.target

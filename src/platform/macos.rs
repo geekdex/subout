@@ -4,7 +4,10 @@ use anyhow::anyhow;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::platform::{BoxFuture, PlatformStrategy, get_config_path_variants};
+use crate::platform::{
+    BoxFuture, PlatformStrategy, ResourceConflictKind, ResourceHolderInfo,
+    collect_inbound_listeners, get_config_path_variants,
+};
 use crate::service::ConflictingProcessInfo;
 
 struct RawProc {
@@ -161,6 +164,105 @@ impl PlatformStrategy for MacOsPlatform {
             let _ = pid;
             false
         }
+    }
+
+    fn port_probe_command(&self, port: u16) -> String {
+        if port == 0 {
+            "sudo lsof -nP -iTCP -sTCP:LISTEN".to_string()
+        } else {
+            format!("sudo lsof -nP -iTCP:{port} -sTCP:LISTEN")
+        }
+    }
+
+    fn describe_port_holder(&self, port: u16) -> Option<String> {
+        // lsof 在 macOS 普遍可用；-F 输出便于解析
+        let filter = format!("-iTCP:{port}");
+        let output = std::process::Command::new("lsof")
+            .args(["-nP", &filter, "-sTCP:LISTEN", "-F"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut pid: Option<u32> = None;
+        let mut name: Option<String> = None;
+        // lsof -F 每条记录以 p 开头，随后跟 c（命令名）；取第一条记录的 PID 与命令名
+        for line in text.lines() {
+            if let Some(p) = line.strip_prefix('p') {
+                if pid.is_none() {
+                    pid = p.parse().ok();
+                } else {
+                    break; // 进入下一条记录
+                }
+            } else if let Some(c) = line.strip_prefix('c')
+                && pid.is_some()
+                && name.is_none()
+            {
+                name = Some(c.to_string());
+            }
+        }
+        match pid {
+            Some(p) if p != std::process::id() => {
+                let who = name.unwrap_or_else(|| "未知进程".to_string());
+                Some(format!(
+                    "占用者：{who} (PID {p})，可用 `lsof -nP -iTCP:{port} -sTCP:LISTEN` 查看详情。"
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    fn detect_resource_conflicts<'a>(
+        &'a self,
+        running_config_path: &'a Path,
+        exclude_pid: Option<u32>,
+    ) -> BoxFuture<'a, Vec<ResourceHolderInfo>> {
+        Box::pin(async move {
+            let config: Value = match std::fs::read_to_string(running_config_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+            {
+                Some(c) => c,
+                None => return Vec::new(),
+            };
+            let mut results = Vec::new();
+            for (listen, port) in collect_inbound_listeners(&config) {
+                // lsof 在 macOS 上普遍可用；-F 输出便于解析
+                let filter = format!("-iTCP:{port}");
+                let output = std::process::Command::new("lsof")
+                    .args(["-nP", &filter, "-sTCP:LISTEN", "-F"])
+                    .output();
+                if let Ok(out) = output
+                    && out.status.success()
+                {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    let mut pid: Option<u32> = None;
+                    let mut name: Option<String> = None;
+                    for line in text.lines() {
+                        if let Some(p) = line.strip_prefix('p') {
+                            pid = p.parse().ok();
+                        } else if let Some(c) = line.strip_prefix('c') {
+                            name = Some(c.to_string());
+                        }
+                    }
+                    if let Some(p) = pid
+                        && Some(p) != exclude_pid
+                        && p != std::process::id()
+                    {
+                        results.push(ResourceHolderInfo {
+                            kind: ResourceConflictKind::Port,
+                            resource: format!("{listen}:{port}"),
+                            holder_pid: Some(p),
+                            holder_name: name,
+                            holder_cmdline: None,
+                            evidence: "lsof -nP -iTCP:<port> -sTCP:LISTEN".to_string(),
+                        });
+                    }
+                }
+            }
+            results
+        })
     }
 
     fn detect_conflicting_processes(
@@ -644,6 +746,8 @@ impl PlatformStrategy for MacOsPlatform {
                     details: msg,
                     pids,
                     can_auto_takeover: true,
+                    resource_conflicts: Vec::new(),
+                    auto_takeover_allowed: true,
                 });
             }
 
@@ -675,6 +779,8 @@ impl PlatformStrategy for MacOsPlatform {
                     details: msg,
                     pids,
                     can_auto_takeover: true,
+                    resource_conflicts: Vec::new(),
+                    auto_takeover_allowed: true,
                 });
             }
 

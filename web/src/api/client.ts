@@ -209,9 +209,28 @@ export const api = {
     );
     const hasConflict = Boolean(raw.has_conflict);
     const conflictType = (raw.conflict_type as string) || "running_processes";
-    const canAuto = Boolean(
-      raw.can_auto_takeover ?? conflictType === "running_processes",
+    const resourceConflicts = Array.isArray(raw.resource_conflicts)
+      ? (raw.resource_conflicts as Array<Record<string, unknown>>).map((c) => ({
+          kind: (c.kind as "port" | "tun_interface" | "dns" | "policy_route") || "port",
+          resource: String(c.resource || ""),
+          holder_pid: c.holder_pid != null ? Number(c.holder_pid) : null,
+          holder_name: c.holder_name != null ? String(c.holder_name) : null,
+          holder_cmdline:
+            c.holder_cmdline != null ? String(c.holder_cmdline) : null,
+          evidence: String(c.evidence || ""),
+        }))
+      : [];
+    // 资源冲突里的 holder_pid 也合并进 pids，便于横幅统一展示 PID 标签
+    const mergedPids = Array.from(
+      new Set([
+        ...((raw.pids as number[]) || []),
+        ...resourceConflicts.map((c) => c.holder_pid).filter((p): p is number => p != null),
+      ]),
     );
+    // 仅这些类型允许一键接管；新的网络资源冲突类型一律不允许
+    const takeoverAllowedTypes = ["systemd", "launchd", "running_processes"];
+    const canAuto =
+      takeoverAllowedTypes.includes(conflictType) && Boolean(raw.can_auto_takeover ?? true);
     return {
       has_conflict: hasConflict,
       conflict_type: conflictType,
@@ -222,8 +241,13 @@ export const api = {
       suggestion:
         (raw.suggestion as string) || (raw.suggestion_command as string) || "",
       suggestion_command: (raw.suggestion_command as string) || undefined,
-      pids: (raw.pids as number[]) || [],
+      pids: mergedPids,
       can_auto_takeover: canAuto,
+      resource_conflicts: resourceConflicts,
+      auto_takeover_allowed:
+        raw.auto_takeover_allowed != null
+          ? Boolean(raw.auto_takeover_allowed)
+          : canAuto,
     };
   },
   async takeoverService(payload?: {

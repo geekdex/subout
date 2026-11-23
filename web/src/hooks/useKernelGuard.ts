@@ -47,6 +47,8 @@ export function useKernelGuard(enabled = true) {
   const downloadPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
+  // 冲突集合指纹：仅在"从无到有"时弹一次 toast，避免每 10 秒轮询重复打扰
+  const lastConflictFingerprintRef = useRef<string>("");
 
   const stopDownloadPolling = useCallback(() => {
     if (downloadPollTimerRef.current !== null) {
@@ -66,6 +68,22 @@ export function useKernelGuard(enabled = true) {
       ]);
       setKernelInfo(info);
       setTakeoverDiagnose(diag);
+
+      // 网络资源冲突（端口/TUN/DNS 被占用）从无到有时弹一次 toast。
+      // 指纹按"资源+占用者"生成，只有变化才提示，避免每 10 秒轮询重复打扰。
+      const rc = diag?.resource_conflicts ?? [];
+      const fingerprint = rc
+        .map((c) => `${c.kind}:${c.resource}:${c.holder_pid ?? ""}:${c.holder_name ?? ""}`)
+        .join("|");
+      if (fingerprint && fingerprint !== lastConflictFingerprintRef.current) {
+        const first = rc[0];
+        const who = first.holder_name
+          ? `${first.holder_name}${first.holder_pid ? ` (PID ${first.holder_pid})` : ""}`
+          : "未知程序";
+        error("检测到网络环境冲突", `${first.resource} 被 ${who} 占用，详见页面顶部提示`);
+      }
+      lastConflictFingerprintRef.current = fingerprint;
+
       memoryKernelCache = info;
       if (typeof window !== "undefined") {
         try {
@@ -81,7 +99,7 @@ export function useKernelGuard(enabled = true) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [error]);
 
   const pollDownloadStatus = useCallback(async () => {
     try {

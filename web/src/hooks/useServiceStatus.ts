@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api, ApiError } from "../api/client";
 import { ServiceStatus } from "../types/api";
 import { useToast } from "./useToast";
@@ -9,10 +9,18 @@ export function useServiceStatus(pollInterval = 3000, enabled = true) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const { success, error } = useToast();
+  // 记录上一次轮询的运行状态，用于检测后台崩溃（running: true -> false）
+  const prevRunningRef = useRef<boolean | null>(null);
 
   const fetchStatus = useCallback(async () => {
     try {
       const data = await api.getServiceStatus();
+      // 服务在后台崩溃时，启动 API 早已返回成功，只有轮询能感知。
+      // running 从 true 翻转为 false 且带 last_error 时弹一次提示。
+      if (prevRunningRef.current === true && !data.running && data.last_error) {
+        error("服务异常退出", data.last_error);
+      }
+      prevRunningRef.current = data.running;
       setStatus(data);
     } catch (err: unknown) {
       if (!(
@@ -24,7 +32,7 @@ export function useServiceStatus(pollInterval = 3000, enabled = true) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [error]);
 
   useEffect(() => {
     if (!enabled) return;

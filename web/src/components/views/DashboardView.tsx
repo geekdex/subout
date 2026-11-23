@@ -18,7 +18,13 @@ import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { Badge } from "../ui/Badge";
 import { formatBytes, formatDuration } from "../../utils/format";
-import { ServiceStatus, SystemInfo, ConfigProfile } from "../../types/api";
+import {
+  ServiceStatus,
+  SystemInfo,
+  ConfigProfile,
+  TakeoverDiagnoseResult,
+  ResourceConflict,
+} from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import { getErrorMessage } from "../../utils/format";
@@ -27,6 +33,7 @@ import { NavTab } from "../layout/Sidebar";
 interface DashboardViewProps {
   systemInfo: SystemInfo | null;
   serviceStatus: ServiceStatus | null;
+  takeoverDiagnose?: TakeoverDiagnoseResult | null;
   configs: ConfigProfile[];
   runningProfile: ConfigProfile | null;
   onRefreshConfigs: () => void;
@@ -36,6 +43,7 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   systemInfo,
   serviceStatus,
+  takeoverDiagnose,
   configs,
   runningProfile,
   onRefreshConfigs,
@@ -79,6 +87,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const isRunning = serviceStatus?.running ?? false;
   const hostOs = systemInfo?.host_os ?? "unknown";
   const isSimpleMode = (systemInfo?.app_mode ?? "simple") === "simple";
+  const resourceConflicts: ResourceConflict[] =
+    takeoverDiagnose?.resource_conflicts ?? [];
+  const hasResourceConflict = resourceConflicts.length > 0;
 
   // Filter configs matching host platform
   const eligibleConfigs = configs.filter((c) => c.platform === hostOs);
@@ -176,8 +187,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6">
-      {/* Safe conflict reminder */}
-      {!hideConflictTip && (
+      {/* 实际检测到网络资源冲突：动态横幅，常驻不可被"今日不再提示"隐藏 */}
+      {hasResourceConflict && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 text-xs text-rose-200">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <p className="font-semibold text-rose-300">
+                检测到影响 sing-box 运行的网络资源冲突
+              </p>
+              {resourceConflicts.map((c, idx) => (
+                <div key={`${c.kind}-${c.resource}-${idx}`} className="break-all">
+                  <span className="font-mono text-rose-200">{c.resource}</span>
+                  {" 被 "}
+                  {c.holder_name
+                    ? `${c.holder_name}${c.holder_pid ? ` (PID ${c.holder_pid})` : ""}`
+                    : c.holder_pid
+                      ? `PID ${c.holder_pid}`
+                      : "未知程序"}{" "}
+                  占用（依据：{c.evidence}）
+                </div>
+              ))}
+              <p className="text-rose-300/80 pt-1">
+                Subout 不会自动关闭这些程序或修改配置。请按冲突提示自行处理。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Safe conflict reminder（仅无实际冲突时的通用提醒，可按日忽略） */}
+      {!hasResourceConflict && !hideConflictTip && (
         <div className="bg-sky-500/10 border border-sky-500/20 rounded-xl p-4 flex items-center justify-between gap-3 text-xs text-sky-300">
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0" />

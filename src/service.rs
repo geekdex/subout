@@ -413,9 +413,43 @@ impl SingBoxServiceManager {
         &self,
     ) -> Result<crate::platform::TakeoverDiagnoseResult> {
         let managed_pid = self.get_managed_pid().await;
-        crate::platform::current_platform()
-            .diagnose_takeover_conflict(managed_pid)
-            .await
+        let platform = crate::platform::current_platform();
+        let mut result = platform.diagnose_takeover_conflict(managed_pid).await?;
+
+        // 合并通用资源占用诊断（端口/TUN/DNS/路由）。
+        // 按实际占用判定、不硬编码工具名；这些冲突一律不可一键接管，防止误杀组网工具。
+        let config_path = Self::get_running_config_path();
+        let resource_conflicts = platform
+            .detect_resource_conflicts(&config_path, managed_pid)
+            .await;
+        if !resource_conflicts.is_empty() {
+            let summary = format_resource_conflicts_summary(&resource_conflicts);
+            if result.has_conflict {
+                // 已有外部 sing-box 冲突：保留可接管语义，附加资源占用信息
+                result.details = format!("{}\n\n{summary}", result.details);
+                result.resource_conflicts = resource_conflicts;
+            } else {
+                // 无 sing-box 冲突、仅有资源占用：标记为冲突但禁止一键接管
+                let first_type = resource_conflict_type_label(&resource_conflicts[0].kind);
+                result.has_conflict = true;
+                result.conflict_type = Some(first_type.to_string());
+                result.conflict_name = Some("外部程序占用 sing-box 所需资源".to_string());
+                result.message = "检测到系统中的其他程序占用了 sing-box 运行所需的网络资源。".to_string();
+                result.details = summary;
+                result.pids = resource_conflicts
+                    .iter()
+                    .filter_map(|c| c.holder_pid)
+                    .collect();
+                result.can_auto_takeover = false;
+                result.auto_takeover_allowed = false;
+                result.suggestion = Some(
+                    "Subout 不会自动修改配置或关闭这些程序。请按占用者信息自行关闭相关程序，或在配置中改用其他端口/网卡。".to_string(),
+                );
+                result.suggestion_command = Some(resource_conflict_hint_command(&resource_conflicts));
+                result.resource_conflicts = resource_conflicts;
+            }
+        }
+        Ok(result)
     }
 
     pub async fn get_status(&self) -> ServiceStatusInfo {
@@ -922,6 +956,9 @@ impl SingBoxServiceManager {
         self.stop().await?;
 
         // 2. Handle conflicting external sing-box processes
+        //    安全约束：takeover 仅针对"外部 sing-box 进程"（见 detect_conflicting_processes），
+        //    绝不把端口/TUN 反查到的组网工具（节点小宝/ZeroTier 等）加入杀进程列表——
+        //    那是用户正常使用的网络工具，只能提示，不能终止。
         if takeover {
             self.takeover_external_processes(sudo_pass).await?;
         } else {
@@ -948,6 +985,14 @@ impl SingBoxServiceManager {
                 *self.last_error.write().await = Some(err_msg.clone());
                 return Err(anyhow!(err_msg));
             }
+        }
+
+        // 2.5 提前探测入站端口，避免 sing-box 加载完规则集后才因端口占用 FATAL
+        //     （此时 API 早已返回成功，前端无从感知崩溃）。
+        if let Err(e) = check_inbound_ports_available(config_json) {
+            self.append_log(&format!("❌ {e}")).await;
+            *self.last_error.write().await = Some(e.to_string());
+            return Err(e);
         }
 
         let paths = crate::paths::AppPaths::get();
@@ -1850,6 +1895,132 @@ pub fn get_mixed_port_from_config(config: &Value) -> Option<u16> {
     None
 }
 
+/// 在 spawn sing-box 之前探测配置里所有 TCP 入站端口是否可用。
+/// 端口被占用时立即报错：API 会返回错误从而触发前端 toast，
+/// 而不是等 sing-box 加载完规则集后才 FATAL 崩溃、前端却毫不知情。
+pub fn check_inbound_ports_available(config: &Value) -> Result<()> {
+    let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) else {
+        return Ok(());
+    };
+    for inbound in inbounds {
+        let Some(port) = inbound
+            .get("listen_port")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue; // tun 等无明显 TCP 端口的入站
+        };
+        let port = port as u16;
+        let listen = inbound
+            .get("listen")
+            .and_then(|l| l.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("0.0.0.0");
+
+        match std::net::TcpListener::bind((listen, port)) {
+            Ok(listener) => drop(listener),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                // 尝试反查真实占用者并点名（best-effort，失败则给出自查命令）
+                let holder_desc = describe_port_holder(port);
+                return Err(anyhow!(
+                    "入站端口 {listen}:{port} 已被占用，sing-box 无法启动。{holder_desc}请自行关闭占用程序或修改配置中的监听端口（Subout 不会自动更改你的配置）。"
+                ));
+            }
+            Err(e) => {
+                return Err(anyhow!("入站地址 {listen}:{port} 不可用: {e}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 将资源占用类别映射为冲突类型标识（与前端约定）。
+pub fn resource_conflict_type_label(kind: &crate::platform::ResourceConflictKind) -> &'static str {
+    use crate::platform::ResourceConflictKind;
+    match kind {
+        ResourceConflictKind::Port => "port_occupied_by_external",
+        ResourceConflictKind::TunInterface => "tun_interface_occupied",
+        ResourceConflictKind::Dns => "dns_takeover",
+        ResourceConflictKind::PolicyRoute => "policy_route_conflict",
+    }
+}
+
+/// 数据模型里的展示名称。
+fn resource_kind_display(kind: &crate::platform::ResourceConflictKind) -> &'static str {
+    use crate::platform::ResourceConflictKind;
+    match kind {
+        ResourceConflictKind::Port => "端口",
+        ResourceConflictKind::TunInterface => "TUN 网卡",
+        ResourceConflictKind::Dns => "DNS",
+        ResourceConflictKind::PolicyRoute => "策略路由",
+    }
+}
+
+/// 生成占用列表的可读摘要，用于诊断横幅的 details。
+pub fn format_resource_conflicts_summary(
+    conflicts: &[crate::platform::ResourceHolderInfo],
+) -> String {
+    let mut lines = Vec::new();
+    for c in conflicts {
+        let holder = match (&c.holder_name, c.holder_pid) {
+            (Some(n), Some(pid)) => match &c.holder_cmdline {
+                Some(cmd) => format!("{n} (PID {pid})，命令：{cmd}"),
+                None => format!("{n} (PID {pid})"),
+            },
+            (Some(n), None) => n.clone(),
+            (None, Some(pid)) => format!("PID {pid}"),
+            (None, None) => "占用者未知（请用下方命令自查）".to_string(),
+        };
+        lines.push(format!(
+            "· {} {} 被占用：{}（依据：{}）",
+            resource_kind_display(&c.kind),
+            c.resource,
+            holder,
+            c.evidence
+        ));
+    }
+    format!(
+        "检测到以下网络资源被其他程序占用：\n{}",
+        lines.join("\n")
+    )
+}
+
+/// 生成一键复制的排障命令（汇总去重）。命令按当前平台给出，避免把 Linux 命令显示给 Windows/macOS 用户。
+pub fn resource_conflict_hint_command(
+    conflicts: &[crate::platform::ResourceHolderInfo],
+) -> String {
+    use std::collections::BTreeSet;
+    // 排障命令随平台而异：统一通过平台策略生成，避免硬编码 ss/ip 命令
+    let mut cmds = BTreeSet::new();
+    for c in conflicts {
+        if c.kind == crate::platform::ResourceConflictKind::Port
+            && let Some(port) = c
+                .resource
+                .rsplit(':')
+                .next()
+                .and_then(|p| p.parse::<u16>().ok())
+        {
+            cmds.insert(crate::platform::current_platform().port_probe_command(port));
+        }
+    }
+    if cmds.is_empty() {
+        crate::platform::current_platform().port_probe_command(0)
+    } else {
+        cmds.into_iter().collect::<Vec<_>>().join("\n")
+    }
+}
+
+/// 反查占用指定端口的进程，生成用于错误提示的中文描述。
+/// 统一委托给平台策略：Linux 读 /proc、macOS 用 lsof、Windows 用 netstat。
+/// 不硬编码任何工具名——谁占用就报谁的真实进程名/PID/命令行。
+pub fn describe_port_holder(port: u16) -> String {
+    let platform = crate::platform::current_platform();
+    if let Some(desc) = platform.describe_port_holder(port) {
+        return desc;
+    }
+    // 平台无法反查时降级为自查命令
+    format!("可用 `{}` 查看占用者；", platform.port_probe_command(port))
+}
+
 pub fn get_tun_dns_ip_from_config(config: &Value) -> Option<String> {
     if let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) {
         for inbound in inbounds {
@@ -1978,6 +2149,92 @@ pub fn is_actual_singbox_error(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_check_inbound_ports_available_detects_occupied_port() {
+        // 临时占用一个端口，验证预检能识别出"已被占用"
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let occupied = serde_json::json!({
+            "inbounds": [
+                { "type": "mixed", "listen": "127.0.0.1", "listen_port": port }
+            ]
+        });
+        let err = check_inbound_ports_available(&occupied).unwrap_err();
+        assert!(
+            err.to_string().contains(&format!("{port}")),
+            "错误应包含被占用端口: {err}"
+        );
+
+        drop(listener);
+
+        // 用一个新分配的空闲端口验证"未被占用时可通过"。
+        // 重试数次规避并行测试竞争：分配后立即释放再检查，任一成功即可。
+        let mut passed = false;
+        for _ in 0..8 {
+            let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let free_port = free.local_addr().unwrap().port();
+            drop(free);
+            let free_config = serde_json::json!({
+                "inbounds": [
+                    { "type": "mixed", "listen": "127.0.0.1", "listen_port": free_port }
+                ]
+            });
+            if check_inbound_ports_available(&free_config).is_ok() {
+                passed = true;
+                break;
+            }
+        }
+        assert!(passed, "释放后的端口应能通过预检");
+    }
+
+    #[test]
+    fn test_check_inbound_ports_available_ignores_tun_and_empty_config() {
+        // tun 入站没有 listen_port，不应被预检误判
+        let tun = serde_json::json!({
+            "inbounds": [ { "type": "tun", "address": ["10.0.0.1/30"] } ]
+        });
+        assert!(check_inbound_ports_available(&tun).is_ok());
+        assert!(check_inbound_ports_available(&serde_json::json!({})).is_ok());
+    }
+
+    #[test]
+    fn test_resource_conflict_summary_and_hint() {
+        use crate::platform::{ResourceConflictKind, ResourceHolderInfo};
+        let conflicts = vec![
+            ResourceHolderInfo {
+                kind: ResourceConflictKind::Port,
+                resource: "127.0.0.1:2080".to_string(),
+                holder_pid: Some(1234),
+                holder_name: Some("NodeBabyLinkService".to_string()),
+                holder_cmdline: Some("./NodeBabyLinkService --peerid abc".to_string()),
+                evidence: "/proc/net/tcp inode:11111".to_string(),
+            },
+            ResourceHolderInfo {
+                kind: ResourceConflictKind::TunInterface,
+                resource: "tun0".to_string(),
+                holder_pid: None,
+                holder_name: None,
+                holder_cmdline: None,
+                evidence: "ip -d link show".to_string(),
+            },
+        ];
+        let summary = format_resource_conflicts_summary(&conflicts);
+        assert!(summary.contains("NodeBabyLinkService"), "应点名真实占用进程: {summary}");
+        assert!(summary.contains("127.0.0.1:2080"), "应含资源标识: {summary}");
+        assert!(summary.contains("PID 1234"), "应含 PID: {summary}");
+        assert_eq!(
+            resource_conflict_type_label(&ResourceConflictKind::Port),
+            "port_occupied_by_external"
+        );
+        let cmd = resource_conflict_hint_command(&conflicts);
+        assert!(cmd.contains("2080"), "应给出端口自查命令: {cmd}");
+        assert!(
+            cmd.contains("ss -tlnp") || cmd.contains("lsof") || cmd.contains("netstat"),
+            "应给出当前平台的端口自查命令: {cmd}"
+        );
+    }
 
     #[test]
     fn test_strip_ansi_codes() {
