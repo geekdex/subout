@@ -494,14 +494,16 @@ export const NodesView: React.FC<NodesViewProps> = ({
           )}
         </button>
       ),
-      className: "w-10 px-2 text-center",
+      className: "px-2 text-center",
+      colWidthClass: "w-[6%]",
       sticky: "left",
     },
     {
       key: "tag",
       header: "节点标识 (Tag)",
       sortable: true,
-      className: "w-[124px] px-2.5",
+      className: "px-2.5",
+      colWidthClass: "w-[20%]",
       render: (node) => (
         <div className="flex flex-col min-w-0">
           <span
@@ -520,7 +522,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "subscription",
       header: "所属订阅 / 来源",
       sortable: true,
-      className: "w-[110px] px-2.5",
+      className: "px-2.5",
+      colWidthClass: "w-[16%]",
       render: (node) => {
         if (node.is_custom) {
           return (
@@ -543,7 +546,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "node_type",
       header: "协议类型",
       sortable: true,
-      className: "w-[82px] px-2.5",
+      className: "px-2.5",
+      colWidthClass: "w-[10%]",
       render: (node) => (
         <Badge variant="neutral" size="sm">
           {node.node_type.toUpperCase()}
@@ -554,7 +558,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "server",
       header: "服务器与端口",
       sortable: true,
-      className: "w-[128px] px-2.5",
+      className: "px-2.5",
+      colWidthClass: "w-[18%]",
       render: (node) => (
         <span
           className="font-mono text-slate-300 truncate max-w-full inline-block align-bottom"
@@ -568,7 +573,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "latency_ms",
       header: "测速结果 / 测试点",
       sortable: true,
-      className: "w-[160px] px-2.5",
+      className: "px-2.5",
+      colWidthClass: "w-[30%]",
       render: (node) => {
         const testStatus = testingNodeMap[node.id];
         const isNodeTesting = testStatus === "testing" || testingId === node.id;
@@ -665,13 +671,14 @@ export const NodesView: React.FC<NodesViewProps> = ({
     {
       key: "actions",
       header: "操作",
-      className: "w-[96px] px-2.5 text-right sm:w-[236px]",
+      className: "px-2.5 text-right sm:px-4",
+      colWidthClass: "w-[140px] sm:w-[270px]",
       sticky: "right",
       render: (node) => {
         const isTestingThis =
           testingId === node.id || testingNodeMap[node.id] !== undefined;
         return (
-          <div className="flex items-center justify-end gap-1.5">
+          <div className="flex items-center justify-end gap-1">
             <Button
               variant="ghost"
               size="sm"

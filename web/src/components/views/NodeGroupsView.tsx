@@ -663,7 +663,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
           </>
         }
       >
-        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+        <div className="space-y-4">
           {/* Tag & Group Type */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input

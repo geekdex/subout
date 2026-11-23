@@ -94,7 +94,7 @@ export const Dialog: React.FC<DialogProps> = ({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
       {/* Backdrop */}
       <div
         className={clsx(
@@ -108,7 +108,7 @@ export const Dialog: React.FC<DialogProps> = ({
       <div
         className={twMerge(
           clsx(
-            "relative w-full max-h-[90dvh] overflow-y-auto bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-4 sm:p-6 z-10",
+            "relative flex flex-col w-full max-h-[90dvh] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-4 sm:p-6 z-10",
             isClosing ? "animate-dialog-out" : "animate-dialog-in",
             sizeClasses[size],
             className,
@@ -124,7 +124,7 @@ export const Dialog: React.FC<DialogProps> = ({
         </button>
 
         {title && (
-          <div className="mb-4 pr-6">
+          <div className="mb-4 pr-6 shrink-0">
             <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
             {description && (
               <p className="text-xs text-slate-400 mt-1">{description}</p>
@@ -132,10 +132,12 @@ export const Dialog: React.FC<DialogProps> = ({
           </div>
         )}
 
-        <div className="text-sm text-slate-200">{children}</div>
+        <div className="dialog-scroll text-sm text-slate-200 flex-1 min-h-0 overflow-y-auto">
+          {children}
+        </div>
 
         {footer && (
-          <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+          <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-slate-800 shrink-0">
             {footer}
           </div>
         )}

@@ -746,7 +746,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                 </div>
               </div>
 
-              <div className="relative max-h-[72vh] overflow-auto p-4 bg-slate-950">
+              <div className="relative overflow-x-auto overflow-y-hidden p-4 bg-slate-950">
                 <pre
                   data-testid="json-preview-content"
                   className="font-mono text-xs text-slate-200 leading-relaxed whitespace-pre select-text cursor-text"
@@ -774,7 +774,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
           </Button>
         }
       >
-        <ul className="max-h-[50vh] overflow-auto px-1">
+        <ul className="px-1">
           {sanitizations.map((change, idx) => (
             <SanitizeChangeRow key={`${change.path}-${idx}`} change={change} />
           ))}

@@ -13,6 +13,8 @@ export interface Column<T> {
   sticky?: "left" | "right";
   /** 固定列宽度（px），用于计算多个相邻固定列的偏移量 */
   stickyWidth?: number;
+  /** 固定布局下的列宽 class（作用于 <col>，如固定像素或百分比） */
+  colWidthClass?: string;
 }
 
 export interface TableProps<T> {
@@ -100,6 +102,13 @@ export function Table<T>({
           hasSticky ? "border-separate border-spacing-0" : "border-collapse",
         )}
       >
+        {fixedLayout && (
+          <colgroup>
+            {columns.map((col) => (
+              <col key={col.key} className={col.colWidthClass} />
+            ))}
+          </colgroup>
+        )}
         <thead>
           <tr
             className={clsx(
@@ -113,10 +122,14 @@ export function Table<T>({
                 <th
                   key={col.key}
                   style={getCellStyle(col, colIndex, true)}
+                  title={
+                    typeof col.header === "string" ? col.header : undefined
+                  }
                   onClick={() => col.sortable && onSort && onSort(col.key)}
                   className={twMerge(
                     clsx(
-                      "px-4 py-3 text-xs tracking-wider whitespace-nowrap",
+                      "px-4 py-3 text-xs tracking-wider",
+                      fixedLayout ? "whitespace-normal" : "whitespace-nowrap",
                       fixedLayout && "overflow-hidden text-ellipsis",
                       col.sortable &&
                         "cursor-pointer hover:text-slate-200 transition-colors",
