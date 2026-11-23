@@ -26,6 +26,9 @@ import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import { formatLatency, getErrorMessage } from "../../utils/format";
 
+// 与后端 groups.rs 的保留名校验保持一致（不区分大小写）
+const RESERVED_GROUP_TAGS = ["direct", "block", "dns-out"];
+
 interface NodeGroupsViewProps {
   groups: NodeGroup[];
   versionCode: string;
@@ -130,6 +133,29 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
     () => (Array.isArray(subscriptions) ? subscriptions : []),
     [subscriptions],
   );
+
+  // 实时 Tag 冲突校验：与后端 groups.rs 的 409/400 规则保持一致，
+  // 让用户在保存前就看到错误，而不是等一次往返后被泛化 Toast 打断。
+  const tagValidationError = useMemo(() => {
+    const trimmed = tag.trim();
+    if (!trimmed) return ""; // 空值由 handleSave 单独提示
+    const lowered = trimmed.toLowerCase();
+    if (RESERVED_GROUP_TAGS.includes(lowered)) {
+      return `出站 Tag 不能使用系统保留名称：'${trimmed}'`;
+    }
+    if (
+      groups.some(
+        (g) =>
+          (g.tag || "").toLowerCase() === lowered && g.id !== editingGroup?.id,
+      )
+    ) {
+      return `出站 Tag 名称必须唯一：'${trimmed}' 已存在于其他节点组合`;
+    }
+    if (safeNodes.some((n) => (n.tag || "").toLowerCase() === lowered)) {
+      return `出站 Tag 不能与节点重名：'${trimmed}' 已存在于节点池`;
+    }
+    return "";
+  }, [tag, groups, safeNodes, editingGroup]);
 
   const handleOpenCreate = () => {
     setEditingGroup(null);
@@ -258,6 +284,10 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   const handleSave = async () => {
     if (!tag.trim()) {
       error("请输入组合标识 (Tag)");
+      return;
+    }
+    if (tagValidationError) {
+      error("保存失败", tagValidationError);
       return;
     }
 
@@ -637,6 +667,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
               placeholder="例如: HK-Auto 或 常用专线"
               value={tag}
               onChange={(e) => setTag(e.target.value)}
+              error={tagValidationError}
             />
 
             <div className="space-y-1.5">

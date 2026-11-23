@@ -750,16 +750,6 @@ impl SingBoxServiceManager {
         let is_running = self.is_running().await;
         let db_path_opt = self.db_path.read().await.clone();
 
-        if let Some(ref path) = db_path_opt
-            && let Ok(conn) = rusqlite::Connection::open(path)
-        {
-            let _ = crate::db::update_setting(
-                &conn,
-                "system_proxy_enabled",
-                if enable { "true" } else { "false" },
-            );
-        }
-
         if enable {
             let running_config_path_buf = Self::get_running_config_path();
             let config_json = std::fs::read_to_string(&running_config_path_buf)
@@ -807,6 +797,18 @@ impl SingBoxServiceManager {
             if is_running {
                 self.append_log("🌐 已关闭系统网络代理").await;
             }
+        }
+
+        // 只在所有校验与实际操作都成功后才持久化开关，避免失败调用
+        // （如无可用端口、平台不支持）污染 get_status() 显示的状态。
+        if let Some(ref path) = db_path_opt
+            && let Ok(conn) = rusqlite::Connection::open(path)
+        {
+            let _ = crate::db::update_setting(
+                &conn,
+                "system_proxy_enabled",
+                if enable { "true" } else { "false" },
+            );
         }
 
         Ok(())
@@ -949,7 +951,9 @@ impl SingBoxServiceManager {
         }
 
         let paths = crate::paths::AppPaths::get();
-        let _ = paths.ensure_dirs();
+        paths
+            .ensure_dirs()
+            .map_err(|e| anyhow!("启动服务前目录校验失败: {e}"))?;
 
         let log_disabled = config_json
             .get("log")
@@ -2543,16 +2547,24 @@ mod tests {
         assert!(!status.system_proxy_enabled);
         assert!(!status.system_proxy_active);
 
-        // Turn on when no port configured -> should return error if no running config exists on disk
-        let running_config_path_buf = SingBoxServiceManager::get_running_config_path();
-        if !running_config_path_buf.exists() {
-            let err_res = mgr.set_system_proxy(true).await;
-            assert!(err_res.is_err());
-        }
-
-        // Configure simple config with mixed port
+        // 专业模式下无运行配置、base_config.inbounds 为空 -> 没有混合端口。
+        // 注意：不能再用"磁盘上没有运行配置文件"来构造无端口场景——小白模式
+        // 默认始终提供 mixed_port=2080（见 get_mixed_port_for_active_mode）。
         {
             let conn = rusqlite::Connection::open(&db_path).unwrap();
+            crate::db::update_setting(&conn, "app_mode", "expert").unwrap();
+        }
+        let err_res = mgr.set_system_proxy(true).await;
+        assert!(err_res.is_err());
+        // 失败调用不得污染持久化状态
+        let status_after_err = mgr.get_status().await;
+        assert!(!status_after_err.system_proxy_enabled);
+        assert!(!status_after_err.system_proxy_active);
+
+        // 切回小白模式并配置混合端口
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            crate::db::update_setting(&conn, "app_mode", "simple").unwrap();
             let mut simple_cfg = crate::simple_config::get_saved_simple_config(&conn);
             simple_cfg.inbound.inbound_type = "mixed".to_string();
             simple_cfg.inbound.mixed_port = 7890;

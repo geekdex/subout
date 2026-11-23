@@ -252,6 +252,24 @@ fn validate_platform_and_semantic_rules(
         }
     }
 
+    // 配置文件中的路径字段必须是相对路径（防止指向系统目录导致无权限/数据泄露）
+    if let Some(log) = root.get("log").and_then(Value::as_object)
+        && let Some(output) = log.get("output").and_then(Value::as_str)
+        && let Err(msg) = crate::paths::validate_config_relative_path(output, "log.output")
+    {
+        errors.push(msg);
+    }
+    if let Some(cache_file) = root
+        .get("experimental")
+        .and_then(|e| e.get("cache_file"))
+        .and_then(Value::as_object)
+        && let Some(path) = cache_file.get("path").and_then(Value::as_str)
+        && let Err(msg) =
+            crate::paths::validate_config_relative_path(path, "experimental.cache_file.path")
+    {
+        errors.push(msg);
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {

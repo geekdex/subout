@@ -65,6 +65,13 @@ pub async fn save_simple_config(
         SaveSimpleConfigPayload::Direct(cfg) => (cfg, Some(true), None, None),
     };
 
+    // 小白模式保存不能绕过专业模式的路径约束：log.output 只允许相对路径，
+    // 否则 root 运行时可能写到系统目录，非 root 运行时则启动失败。
+    if let Err(msg) = crate::paths::validate_config_relative_path(&config.log.output, "log.output")
+    {
+        return Err((StatusCode::BAD_REQUEST, msg));
+    }
+
     let generated = simple_config::generate_simple_singbox_config(&conn, &config)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成简单配置失败: {e}")))?;
 
@@ -167,6 +174,11 @@ pub async fn preview_simple_config(
     } else {
         simple_config::get_saved_simple_config(&conn)
     };
+
+    // 与保存路径使用同一套约束，避免预览通过而保存被拒的割裂体验。
+    if let Err(msg) = crate::paths::validate_config_relative_path(&cfg.log.output, "log.output") {
+        return Err((StatusCode::BAD_REQUEST, msg));
+    }
 
     let generated = simple_config::generate_simple_singbox_config(&conn, &cfg)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("生成预览失败: {e}")))?;

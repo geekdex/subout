@@ -192,15 +192,19 @@ async fn main() {
         return;
     }
 
-    // Initialize global paths with CLI overrides
-    subout::paths::AppPaths::init(
+    // Initialize global paths with CLI overrides. 目录校验失败必须可见且终止启动，
+    // 否则会在后续数据库/日志/配置写入处产生难以定位的连环错误。
+    if let Err(e) = subout::paths::AppPaths::init(
         args.config_dir.as_ref().map(std::path::PathBuf::from),
         args.data_dir.as_ref().map(std::path::PathBuf::from),
         args.log_dir.as_ref().map(std::path::PathBuf::from),
         args.runtime_dir.as_ref().map(std::path::PathBuf::from),
         args.kernel_path.as_ref().map(std::path::PathBuf::from),
         args.portable,
-    );
+    ) {
+        eprintln!("错误: 目录初始化失败: {e}");
+        std::process::exit(1);
+    }
 
     if args.web {
         if let Err(e) = subout::web::run_server(args.port).await {

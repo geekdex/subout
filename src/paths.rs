@@ -1,4 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
 static GLOBAL_PATHS: OnceLock<AppPaths> = OnceLock::new();
@@ -15,6 +16,85 @@ pub struct AppPaths {
     pub is_dev: bool,
 }
 
+/// 校验应用自身目录的路径形状：拒绝空路径、`..` 穿越与系统根目录本身。
+/// 注意：这里不禁止绝对路径——安装脚本会使用 /var/lib/subout 等绝对目录；
+/// 真正需要"相对路径"约束的是配置文件里的 `log.output` / `cache_file.path`（见
+/// `validate_config_relative_path`）。
+fn validate_app_dir(dir: &Path, label: &str) -> io::Result<()> {
+    const FORBIDDEN_ROOTS: &[&str] = &[
+        "",
+        "/",
+        "/etc",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/boot",
+        "/proc",
+        "/sys",
+        "/dev",
+        "/root",
+        "c:",
+        "c:\\windows",
+        "c:\\program files",
+        "c:\\program files (x86)",
+    ];
+
+    if dir.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{label} 不能为空"),
+        ));
+    }
+    if dir.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{label} 不能包含 '..' 目录穿越: {}", dir.display()),
+        ));
+    }
+    let lowered = dir.to_string_lossy().to_lowercase();
+    let root = lowered.trim_end_matches(['/', '\\']);
+    if FORBIDDEN_ROOTS.contains(&root) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{label} 不能直接使用系统目录 '{}'，请指定应用专属子目录（如 '{}/subout'）",
+                dir.display(),
+                dir.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// 校验 sing-box 配置文件中的路径字段（`log.output` / `experimental.cache_file.path`）。
+/// 只允许相对路径，拒绝绝对路径、`..` 穿越、Windows 盘符/UNC 与空字节。
+/// 错误消息可直接展示给用户。
+pub fn validate_config_relative_path(value: &str, field: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(()); // 未配置，使用默认值
+    }
+    if trimmed.contains('\0') {
+        return Err(format!("{field} 包含非法空字符"));
+    }
+    let path = Path::new(trimmed);
+    let bytes = trimmed.as_bytes();
+    let has_windows_drive = bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic();
+    if path.is_absolute()
+        || has_windows_drive
+        || trimmed.starts_with('/')
+        || trimmed.starts_with('\\')
+    {
+        return Err(format!(
+            "{field} 必须是相对路径（如 'cache.db' 或 'logs/subout.log'），当前为 '{trimmed}'。绝对路径可能指向系统目录，导致无权限或数据泄露"
+        ));
+    }
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(format!("{field} 不能包含 '..' 目录穿越: '{trimmed}'"));
+    }
+    Ok(())
+}
+
 impl AppPaths {
     /// Initialize global `AppPaths` with optional explicit CLI overrides.
     pub fn init(
@@ -24,7 +104,7 @@ impl AppPaths {
         cli_runtime_dir: Option<PathBuf>,
         cli_singbox_path: Option<PathBuf>,
         cli_portable: bool,
-    ) -> &'static AppPaths {
+    ) -> io::Result<&'static AppPaths> {
         let paths = Self::resolve(
             cli_config_dir,
             cli_data_dir,
@@ -33,18 +113,22 @@ impl AppPaths {
             cli_singbox_path,
             cli_portable,
         );
-        let _ = paths.ensure_dirs();
+        paths.ensure_dirs()?;
         let _ = GLOBAL_PATHS.set(paths);
-        GLOBAL_PATHS
+        Ok(GLOBAL_PATHS
             .get()
-            .expect("Global paths must be initialized")
+            .expect("Global paths must be initialized"))
     }
 
     /// Get the global `AppPaths` instance (or initialize with defaults if not already initialized).
     pub fn get() -> &'static AppPaths {
         GLOBAL_PATHS.get_or_init(|| {
             let paths = Self::resolve(None, None, None, None, None, false);
-            let _ = paths.ensure_dirs();
+            if let Err(e) = paths.ensure_dirs() {
+                // get_or_init 无法返回错误；此处必须显式失败并给出可操作提示，
+                // 绝不能让目录无权限的问题演变成后续难以定位的连环错误。
+                panic!("subout 目录初始化失败: {e}");
+            }
             paths
         })
     }
@@ -173,18 +257,51 @@ impl AppPaths {
         false
     }
 
-    /// Ensure required directories exist.
-    pub fn ensure_dirs(&self) -> std::io::Result<()> {
-        let _ = std::fs::create_dir_all(&self.data_dir);
-        let _ = std::fs::create_dir_all(&self.log_dir);
-        let _ = std::fs::create_dir_all(&self.runtime_dir);
-        let _ = std::fs::create_dir_all(self.kernel_dir());
-        let _ = std::fs::create_dir_all(self.generated_dir());
-        let _ = std::fs::create_dir_all(self.subscriptions_dir());
-        let _ = std::fs::create_dir_all(self.nodes_dir());
+    /// Ensure required directories exist AND are writable.
+    ///
+    /// 之前的实现吞掉了所有 `create_dir_all` 错误并永远返回 Ok，导致目录无权限时
+    /// 服务照常启动、随后在数据库/日志/生成配置处产生难以定位的连环错误。
+    /// 现在逐个创建并写入探针文件验证可写，失败即返回带路径与修复建议的错误。
+    pub fn ensure_dirs(&self) -> io::Result<()> {
+        Self::ensure_writable_dir(&self.data_dir, "数据目录")?;
+        Self::ensure_writable_dir(&self.log_dir, "日志目录")?;
+        Self::ensure_writable_dir(&self.runtime_dir, "运行时目录")?;
+        Self::ensure_writable_dir(&self.config_dir, "配置目录")?;
+        Self::ensure_writable_dir(&self.kernel_dir(), "内核目录")?;
+        Self::ensure_writable_dir(&self.generated_dir(), "生成配置目录")?;
+        Self::ensure_writable_dir(&self.subscriptions_dir(), "订阅缓存目录")?;
+        Self::ensure_writable_dir(&self.nodes_dir(), "节点目录")?;
+        Ok(())
+    }
 
-        // Attempt creating config_dir if writable
-        let _ = std::fs::create_dir_all(&self.config_dir);
+    fn ensure_writable_dir(dir: &Path, label: &str) -> io::Result<()> {
+        validate_app_dir(dir, label)?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!(
+                    "无法创建{label} '{}': {e}。请检查父目录权限，或通过 --data-dir/--config-dir/--log-dir/--runtime-dir 指定可写目录",
+                    dir.display()
+                ),
+            )
+        })?;
+
+        let probe = dir.join(format!(
+            ".subout-write-probe-{}-{}",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        ));
+        std::fs::write(&probe, b"ok")
+            .and_then(|()| std::fs::remove_file(&probe))
+            .map_err(|e| {
+                io::Error::new(
+                    e.kind(),
+                    format!(
+                        "{label} '{}' 不可写: {e}。请以有权限的用户运行，或调整目录权限",
+                        dir.display()
+                    ),
+                )
+            })?;
         Ok(())
     }
 
@@ -624,5 +741,72 @@ mod tests {
         assert!(is_version_ge("sing-box version 1.14.0", "1.13.0"));
         assert!(is_version_ge("sing-box version 1.12.0", "1.12.0"));
         assert!(!is_version_ge("sing-box version 1.11.8", "1.12.0"));
+    }
+
+    #[test]
+    fn test_validate_config_relative_path() {
+        // 允许：相对路径、空值（未配置走默认）
+        assert!(validate_config_relative_path("cache.db", "cache_file.path").is_ok());
+        assert!(validate_config_relative_path("logs/subout.log", "log.output").is_ok());
+        assert!(validate_config_relative_path("  ", "log.output").is_ok());
+
+        // 拒绝：Unix 绝对路径、Windows 盘符、UNC、`..` 穿越、空字节
+        for bad in [
+            "/etc/passwd",
+            "/var/log/subout.log",
+            "C:\\Windows\\Temp\\x.db",
+            "C:/x.db",
+            "\\\\server\\share\\x.db",
+            "../cache.db",
+            "logs/../../etc/x.log",
+            "cache\0.db",
+        ] {
+            assert!(
+                validate_config_relative_path(bad, "cache_file.path").is_err(),
+                "应拒绝非法路径: {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ensure_dirs_rejects_parent_traversal() {
+        let paths = AppPaths {
+            config_dir: PathBuf::from("../etc/subout"),
+            data_dir: PathBuf::from("/tmp/subout-test-traversal/data"),
+            log_dir: PathBuf::from("/tmp/subout-test-traversal/logs"),
+            runtime_dir: PathBuf::from("/tmp/subout-test-traversal/run"),
+            custom_singbox_path: None,
+            is_portable: false,
+            is_dev: true,
+        };
+        let err = paths.ensure_dirs().unwrap_err();
+        assert!(err.to_string().contains(".."), "错误信息应指出 '..': {err}");
+    }
+
+    #[test]
+    fn test_ensure_dirs_reports_unwritable_dir() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("subout_test_probe_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        // 用一个普通文件充当数据目录，create_dir_all 必然失败
+        let blocker = temp_dir.join("not-a-directory");
+        std::fs::write(&blocker, b"occupied").unwrap();
+
+        let paths = AppPaths {
+            config_dir: temp_dir.join("config"),
+            data_dir: blocker.clone(),
+            log_dir: temp_dir.join("logs"),
+            runtime_dir: temp_dir.join("run"),
+            custom_singbox_path: None,
+            is_portable: false,
+            is_dev: true,
+        };
+        let err = paths.ensure_dirs().unwrap_err();
+        assert!(
+            err.to_string().contains("数据目录") && err.to_string().contains("无法创建"),
+            "错误信息应含中文标签与修复建议: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

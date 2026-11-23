@@ -216,4 +216,102 @@ describe("NodeGroupsView Component", () => {
       );
     });
   });
+
+  describe("Tag 冲突实时校验", () => {
+    const openCreateModal = () => {
+      fireEvent.click(screen.getByRole("button", { name: /新建节点组合/i }));
+      return screen.getByPlaceholderText(/例如: HK-Auto 或 常用专线/i);
+    };
+
+    it("与已有节点组合重名（忽略大小写）时行内报错并阻止保存", () => {
+      renderWithToast(
+        <NodeGroupsView
+          groups={mockGroups}
+          versionCode="20261105220000"
+          nodes={mockNodes}
+          subscriptions={mockSubscriptions}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      const tagInput = openCreateModal();
+      fireEvent.change(tagInput, { target: { value: "hk-auto" } });
+
+      expect(screen.getByText(/已存在于其他节点组合/)).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: /保存组合/i }));
+      expect(api.createNodeGroup).not.toHaveBeenCalled();
+    });
+
+    it("与节点池中的节点重名（忽略大小写）时行内报错并阻止保存", () => {
+      renderWithToast(
+        <NodeGroupsView
+          groups={mockGroups}
+          versionCode="20261105220000"
+          nodes={mockNodes}
+          subscriptions={mockSubscriptions}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      const tagInput = openCreateModal();
+      fireEvent.change(tagInput, { target: { value: "HK-01-FAST" } });
+
+      expect(screen.getByText(/已存在于节点池/)).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: /保存组合/i }));
+      expect(api.createNodeGroup).not.toHaveBeenCalled();
+    });
+
+    it("使用系统保留名时行内报错并阻止保存", () => {
+      renderWithToast(
+        <NodeGroupsView
+          groups={mockGroups}
+          versionCode="20261105220000"
+          nodes={mockNodes}
+          subscriptions={mockSubscriptions}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      const tagInput = openCreateModal();
+      fireEvent.change(tagInput, { target: { value: "Direct" } });
+
+      expect(screen.getByText(/不能使用系统保留名称/)).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: /保存组合/i }));
+      expect(api.createNodeGroup).not.toHaveBeenCalled();
+    });
+
+    it("编辑组合时保留自身 Tag 不误报冲突，可正常保存", async () => {
+      (api.updateNodeGroup as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+      });
+
+      renderWithToast(
+        <NodeGroupsView
+          groups={mockGroups}
+          versionCode="20261105220000"
+          nodes={mockNodes}
+          subscriptions={mockSubscriptions}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getAllByTitle("编辑组合配置")[0]);
+      expect(screen.getByRole("heading", { name: "编辑节点组合" })).toBeDefined();
+
+      const tagInput = screen.getByPlaceholderText(/例如: HK-Auto 或 常用专线/i);
+      expect((tagInput as HTMLInputElement).value).toBe("HK-Auto");
+      expect(screen.queryByText(/已存在于其他节点组合/)).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: /保存组合/i }));
+      await waitFor(() => {
+        expect(api.updateNodeGroup).toHaveBeenCalledWith(
+          1,
+          expect.objectContaining({ tag: "HK-Auto" }),
+        );
+      });
+    });
+  });
 });
