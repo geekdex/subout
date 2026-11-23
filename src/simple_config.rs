@@ -316,17 +316,29 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
     let has_nodes = !proxy_node_tags.is_empty();
     let is_direct_all = cfg.route.mode == "direct_all";
 
+    // Reject unknown outbound choices instead of silently falling back to AUTO-Test.
+    // WYSIWYG: a value the user did not choose must never be substituted for theirs.
+    let chosen = cfg.route.default_outbound.trim();
+    let is_known = chosen == "direct"
+        || chosen == "proxy"
+        || chosen == "AUTO-Test"
+        || proxy_node_tags.iter().any(|t| t == chosen);
+    if !is_known {
+        anyhow::bail!(
+            "route.default_outbound: 出站 '{}' 不存在（可选: direct / proxy / AUTO-Test / 已启用节点），请重新选择",
+            chosen
+        );
+    }
+
     // Determine target proxy outbound
-    let target_proxy = if is_direct_all || cfg.route.default_outbound == "direct" || !has_nodes {
+    let target_proxy = if is_direct_all || chosen == "direct" || !has_nodes {
         "direct".to_string()
-    } else if cfg.route.default_outbound == "proxy" {
+    } else if chosen == "proxy" {
         "proxy".to_string()
-    } else if cfg.route.default_outbound == "AUTO-Test" {
+    } else if chosen == "AUTO-Test" {
         "AUTO-Test".to_string()
-    } else if proxy_node_tags.contains(&cfg.route.default_outbound) {
-        cfg.route.default_outbound.clone()
     } else {
-        "AUTO-Test".to_string()
+        chosen.to_string()
     };
 
     let dns_servers = if is_direct_all {
@@ -698,6 +710,18 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_unknown_default_outbound_is_rejected() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        let mut cfg = SimpleConfig::default();
+        cfg.route.default_outbound = "nonexistent-node".to_string();
+        let err = generate_simple_singbox_config(&conn, &cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("default_outbound"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn test_build_dns_server_types() {

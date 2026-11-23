@@ -616,4 +616,50 @@ describe("parseConfigToVisualState logical DNS rule normalization", () => {
       rule_set: ["geosite-geolocation-!cn"],
     });
   });
+
+  it("blocks saving when schema validation reports errors", async () => {
+    const onSaved = vi.fn();
+    vi.mocked(api.validateConfigSchema).mockResolvedValueOnce({
+      valid: false,
+      errors: ["dns.servers[0].server: 缺少 domain_resolver"],
+    } as never);
+
+    render(
+      <ToastProvider>
+        <ProfileEditor
+          profile={baseLinuxProfile}
+          onClose={vi.fn()}
+          onSaved={onSaved}
+        />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByText("保存配置"));
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/缺少 domain_resolver/).length,
+      ).toBeGreaterThan(0),
+    );
+    expect(api.updateConfig).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when schema validation itself throws", async () => {
+    vi.mocked(api.validateConfigSchema).mockRejectedValueOnce(
+      new Error("网络中断"),
+    );
+    render(
+      <ToastProvider>
+        <ProfileEditor
+          profile={baseLinuxProfile}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByText("保存配置"));
+    await waitFor(() =>
+      expect(screen.getAllByText(/网络中断/).length).toBeGreaterThan(0),
+    );
+    expect(api.updateConfig).not.toHaveBeenCalled();
+  });
 });

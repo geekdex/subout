@@ -483,14 +483,28 @@ pub async fn post_generated_config(
     Ok(Json(config))
 }
 
+/// Only genuinely environment-only failures (permissions for TUN / transparent proxy)
+/// may be tolerated. A config error that merely mentions "tun" is still a config error
+/// and must be surfaced to the user — never silently accepted.
 fn is_environment_error(err_msg: &str) -> bool {
     let lower = err_msg.to_lowercase();
-    lower.contains("auto-redirect")
-        || lower.contains("tun")
-        || lower.contains("permission denied")
+    let config_error = lower.contains("unknown field")
+        || lower.contains("decode config")
+        || lower.contains("invalid ")
+        || lower.contains("missing field")
+        || lower.contains("expected ");
+    if config_error {
+        return false;
+    }
+    let permission_issue = lower.contains("permission denied")
         || lower.contains("operation not permitted")
-        || lower.contains("tproxy")
         || lower.contains("privilege")
+        || lower.contains("capability");
+    let tun_related = lower.contains("tun")
+        || lower.contains("tproxy")
+        || lower.contains("auto-redirect")
+        || lower.contains("netns");
+    permission_issue && tun_related
 }
 
 pub async fn validate_full_config(
@@ -660,13 +674,7 @@ pub fn validate_config_with_singbox(
                 }
             }
         }
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Ok(())
-            } else {
-                Err(format!("执行 sing-box 校验失败: {e}"))
-            }
-        }
+        Err(e) => Err(format!("执行 sing-box 校验失败: {e}")),
     }
 }
 

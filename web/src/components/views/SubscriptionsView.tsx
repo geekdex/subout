@@ -41,6 +41,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   const [syncingId, setSyncingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Quick toggle and disable confirmation modal
   const [disableTargetSub, setDisableTargetSub] = useState<Subscription | null>(
@@ -180,7 +181,8 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!deleteConfirmId) return;
+    if (deleting || deleteConfirmId === null) return;
+    setDeleting(true);
     try {
       await api.deleteSubscription(deleteConfirmId);
       success("订阅已删除");
@@ -188,6 +190,8 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
       onRefresh();
     } catch (err: unknown) {
       error("删除失败", getErrorMessage(err));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -527,7 +531,13 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
             >
               取消
             </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete}>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={deleting}
+              loading={deleting}
+              onClick={handleDelete}
+            >
               确认删除
             </Button>
           </>

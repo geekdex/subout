@@ -278,6 +278,35 @@ describe("NodesView Component", () => {
     expect(screen.queryByText(/undefined/)).toBeNull();
   });
 
+  it("uses a fixed table layout with a minimum width", () => {
+    const { container } = renderWithToast(
+      <NodesView nodes={mockNodes} onRefresh={vi.fn()} />,
+    );
+
+    const table = container.querySelector("table") as HTMLTableElement;
+    expect(table.className).toContain("table-fixed");
+    expect(table.style.minWidth).toBe("880px");
+  });
+
+  it("pins the select and action columns while other columns scroll", () => {
+    const { container } = renderWithToast(
+      <NodesView nodes={mockNodes} onRefresh={vi.fn()} />,
+    );
+
+    const headers = container.querySelectorAll<HTMLElement>("thead th");
+    const selectHeader = headers[0];
+    const actionsHeader = headers[headers.length - 1];
+
+    expect(selectHeader.style.position).toBe("sticky");
+    expect(
+      selectHeader.style.left === "0px" || selectHeader.style.left === "0",
+    ).toBe(true);
+    expect(actionsHeader.style.position).toBe("sticky");
+    expect(
+      actionsHeader.style.right === "0px" || actionsHeader.style.right === "0",
+    ).toBe(true);
+  });
+
   it("renders subscription column and custom node badge", () => {
     renderWithToast(
       <NodesView

@@ -156,6 +156,18 @@ fn validate_platform_and_semantic_rules(
                         }
                     }
 
+                    if plat == "windows"
+                        && inb_obj
+                            .get("interface_name")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            == Some("tun0")
+                    {
+                        errors.push(format!(
+                            "inbounds[{idx}].interface_name: Windows 平台 TUN 网卡不能命名为 'tun0'，请改为 'subout-tun' 或留空由系统自动分配"
+                        ));
+                    }
+
                     if plat != "android" {
                         for key in ["include_package", "exclude_package", "include_android_user"] {
                             if has_non_empty_field(inb_obj, key) {
@@ -214,6 +226,8 @@ fn validate_platform_and_semantic_rules(
     }
 
     // 2. Explicit sing-box 1.14 semantic checks
+    validate_config_semantics(root, &mut errors);
+
     if let Some(servers) = root
         .get("dns")
         .and_then(|d| d.get("servers"))
@@ -274,6 +288,90 @@ fn validate_platform_and_semantic_rules(
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+/// Validates cross-field semantics that cannot be expressed by the official JSON Schema.
+///
+/// Every finding is a field-named error that the user must fix themselves. This is the
+/// counterpart to the WYSIWYG rule: the program never injects a DNS server, resolver,
+/// strategy, or any other value on the user's behalf — it reports what is missing.
+fn validate_config_semantics(root: &serde_json::Map<String, Value>, errors: &mut Vec<String>) {
+    let dns_servers = root
+        .get("dns")
+        .and_then(|d| d.get("servers"))
+        .and_then(Value::as_array);
+
+    let has_tun = root
+        .get("inbounds")
+        .and_then(Value::as_array)
+        .is_some_and(|arr| {
+            arr.iter()
+                .any(|i| i.get("type").and_then(Value::as_str) == Some("tun"))
+        });
+
+    if let Some(servers) = dns_servers {
+        for (idx, srv) in servers.iter().enumerate() {
+            let Some(obj) = srv.as_object() else {
+                continue;
+            };
+            let srv_type = obj.get("type").and_then(Value::as_str).unwrap_or_default();
+
+            // `local` DNS relies on the system resolver. With a TUN inbound this can
+            // loop back through the tunnel instead of reaching the real system DNS.
+            // Previously the generator silently rewrote it to udp/223.5.5.5 — instead,
+            // require the user to choose an explicit upstream.
+            if has_tun && srv_type == "local" {
+                errors.push(format!(
+                    "dns.servers[{idx}].type: 使用 TUN 入站时 'local' DNS 会与隧道形成回环；请改用明确的 upstream DNS 服务器（如 udp / https / tls 类型）并填写 server 地址"
+                ));
+            }
+
+            // A DNS server whose address is a hostname needs a domain resolver.
+            // Without one on the server itself, route.default_domain_resolver is required.
+            let has_own_resolver = obj.contains_key("domain_resolver");
+            let needs_default_resolver = obj
+                .get("server")
+                .and_then(Value::as_str)
+                .filter(|addr| !addr.trim().is_empty())
+                .is_some_and(|addr| {
+                    let host = addr.rsplit_once(':').map_or(addr, |(h, _)| h);
+                    host.parse::<IpAddr>().is_err()
+                });
+            if srv_type != "fakeip" && needs_default_resolver && !has_own_resolver {
+                let has_default_resolver = root
+                    .get("route")
+                    .and_then(|r| r.get("default_domain_resolver"))
+                    .is_some_and(|v| !v.is_null());
+                if !has_default_resolver {
+                    errors.push(format!(
+                        "dns.servers[{idx}].server: 该 DNS 服务器使用域名地址，但未配置 domain_resolver；请在服务器条目上设置 domain_resolver，或在 route.default_domain_resolver 中指定解析器"
+                    ));
+                }
+            }
+        }
+    }
+
+    // Strategy groups with no members are invalid at runtime. Previously empty groups
+    // were silently filled with "direct"; require the user to fix the group instead.
+    if let Some(outbounds) = root.get("outbounds").and_then(Value::as_array) {
+        for (idx, outbound) in outbounds.iter().enumerate() {
+            let Some(obj) = outbound.as_object() else {
+                continue;
+            };
+            if matches!(
+                obj.get("type").and_then(Value::as_str),
+                Some("selector" | "urltest" | "url-test" | "fallback" | "loadbalance")
+            ) && obj
+                .get("outbounds")
+                .and_then(Value::as_array)
+                .is_none_or(|m| m.is_empty())
+            {
+                errors.push(format!(
+                    "outbounds[{idx}].outbounds: 策略组成员为空；请至少添加一个成员，或移除该策略组"
+                ));
+            }
+        }
     }
 }
 
@@ -607,9 +705,13 @@ fn validate_node(
                 errors.push(format!("{path}: 不符合 oneOf 规范定义"));
             }
         } else {
-            for props in matched_props {
-                evaluated_props.extend(props);
-            }
+            // JSON Schema `oneOf` requires EXACTLY one matching branch. Silently
+            // accepting multiple matches lets ambiguous configs through, which
+            // can change meaning across kernel versions. Fail closed instead.
+            errors.push(format!(
+                "{path}: 同时匹配 {} 个 oneOf 分支，配置有歧义，请检查互斥字段",
+                matched_props.len()
+            ));
         }
     }
 
@@ -1053,5 +1155,53 @@ mod tests {
                 .iter()
                 .any(|e| e.contains("http_clients[0].detour"))
         );
+    }
+
+    #[test]
+    fn test_local_dns_with_tun_is_rejected() {
+        let cfg = json!({
+            "inbounds": [{ "type": "tun", "tag": "tun-in" }],
+            "dns": { "servers": [{ "type": "local", "tag": "local" }] }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(errors.iter().any(|e| e.contains("dns.servers[0].type")));
+    }
+
+    #[test]
+    fn test_domain_dns_server_without_resolver_is_rejected() {
+        let cfg = json!({
+            "dns": { "servers": [{ "type": "https", "tag": "dns-remote", "server": "dns.example.com" }] }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(errors.iter().any(|e| e.contains("dns.servers[0].server")));
+
+        let with_default = json!({
+            "dns": { "servers": [{ "type": "https", "tag": "dns-remote", "server": "dns.example.com" }] },
+            "route": { "default_domain_resolver": { "server": "dns-remote" } }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(with_default.as_object().unwrap(), &mut errors);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_windows_tun0_interface_name_is_rejected() {
+        let cfg = json!({
+            "inbounds": [{ "type": "tun", "interface_name": "tun0" }]
+        });
+        let errs = validate_singbox_config_for_platform(&cfg, Some("windows")).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("interface_name")));
+    }
+
+    #[test]
+    fn test_empty_strategy_group_is_rejected() {
+        let cfg = json!({
+            "outbounds": [{ "type": "selector", "tag": "proxy", "outbounds": [] }]
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(errors.iter().any(|e| e.contains("outbounds[0].outbounds")));
     }
 }

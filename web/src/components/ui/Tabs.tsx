@@ -30,7 +30,7 @@ export const Tabs: React.FC<TabsProps> = ({
       <div
         className={twMerge(
           clsx(
-            "flex gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl",
+            "flex flex-wrap gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl",
             className,
           ),
         )}
@@ -65,7 +65,10 @@ export const Tabs: React.FC<TabsProps> = ({
     return (
       <div
         className={twMerge(
-          clsx("flex border-b border-slate-800 gap-6", className),
+          clsx(
+            "flex flex-wrap border-b border-slate-800 gap-x-6 gap-y-1",
+            className,
+          ),
         )}
       >
         {tabs.map((tab) => {

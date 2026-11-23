@@ -97,6 +97,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
 
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // Speed test endpoint state, persisted in localStorage safely
   const [selectedEndpointUrl, setSelectedEndpointUrl] = useState<string>(() => {
@@ -493,15 +494,22 @@ export const NodesView: React.FC<NodesViewProps> = ({
           )}
         </button>
       ),
-      className: "w-10 text-center",
+      className: "w-10 px-2 text-center",
+      sticky: "left",
     },
     {
       key: "tag",
       header: "节点标识 (Tag)",
       sortable: true,
+      className: "w-[124px] px-2.5",
       render: (node) => (
-        <div className="flex flex-col">
-          <span className="font-semibold text-slate-100">{node.tag}</span>
+        <div className="flex flex-col min-w-0">
+          <span
+            className="font-semibold text-slate-100 truncate max-w-full"
+            title={node.tag}
+          >
+            {node.tag}
+          </span>
           <span className="text-[11px] text-slate-500 font-mono">
             ID: {node.id}
           </span>
@@ -512,6 +520,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "subscription",
       header: "所属订阅 / 来源",
       sortable: true,
+      className: "w-[110px] px-2.5",
       render: (node) => {
         if (node.is_custom) {
           return (
@@ -522,7 +531,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
         }
         return (
           <span
-            className="text-xs text-slate-300 font-medium truncate max-w-[140px] inline-block"
+            className="text-xs text-slate-300 font-medium truncate max-w-full inline-block align-bottom"
             title={node.subscription_label || "未知订阅"}
           >
             {node.subscription_label || "未知订阅"}
@@ -534,6 +543,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "node_type",
       header: "协议类型",
       sortable: true,
+      className: "w-[82px] px-2.5",
       render: (node) => (
         <Badge variant="neutral" size="sm">
           {node.node_type.toUpperCase()}
@@ -544,8 +554,12 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "server",
       header: "服务器与端口",
       sortable: true,
+      className: "w-[128px] px-2.5",
       render: (node) => (
-        <span className="font-mono text-slate-300">
+        <span
+          className="font-mono text-slate-300 truncate max-w-full inline-block align-bottom"
+          title={`${node.server}:${node.port}`}
+        >
           {node.server}:{node.port}
         </span>
       ),
@@ -554,6 +568,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       key: "latency_ms",
       header: "测速结果 / 测试点",
       sortable: true,
+      className: "w-[160px] px-2.5",
       render: (node) => {
         const testStatus = testingNodeMap[node.id];
         const isNodeTesting = testStatus === "testing" || testingId === node.id;
@@ -632,7 +647,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
                 className="flex items-center gap-1 text-[11px] text-slate-400"
                 title={`测试点: ${endpointName}\n目标 URL: ${node.last_target_url || "-"}\n测试时间: ${node.last_tested_at}`}
               >
-                <span className="text-slate-300 font-medium truncate max-w-[130px]">
+                <span className="text-slate-300 font-medium truncate max-w-full">
                   {endpointName}
                 </span>
                 <span className="text-slate-600">·</span>
@@ -650,7 +665,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
     {
       key: "actions",
       header: "操作",
-      className: "text-right",
+      className: "w-[96px] px-2.5 text-right sm:w-[236px]",
+      sticky: "right",
       render: (node) => {
         const isTestingThis =
           testingId === node.id || testingNodeMap[node.id] !== undefined;
@@ -666,9 +682,10 @@ export const NodesView: React.FC<NodesViewProps> = ({
                 setDetailModalOpen(true);
               }}
               icon={<Eye className="w-3.5 h-3.5 text-sky-400" />}
+              className="px-1.5 sm:px-2.5"
               title="查看节点详情与配置 JSON"
             >
-              详情
+              <span className="hidden sm:inline">详情</span>
             </Button>
             <Button
               variant="ghost"
@@ -679,9 +696,10 @@ export const NodesView: React.FC<NodesViewProps> = ({
                 setEditorModalOpen(true);
               }}
               icon={<Pencil className="w-3.5 h-3.5 text-amber-400" />}
+              className="px-1.5 sm:px-2.5"
               title="编辑节点配置"
             >
-              编辑
+              <span className="hidden sm:inline">编辑</span>
             </Button>
             <Button
               variant="ghost"
@@ -690,28 +708,34 @@ export const NodesView: React.FC<NodesViewProps> = ({
               disabled={testingBatchActive || serviceRunning}
               onClick={() => handleTestLatency(node)}
               icon={<Zap className="w-3.5 h-3.5" />}
+              className="px-1.5 sm:px-2.5"
               title={
                 serviceRunning
                   ? "sing-box 正在运行，请先停止服务后再测速"
                   : `使用当前测试点 [${currentEndpoint.name}] 测速`
               }
             >
-              测速
+              <span className="hidden sm:inline">测速</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              disabled={testingBatchActive}
+              disabled={testingBatchActive || deletingId !== null}
+              loading={deletingId === node.id}
               onClick={async () => {
+                if (deletingId !== null) return;
+                setDeletingId(node.id);
                 try {
                   await api.deleteNode(node.id);
                   success("节点已删除");
                   onRefresh();
                 } catch (err: unknown) {
                   error("删除失败", getErrorMessage(err));
+                } finally {
+                  setDeletingId(null);
                 }
               }}
-              className="text-rose-400 hover:text-rose-300"
+              className="px-1.5 text-rose-400 hover:text-rose-300 sm:px-2.5"
               title="删除节点"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -966,6 +990,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
         sortKey={sortKey}
         sortDirection={sortDirection}
         onSort={handleSort}
+        fixedLayout
+        minWidth={880}
       />
 
       {/* Pagination Bar */}

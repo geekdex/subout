@@ -127,6 +127,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   ];
 
   const handleRunSiteTest = async () => {
+    if (siteTesting) return;
     setSiteTesting(true);
 
     // Set all to testing state for dynamic progress indicators

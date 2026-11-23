@@ -55,6 +55,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
     null,
   );
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const { success, error } = useToast();
   const hostOs = systemInfo?.host_os ?? "unknown";
@@ -101,6 +102,9 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
   };
 
   const handleResetToken = async (id: number) => {
+    const key = `reset:${id}`;
+    if (busyAction) return;
+    setBusyAction(key);
     try {
       const res = await api.resetConfigToken(id);
       success(
@@ -110,10 +114,13 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       onRefresh();
     } catch (err: unknown) {
       error("重置 Token 失败", getErrorMessage(err));
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const handleSetRunning = async (profile: ConfigProfile) => {
+    if (busyAction) return;
     if (profile.platform !== hostOs) {
       error(
         "平台不兼容",
@@ -121,17 +128,21 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       );
       return;
     }
+    setBusyAction(`running:${profile.id}`);
     try {
       await api.setRunningConfig(profile.id);
       success("已设为本机运行配置");
       onRefresh();
     } catch (err: unknown) {
       error("设置失败", getErrorMessage(err));
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const handleDelete = async () => {
-    if (!deleteConfirmId) return;
+    if (busyAction || deleteConfirmId === null) return;
+    setBusyAction("delete");
     try {
       await api.deleteConfig(deleteConfirmId);
       success("配置已删除");
@@ -139,6 +150,8 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
       onRefresh();
     } catch (err: unknown) {
       error("删除失败", getErrorMessage(err));
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -268,6 +281,8 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                   <Button
                     variant="ghost"
                     size="sm"
+                    disabled={busyAction !== null}
+                    loading={busyAction === `reset:${p.id}`}
                     onClick={() => handleResetToken(p.id)}
                     icon={<RotateCw className="w-3.5 h-3.5" />}
                     title="重置订阅 Token"
@@ -280,6 +295,7 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                       size="sm"
                       onClick={() => setDeleteConfirmId(p.id)}
                       className="text-rose-400 hover:text-rose-300"
+                      title="删除配置"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
@@ -290,7 +306,8 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
                   <Button
                     variant={isCompatible ? "secondary" : "ghost"}
                     size="sm"
-                    disabled={!isCompatible}
+                    disabled={!isCompatible || busyAction !== null}
+                    loading={busyAction === `running:${p.id}`}
                     onClick={() => handleSetRunning(p)}
                     icon={<Check className="w-3.5 h-3.5" />}
                     title={
@@ -389,7 +406,13 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
             >
               取消
             </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete}>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={busyAction !== null}
+              loading={busyAction === "delete"}
+              onClick={handleDelete}
+            >
               确认删除
             </Button>
           </>

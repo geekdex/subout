@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::platform::{BoxFuture, PlatformStrategy};
@@ -462,14 +462,10 @@ impl PlatformStrategy for WindowsPlatform {
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
+            // auto_redirect is a Linux-only feature; removing it is a platform
+            // capability translation. interface_name is left exactly as the user
+            // wrote it — an invalid name is reported by validation, not rewritten.
             obj.remove("auto_redirect");
-            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun
-                && let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
-                && iface == "tun0"
-            {
-                obj.insert("interface_name".to_string(), json!("subout-tun"));
-            }
         }
     }
 

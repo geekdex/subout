@@ -236,12 +236,10 @@ const LOGICAL_DNS_RULE_PARENT_FIELDS: &[&str] = &[
 
 /// Normalizes one DNS rule in place.
 ///
-/// - Logical rules: leaf-only condition fields are moved from the parent into a
-///   nested child rule (preserving their intent) so the config decodes cleanly.
-///   They are never given a top-level `query_type`.
-/// - Plain rules: when they resolve via a fakeip server, add `query_type` so only
-///   A/AAAA queries receive fake IPs, avoiding HTTPS/SVCB pollution.
-fn normalize_dns_rule(rule: &mut Value, fakeip_tags: &HashSet<String>, top_level: bool) {
+/// Logical rules: leaf-only condition fields are moved from the parent into a
+/// nested child rule (preserving their intent) so the config decodes cleanly.
+/// This is a pure format translation — no fields are added to the user's config.
+fn normalize_dns_rule(rule: &mut Value) {
     let Some(rule_obj) = rule.as_object_mut() else {
         return;
     };
@@ -271,18 +269,10 @@ fn normalize_dns_rule(rule: &mut Value, fakeip_tags: &HashSet<String>, top_level
         }
         if let Some(children) = rule_obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
             for child in children.iter_mut() {
-                normalize_dns_rule(child, fakeip_tags, false);
+                normalize_dns_rule(child);
             }
         }
         return;
-    }
-
-    if top_level
-        && let Some(srv) = rule_obj.get("server").and_then(|s| s.as_str())
-        && fakeip_tags.contains(srv)
-        && !rule_obj.contains_key("query_type")
-    {
-        rule_obj.insert("query_type".to_string(), json!(["A", "AAAA"]));
     }
 }
 
@@ -291,46 +281,21 @@ pub fn sanitize_dns_value(dns: &mut Value) {
         // `independent_cache` is deprecated in sing-box 1.14.0 and removed in 1.16.0
         obj.remove("independent_cache");
 
-        if !obj.contains_key("strategy")
-            || obj
-                .get("strategy")
-                .and_then(|s| s.as_str())
-                .is_none_or(|s| s.trim().is_empty())
-        {
-            obj.insert("strategy".to_string(), json!("prefer_ipv4"));
-        }
-        let is_ipv4_only = obj
-            .get("strategy")
-            .and_then(|s| s.as_str())
-            .is_some_and(|s| s == "ipv4_only");
-        let mut fakeip_tags = HashSet::new();
         if let Some(servers) = obj.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for server in servers {
-                if let Some(srv_obj) = server.as_object_mut() {
+                if let Some(srv_obj) = server.as_object_mut()
+                    && srv_obj.get("detour").and_then(|d| d.as_str()) == Some("direct")
+                {
                     // Detouring to an empty direct outbound triggers sing-box fatal error
-                    if srv_obj.get("detour").and_then(|d| d.as_str()) == Some("direct") {
-                        srv_obj.remove("detour");
-                    }
-                    if srv_obj.get("type").and_then(|t| t.as_str()) == Some("fakeip") {
-                        if let Some(tag) = srv_obj.get("tag").and_then(|t| t.as_str()) {
-                            fakeip_tags.insert(tag.to_string());
-                        }
-                        if !srv_obj.contains_key("inet4_range") {
-                            srv_obj.insert("inet4_range".to_string(), json!("198.18.0.0/15"));
-                        }
-                        if !is_ipv4_only && !srv_obj.contains_key("inet6_range") {
-                            srv_obj.insert("inet6_range".to_string(), json!("fc00::/18"));
-                        }
-                    }
+                    srv_obj.remove("detour");
                 }
             }
         }
-        // Always normalize rules, even without fakeip servers: repairing logical
-        // rules that carry leaf conditions on their parent is required for a valid
-        // config regardless of the DNS servers in use.
+        // Normalize logical DNS rules: leaf-only conditions on the parent are moved
+        // into a child rule. This is a format translation that preserves intent.
         if let Some(rules) = obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
             for rule in rules.iter_mut() {
-                normalize_dns_rule(rule, &fakeip_tags, true);
+                normalize_dns_rule(rule);
             }
         }
     }
@@ -372,11 +337,6 @@ fn migrate_legacy_special_outbound_rule(
 
 pub fn sanitize_route_value(route: &mut Value) {
     if let Some(obj) = route.as_object_mut() {
-        // Ensure auto_detect_interface is true to prevent routing loops if not specified
-        if !obj.contains_key("auto_detect_interface") {
-            obj.insert("auto_detect_interface".to_string(), json!(true));
-        }
-
         // sing-box 1.14: legacy 特殊出站引用迁移为 rule action（仅约定名 block/dns）
         if let Some(rules) = obj.get_mut("rules").and_then(|r| r.as_array_mut()) {
             for rule in rules {
@@ -416,80 +376,28 @@ pub fn sanitize_http_clients_value(http_clients: &mut Value) {
 
 use std::collections::HashSet;
 
-pub fn sanitize_log_value(log: &mut Value) {
-    if let Some(obj) = log.as_object_mut() {
-        if !obj.contains_key("level")
-            || obj
-                .get("level")
-                .and_then(|s| s.as_str())
-                .is_none_or(|s| s.trim().is_empty())
-        {
-            obj.insert("level".to_string(), json!("info"));
-        }
-        if !obj.contains_key("timestamp") {
-            obj.insert("timestamp".to_string(), json!(true));
-        }
-    }
-}
-
-fn find_preferred_domain_resolver_tag(root: &serde_json::Map<String, Value>) -> Option<String> {
-    root.get("dns")
-        .and_then(|d| d.get("servers"))
-        .and_then(|s| s.as_array())
-        .and_then(|servers| {
-            servers
-                .iter()
-                .find(|srv| {
-                    srv.get("type").and_then(|t| t.as_str()) != Some("fakeip")
-                        && srv
-                            .get("detour")
-                            .and_then(|d| d.as_str())
-                            .is_none_or(|d| d.is_empty() || d == "direct")
-                })
-                .or_else(|| {
-                    servers
-                        .iter()
-                        .find(|srv| srv.get("type").and_then(|t| t.as_str()) != Some("fakeip"))
-                })
-                .and_then(|srv| srv.get("tag").and_then(|t| t.as_str()))
-        })
-        .map(str::to_string)
-}
+/// Kept for API compatibility. `log.level` / `log.timestamp` are no longer injected:
+/// the config must contain exactly what the user wrote (WYSIWYG).
+pub fn sanitize_log_value(_log: &mut Value) {}
 
 /// Sanitize and prepare the runtime sing-box configuration to adhere to best practices:
 /// 1. Remove deprecated `independent_cache` from `dns` (deprecated in 1.14.0, removed in 1.16.0).
 /// 2. Remove redundant `detour: "direct"` from DNS, rule sets, and `http_clients` to avoid "detour to an empty direct outbound makes no sense".
-/// 3. Sanitize inbounds, outbounds, route, and log defaults without implicit mutations.
+/// 3. Translate legacy special outbounds (`block`/`dns`) into rule actions and
+///    `store_rdrc` into `store_dns` — faithful format translations only.
+///
+/// No feature/value is ever injected: missing DNS servers, resolvers, strategies,
+/// fakeip ranges, log levels and interface names are reported by validation instead
+/// of silently filled in. The saved config is the config that runs (WYSIWYG).
 pub fn sanitize_runtime_config(config: &mut Value) {
     let Some(root) = config.as_object_mut() else {
         return;
     };
 
-    let has_tun_inbound = root
-        .get("inbounds")
-        .and_then(|i| i.as_array())
-        .is_some_and(|arr| {
-            arr.iter()
-                .any(|inb| inb.get("type").and_then(|t| t.as_str()) == Some("tun"))
-        });
-
     if let Some(log) = root.get_mut("log") {
         sanitize_log_value(log);
     }
     if let Some(dns) = root.get_mut("dns") {
-        if has_tun_inbound
-            && let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut())
-        {
-            for server in servers {
-                if let Some(srv_obj) = server.as_object_mut()
-                    && srv_obj.get("type").and_then(|t| t.as_str()) == Some("local")
-                    && !srv_obj.contains_key("server")
-                {
-                    srv_obj.insert("type".to_string(), json!("udp"));
-                    srv_obj.insert("server".to_string(), json!("223.5.5.5"));
-                }
-            }
-        }
         sanitize_dns_value(dns);
     }
     if let Some(inbounds) = root.get_mut("inbounds") {
@@ -567,16 +475,6 @@ pub fn sanitize_runtime_config(config: &mut Value) {
         cache_file.insert("store_dns".to_string(), json!(true));
     }
 
-    // sing-box 1.14 将 "missing route.default_domain_resolver" 从废弃警告升级为启动错误。
-    // 若配置了 DNS 服务器但未指定解析器，优先指向首个直连（无代理 detour）的非 fakeip 服务器。
-    // （先取出 owned 值，避免与 route 的可变借用冲突）
-    let resolver_tag = find_preferred_domain_resolver_tag(root);
-    if let Some(route_obj) = root.get_mut("route").and_then(|r| r.as_object_mut())
-        && !route_obj.contains_key("default_domain_resolver")
-        && let Some(tag) = resolver_tag
-    {
-        route_obj.insert("default_domain_resolver".to_string(), json!(tag));
-    }
 }
 
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
@@ -941,11 +839,10 @@ mod tests {
 
         let (sanitized, changes) = sanitize_runtime_config_with_diff(&original);
 
-        // Sanitized output must carry the corrections…
-        assert_eq!(
-            sanitized["log"]["level"].as_str(),
-            Some("info"),
-            "missing log default"
+        // Sanitized output must carry only format translations, not injected defaults.
+        assert!(
+            sanitized["log"].get("level").is_none(),
+            "log.level must not be injected"
         );
         assert!(
             sanitized["dns"]["servers"][0].get("detour").is_none(),
@@ -953,10 +850,8 @@ mod tests {
         );
         // …and the diff must report exactly those corrections (no noise).
         assert!(
-            changes
-                .iter()
-                .any(|c| c.path == "log.level" && c.action == "added"),
-            "log.level addition missing from diff: {changes:?}"
+            !changes.iter().any(|c| c.path == "log.level"),
+            "log.level must not appear in diff: {changes:?}"
         );
         assert!(
             changes
@@ -973,14 +868,10 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_log_defaults() {
+    fn test_sanitize_log_does_not_inject_defaults() {
         let mut log = json!({});
         sanitize_log_value(&mut log);
-        assert_eq!(log.get("level").and_then(|v| v.as_str()), Some("info"));
-        assert_eq!(
-            log.get("timestamp").and_then(serde_json::Value::as_bool),
-            Some(true)
-        );
+        assert_eq!(log, json!({}), "log defaults must not be injected");
 
         let mut custom_log =
             json!({ "level": "warn", "output": "sing-box.log", "timestamp": false });
@@ -1099,7 +990,11 @@ mod tests {
         });
         crate::platform::macos_platform().sanitize_inbound(&mut macos_inbound);
         assert_eq!(macos_inbound.get("auto_redirect"), None);
-        assert_eq!(macos_inbound.get("interface_name"), None);
+        assert_eq!(
+            macos_inbound.get("interface_name"),
+            Some(&json!("tun0")),
+            "interface_name must be preserved verbatim; validation reports invalid names"
+        );
         assert_eq!(macos_inbound.get("auto_route"), Some(&json!(true)));
         assert_eq!(
             macos_inbound.get("address"),
@@ -1119,10 +1014,7 @@ mod tests {
         crate::platform::windows_platform().sanitize_inbound(&mut win_inbound);
         assert_eq!(win_inbound.get("auto_redirect"), None);
         assert_eq!(win_inbound.get("auto_route"), Some(&json!(true)));
-        assert_eq!(
-            win_inbound.get("interface_name"),
-            Some(&json!("subout-tun"))
-        );
+        assert_eq!(win_inbound.get("interface_name"), Some(&json!("tun0")));
         assert_eq!(win_inbound.get("address"), Some(&json!(["172.19.0.1/30"])));
         assert_eq!(win_inbound.get("strict_route"), None);
     }
@@ -1142,7 +1034,10 @@ mod tests {
         assert_eq!(rules[0].get("outbound").unwrap().as_str(), Some("direct"));
         assert_eq!(rules[1].get("action").unwrap().as_str(), Some("sniff"));
         assert_eq!(rules[2].get("action").unwrap().as_str(), Some("hijack-dns"));
-        assert_eq!(route.get("auto_detect_interface"), Some(&json!(true)));
+        assert!(
+            route.get("auto_detect_interface").is_none(),
+            "auto_detect_interface must not be injected"
+        );
     }
 
     #[test]
@@ -1454,7 +1349,12 @@ mod tests {
             "log": { "level": "info", "timestamp": true },
             "dns": {
                 "servers": [
-                    { "type": "fakeip", "tag": "fakeip-dns" },
+                    {
+                        "type": "fakeip",
+                        "tag": "fakeip-dns",
+                        "inet4_range": "198.18.0.0/15",
+                        "inet6_range": "fc00::/18"
+                    },
                     { "type": "udp", "tag": "local-dns", "server": "223.5.5.5" }
                 ],
                 "rules": [
@@ -1496,7 +1396,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_dns_value_still_injects_query_type_for_plain_fakeip_rules() {
+    fn test_sanitize_dns_value_does_not_inject_query_type_for_fakeip_rules() {
         let mut dns = json!({
             "strategy": "ipv4_only",
             "servers": [
@@ -1507,7 +1407,10 @@ mod tests {
             "final": "local-dns"
         });
         sanitize_dns_value(&mut dns);
-        assert_eq!(dns["rules"][0]["query_type"], json!(["A", "AAAA"]));
+        assert!(
+            dns["rules"][0].get("query_type").is_none(),
+            "query_type must not be injected"
+        );
     }
 
     #[test]
@@ -1565,8 +1468,8 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert_eq!(members[0], "direct");
 
-        // default_domain_resolver 自动补全
-        assert_eq!(cfg["route"]["default_domain_resolver"], "local-dns");
+        // default_domain_resolver 不再自动补全（所见即所得）
+        assert!(cfg["route"].get("default_domain_resolver").is_none());
     }
 
     #[test]

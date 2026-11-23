@@ -299,9 +299,12 @@ describe("NodeGroupsView Component", () => {
       );
 
       fireEvent.click(screen.getAllByTitle("编辑组合配置")[0]);
-      expect(screen.getByRole("heading", { name: "编辑节点组合" })).toBeDefined();
+      expect(
+        screen.getByRole("heading", { name: "编辑节点组合" }),
+      ).toBeDefined();
 
-      const tagInput = screen.getByPlaceholderText(/例如: HK-Auto 或 常用专线/i);
+      const tagInput =
+        screen.getByPlaceholderText(/例如: HK-Auto 或 常用专线/i);
       expect((tagInput as HTMLInputElement).value).toBe("HK-Auto");
       expect(screen.queryByText(/已存在于其他节点组合/)).toBeNull();
 

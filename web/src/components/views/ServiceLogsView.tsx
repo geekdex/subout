@@ -3,11 +3,13 @@ import { FileText, Trash2, ArrowDownCircle } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { api, ApiError } from "../../api/client";
+import { getErrorMessage } from "../../utils/format";
 
 export const ServiceLogsView: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [filterLevel, setFilterLevel] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,13 +37,16 @@ export const ServiceLogsView: React.FC = () => {
     try {
       const res = await api.getServiceLogs(300);
       setLogs(res.logs || []);
+      setFetchError(null);
     } catch (err: unknown) {
       if (
         err instanceof ApiError &&
         (err.status === 428 || err.status === 401)
       ) {
-        // ignore background poll error
+        // expected background-poll guards, no user-facing error
+        return;
       }
+      setFetchError(getErrorMessage(err));
     }
   };
 
@@ -126,6 +131,12 @@ export const ServiceLogsView: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {fetchError && (
+        <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
+          日志拉取失败：{fetchError}
+        </div>
+      )}
 
       {/* Terminal logs container */}
       <div

@@ -35,7 +35,10 @@ export const Select: React.FC<SelectProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [openUp, setOpenUp] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const selectedOption = options.find((opt) => opt.value === value);
 
@@ -60,6 +63,57 @@ export const Select: React.FC<SelectProps> = ({
       )
     : options;
 
+  const toggleOpen = () => {
+    if (disabled) return;
+    if (!isOpen && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setOpenUp(window.innerHeight - rect.bottom < 260);
+      setHighlightIndex(-1);
+    }
+    setIsOpen((prev) => !prev);
+  };
+
+  const selectIndex = (index: number) => {
+    const opt = filteredOptions[index];
+    if (!opt || opt.disabled) return;
+    onChange(opt.value);
+    setIsOpen(false);
+    setSearchTerm("");
+    setHighlightIndex(-1);
+    triggerRef.current?.focus();
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (disabled) return;
+    if (event.key === "Escape") {
+      setIsOpen(false);
+      setHighlightIndex(-1);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!isOpen) {
+        toggleOpen();
+        setHighlightIndex(
+          event.key === "ArrowDown" ? 0 : filteredOptions.length - 1,
+        );
+        return;
+      }
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setHighlightIndex((prev) => {
+        const next = prev + step;
+        if (next < 0) return filteredOptions.length - 1;
+        if (next >= filteredOptions.length) return 0;
+        return next;
+      });
+      return;
+    }
+    if (event.key === "Enter" && isOpen && highlightIndex >= 0) {
+      event.preventDefault();
+      selectIndex(highlightIndex);
+    }
+  };
+
   return (
     <div
       className={twMerge(
@@ -73,9 +127,13 @@ export const Select: React.FC<SelectProps> = ({
         </label>
       )}
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={toggleOpen}
+        onKeyDown={handleKeyDown}
         className={clsx(
           "w-full flex items-center justify-between bg-slate-900 border border-slate-700/80 rounded-lg px-3.5 py-2 text-sm text-left transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500",
           disabled && "opacity-50 cursor-not-allowed",
@@ -94,7 +152,14 @@ export const Select: React.FC<SelectProps> = ({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-full z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 max-h-60 overflow-auto">
+        <div
+          role="listbox"
+          onKeyDown={handleKeyDown}
+          className={clsx(
+            "absolute left-0 w-full z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 max-h-60 overflow-auto",
+            openUp ? "bottom-full mb-1" : "top-full mt-1",
+          )}
+        >
           {searchable && (
             <div className="p-2 border-b border-slate-800 flex items-center gap-2">
               <Search className="w-3.5 h-3.5 text-slate-400" />
@@ -113,20 +178,20 @@ export const Select: React.FC<SelectProps> = ({
               无匹配项
             </div>
           ) : (
-            filteredOptions.map((opt) => {
+            filteredOptions.map((opt, index) => {
               const isSelected = opt.value === value;
               return (
-                <div
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
                   key={opt.value}
-                  onClick={() => {
-                    if (!opt.disabled) {
-                      onChange(opt.value);
-                      setIsOpen(false);
-                      setSearchTerm("");
-                    }
-                  }}
+                  onClick={() => selectIndex(index)}
+                  onMouseEnter={() => setHighlightIndex(index)}
                   className={clsx(
-                    "px-3.5 py-2 text-xs flex items-center justify-between cursor-pointer transition-colors",
+                    "w-full text-left px-3.5 py-2 text-xs flex items-center justify-between cursor-pointer transition-colors",
+                    index === highlightIndex &&
+                      "ring-1 ring-inset ring-sky-500/50",
                     opt.disabled
                       ? "opacity-40 cursor-not-allowed"
                       : isSelected
@@ -145,7 +210,7 @@ export const Select: React.FC<SelectProps> = ({
                   {isSelected && (
                     <Check className="w-4 h-4 text-sky-400 shrink-0" />
                   )}
-                </div>
+                </button>
               );
             })
           )}

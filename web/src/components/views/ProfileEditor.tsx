@@ -334,10 +334,13 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         error("Schema 校验未通过", res.errors?.[0] || "请检查配置项");
         return false;
       }
-    } catch {
-      setSchemaErrors([]);
-      setSchemaValidatedOk(true);
-      return true;
+    } catch (err: unknown) {
+      // Fail closed: a network/API error must never be reported as "validation passed".
+      const msg = getErrorMessage(err);
+      setSchemaErrors([msg]);
+      setSchemaValidatedOk(false);
+      error("校验失败", msg);
+      return false;
     } finally {
       setValidating(false);
     }
@@ -380,8 +383,13 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
           );
           return;
         }
-      } catch {
-        // Proceed to updateConfig which also enforces schema_validator on the backend
+      } catch (err: unknown) {
+        // Fail closed: if pre-save validation cannot run, do not save.
+        const msg = getErrorMessage(err);
+        setSchemaErrors([msg]);
+        setSchemaValidatedOk(false);
+        error("校验失败，未保存", msg);
+        return;
       }
 
       const res = await api.updateConfig(profile.id, {
@@ -754,8 +762,8 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
       <Dialog
         open={sanitizeDialogOpen}
         onClose={() => setSanitizeDialogOpen(false)}
-        title="程序已按内核规范修正以下字段"
-        description="以下修正在保存时自动应用，保证配置可被 sing-box 1.14 正常加载。原始意图均已保留。"
+        title="旧格式字段已等价转换"
+        description="仅将已被 sing-box 1.14 移除的旧字段/出站写法等价转换为新格式，未新增任何您未配置的功能或服务器。以下内容已随配置一同保存。"
         size="lg"
         footer={
           <Button

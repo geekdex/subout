@@ -261,13 +261,15 @@ pub async fn update_config(
             ),
         )
     })?;
+    // WYSIWYG: persist exactly the config that will run. The only transformations
+    // applied here are faithful legacy-format translations (deprecated fields,
+    // removed special outbounds, etc.) — no feature/value injection remains in
+    // sanitize_runtime_config. The diff is returned purely so the UI can inform
+    // the user which old-format fields were translated.
+    let (sanitized_val, sanitizations) =
+        crate::generator::sanitize_runtime_config_with_diff(&validated_val);
     let normalized_content =
-        serde_json::to_string_pretty(&validated_val).unwrap_or_else(|_| payload.content.clone());
-
-    // Explicit-correction contract: compute (but do not persist) what the runtime
-    // sanitize pipeline would correct in this config, so the UI can tell the user
-    // exactly which fields the program adjusts relative to what they wrote.
-    let (_, sanitizations) = crate::generator::sanitize_runtime_config_with_diff(&validated_val);
+        serde_json::to_string_pretty(&sanitized_val).unwrap_or_else(|_| payload.content.clone());
 
     db::update_config_profile(
         &conn,
@@ -294,7 +296,7 @@ pub async fn update_config(
             "experimental",
             "http_clients",
         ] {
-            if let Some(sec_val) = validated_val.get(section)
+            if let Some(sec_val) = sanitized_val.get(section)
                 && let Ok(sec_str) = serde_json::to_string(sec_val)
             {
                 let _ = db::save_base_config_section(&conn, section, &sec_str);

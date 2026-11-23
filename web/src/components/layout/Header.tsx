@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
-import { Switch } from "../ui/Switch";
 import { Tooltip } from "../ui/Tooltip";
 import { ThemeSwitcher } from "../ui/ThemeSwitcher";
 import { ServiceStatus, SystemInfo, ConfigProfile } from "../../types/api";
@@ -257,7 +256,11 @@ export const Header: React.FC<HeaderProps> = ({
           align="end"
           className="max-w-[260px] sm:max-w-[300px]"
         >
-          <div
+          <button
+            type="button"
+            role="switch"
+            aria-checked={systemProxyEnabled}
+            disabled={!isProxyClickable || actionLoading}
             className={clsx(
               "flex items-center gap-1.5 px-2 sm:px-3 py-1 bg-slate-800/50 rounded-lg border border-slate-800 text-xs text-slate-300 shrink-0 select-none transition-colors",
               !isProxyClickable
@@ -285,12 +288,21 @@ export const Header: React.FC<HeaderProps> = ({
                 预设
               </span>
             )}
-            <Switch
-              checked={systemProxyEnabled}
-              disabled={!isProxyClickable}
-              onChange={onToggleSystemProxy}
-            />
-          </div>
+            <span
+              aria-hidden="true"
+              className={clsx(
+                "relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors",
+                systemProxyEnabled ? "bg-sky-500" : "bg-slate-700",
+              )}
+            >
+              <span
+                className={clsx(
+                  "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                  systemProxyEnabled ? "translate-x-4" : "translate-x-0",
+                )}
+              />
+            </span>
+          </button>
         </Tooltip>
 
         {/* Service Action Buttons */}

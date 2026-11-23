@@ -84,6 +84,7 @@ export const AutoUpdateView: React.FC = () => {
   );
   const terminalBottomRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { success, error, warning } = useToast();
 
@@ -130,6 +131,17 @@ export const AutoUpdateView: React.FC = () => {
     loadHistory(1);
   }, [loadSettings, loadHistory]);
 
+  // Clean up streams and polling timers when the view unmounts.
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Auto-scroll terminal log to bottom
   useEffect(() => {
     if (manualModalOpen && terminalBottomRef.current) {
@@ -158,9 +170,13 @@ export const AutoUpdateView: React.FC = () => {
     setManualLogs(["[系统提示] 正在建立与后端的实时更新通信..."]);
     setManualVersionCode(null);
 
-    // Abort any existing stream
+    // Abort any existing stream and polling timer
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+    }
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
     }
     const abortCtrl = new AbortController();
     abortControllerRef.current = abortCtrl;
@@ -180,7 +196,7 @@ export const AutoUpdateView: React.FC = () => {
                 .map((l) => l.trim())
                 .filter(Boolean);
               if (lines.length > 0) {
-                setManualLogs(lines);
+                setManualLogs((prev) => [...prev, ...lines]);
               }
             }
             if (event.status === "success" || event.status === "failed") {
@@ -223,6 +239,7 @@ export const AutoUpdateView: React.FC = () => {
       const intervalTimer = setInterval(async () => {
         if (streamFinished || abortCtrl.signal.aborted) {
           clearInterval(intervalTimer);
+          pollTimerRef.current = null;
           return;
         }
         try {
@@ -233,11 +250,12 @@ export const AutoUpdateView: React.FC = () => {
               .map((l) => l.trim())
               .filter(Boolean);
             if (lines.length > 0) {
-              setManualLogs(lines);
+              setManualLogs((prev) => [...prev, ...lines]);
             }
           }
           if (!st.is_running) {
             clearInterval(intervalTimer);
+            pollTimerRef.current = null;
             if (st.last_status === "success") {
               setManualStatus("success");
               if (st.version_code) {
@@ -256,6 +274,7 @@ export const AutoUpdateView: React.FC = () => {
           // Ignore polling errors
         }
       }, 1500);
+      pollTimerRef.current = intervalTimer;
     } catch (err: unknown) {
       setManualStatus("failed");
       const errMsg = getErrorMessage(err);

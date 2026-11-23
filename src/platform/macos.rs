@@ -822,14 +822,10 @@ impl PlatformStrategy for MacOsPlatform {
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {
+            // auto_redirect is a Linux-only feature; removing it is a platform
+            // capability translation. interface_name is left exactly as written;
+            // validation reports invalid macOS names instead of silently deleting them.
             obj.remove("auto_redirect");
-            let is_tun = obj.get("type").and_then(|t| t.as_str()) == Some("tun");
-            if is_tun
-                && let Some(iface) = obj.get("interface_name").and_then(|i| i.as_str())
-                && (iface == "tun0" || iface.is_empty() || !iface.starts_with("utun"))
-            {
-                obj.remove("interface_name");
-            }
         }
     }
 

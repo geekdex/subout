@@ -126,6 +126,7 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   const [saving, setSaving] = useState(false);
   const [syncingId, setSyncingId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const { success, error } = useToast();
   const safeNodes = useMemo(() => (Array.isArray(nodes) ? nodes : []), [nodes]);
@@ -363,7 +364,8 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!deleteConfirmId) return;
+    if (deleting || deleteConfirmId === null) return;
+    setDeleting(true);
     try {
       await api.deleteNodeGroup(deleteConfirmId);
       success("节点组合已删除");
@@ -371,6 +373,8 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
       onRefresh();
     } catch (err: unknown) {
       error("删除失败", getErrorMessage(err));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1109,7 +1113,13 @@ export const NodeGroupsView: React.FC<NodeGroupsViewProps> = ({
             >
               取消
             </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete}>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={deleting}
+              loading={deleting}
+              onClick={handleDelete}
+            >
               确认删除
             </Button>
           </>

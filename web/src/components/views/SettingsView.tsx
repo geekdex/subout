@@ -127,8 +127,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const a = document.createElement("a");
     a.href = url;
     a.download = `subout-diagnostics-${Date.now()}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    // Defer revocation so the browser has time to start the download.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     success("已导出系统诊断数据");
   };
 
