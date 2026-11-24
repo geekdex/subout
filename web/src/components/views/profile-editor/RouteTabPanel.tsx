@@ -619,13 +619,34 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
               </Badge>
             </div>
             {ruleSets.length > 0 && (
-              <button
-                type="button"
-                onClick={() => updateRoute({ rule_set: [] })}
-                className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
-              >
-                清空规则集
-              </button>
+              <div className="flex items-center gap-2">
+                <Select
+                  className="w-48"
+                  value=""
+                  placeholder="一键修改 http_client…"
+                  options={[
+                    { value: "__unset__", label: "未指定 (清空)" },
+                    ...httpClientTags.map((t) => ({ value: t, label: t })),
+                  ]}
+                  onChange={(val) => {
+                    // `__unset__` is only a sentinel when no real client uses it as a tag.
+                    const clear = val === "__unset__" && !httpClientTags.includes(val);
+                    updateRoute({
+                      rule_set: ruleSets.map((rs) => ({
+                        ...rs,
+                        http_client: clear ? undefined : val,
+                      })),
+                    });
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => updateRoute({ rule_set: [] })}
+                  className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
+                >
+                  清空规则集
+                </button>
+              </div>
             )}
           </div>
 
@@ -640,7 +661,7 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
                   key={`ruleset-${idx}`}
                   className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
                 >
-                  <div className="sm:col-span-3">
+                  <div className="sm:col-span-4">
                     <Input
                       label={`#${idx + 1} 标签 (tag)`}
                       value={rs.tag || ""}
@@ -650,7 +671,7 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
                       placeholder="如: geosite-cn"
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-3">
                     <Select
                       label="类型 (type)"
                       value={rs.type || "remote"}
@@ -666,7 +687,7 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
                       ]}
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="sm:col-span-3">
                     <Select
                       label="格式 (format)"
                       value={rs.format || "binary"}
@@ -681,35 +702,6 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
                         { value: "source", label: "源码 (.json)" },
                       ]}
                     />
-                  </div>
-                  <div className="sm:col-span-3">
-                    {rs.type === "local" ? (
-                      <Input
-                        label="本地路径 (path)"
-                        value={rs.path || ""}
-                        onChange={(e) =>
-                          updateRuleSetAt(idx, {
-                            ...rs,
-                            path: e.target.value,
-                            url: undefined,
-                          })
-                        }
-                        placeholder="/etc/sing-box/ruleset.srs"
-                      />
-                    ) : (
-                      <Input
-                        label="远程地址 (url)"
-                        value={rs.url || ""}
-                        onChange={(e) =>
-                          updateRuleSetAt(idx, {
-                            ...rs,
-                            url: e.target.value,
-                            path: undefined,
-                          })
-                        }
-                        placeholder="https://.../geosite-cn.srs"
-                      />
-                    )}
                   </div>
                   <div className="sm:col-span-2 flex items-center justify-end gap-1 pb-1">
                     <button
@@ -738,6 +730,62 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
+                  </div>
+                  <div className="sm:col-span-6">
+                    {rs.type === "local" ? (
+                      <Input
+                        label="本地路径 (path)"
+                        value={rs.path || ""}
+                        onChange={(e) =>
+                          updateRuleSetAt(idx, {
+                            ...rs,
+                            path: e.target.value,
+                            url: undefined,
+                          })
+                        }
+                        placeholder="/etc/sing-box/ruleset.srs"
+                      />
+                    ) : (
+                      <Input
+                        label="远程地址 (url)"
+                        value={rs.url || ""}
+                        onChange={(e) =>
+                          updateRuleSetAt(idx, {
+                            ...rs,
+                            url: e.target.value,
+                            path: undefined,
+                          })
+                        }
+                        placeholder="https://.../geosite-cn.srs"
+                      />
+                    )}
+                  </div>
+                  <div className="sm:col-span-6">
+                    <Select
+                      label="HTTP 客户端 (http_client)"
+                      value={rs.http_client || ""}
+                      onChange={(val) =>
+                        updateRuleSetAt(idx, {
+                          ...rs,
+                          http_client: val || undefined,
+                        })
+                      }
+                      options={[
+                        { value: "", label: "未指定 (清空)" },
+                        ...httpClientTags.map((t) => ({ value: t, label: t })),
+                        // 保留已配置但不再存在于 http_clients 中的旧值，避免 Select 找不到选项时
+                        // 静默显示 placeholder，让用户能看见并自行修正（同 route.final 的写法）。
+                        ...(rs.http_client &&
+                        !httpClientTags.includes(rs.http_client)
+                          ? [
+                              {
+                                value: rs.http_client,
+                                label: `${rs.http_client} (已失效)`,
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
                   </div>
                 </div>
               ))}

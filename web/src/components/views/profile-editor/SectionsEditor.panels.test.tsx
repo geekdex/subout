@@ -177,6 +177,170 @@ describe("split editor panels keep their onChange contracts", () => {
     expect(next.route?.rule_set).toEqual([]);
   });
 
+  // A Select renders its label then a trigger button inside the same wrapper.
+  const selectTriggerFor = (label: string): HTMLElement => {
+    const labelEl = screen.getByText(label);
+    const wrapper = labelEl.parentElement as HTMLElement;
+    return wrapper.querySelector('button[aria-haspopup="listbox"]') as HTMLElement;
+  };
+
+  it("rule set row exposes http_client and persists the selected client", () => {
+    const onChangeMock = vi.fn();
+    const config = {
+      http_clients: [{ tag: "direct" }, { tag: "proxy" }],
+      route: {
+        rule_set: [
+          {
+            tag: "geosite-cn",
+            type: "remote",
+            url: "x",
+            http_client: "proxy",
+          },
+        ],
+      },
+    } as unknown as SingBoxVisualConfig;
+    render(
+      <RouteTabPanel
+        platform="linux"
+        config={config}
+        onChange={onChangeMock}
+        outboundTags={["proxy"]}
+        dnsServerTags={[]}
+        inboundTags={[]}
+        httpClientTags={["direct", "proxy"]}
+      />,
+    );
+
+    const trigger = selectTriggerFor("HTTP 客户端 (http_client)");
+    expect(trigger.textContent).toContain("proxy");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("listbox")).toBeDefined();
+
+    // Pick "direct" from the opened options.
+    const directOption = screen
+      .getAllByRole("option")
+      .find((o) => o.textContent === "direct") as HTMLElement;
+    fireEvent.click(directOption);
+
+    const next = onChangeMock.mock.calls[0][0] as SingBoxVisualConfig;
+    expect(next.route?.rule_set?.[0].http_client).toBe("direct");
+  });
+
+  it("shows a stale http_client value instead of silently hiding it", () => {
+    const config = {
+      route: {
+        rule_set: [
+          {
+            tag: "geosite-cn",
+            type: "remote",
+            url: "x",
+            http_client: "deleted-client",
+          },
+        ],
+      },
+    } as unknown as SingBoxVisualConfig;
+    render(
+      <RouteTabPanel
+        platform="linux"
+        config={config}
+        onChange={vi.fn()}
+        outboundTags={[]}
+        dnsServerTags={[]}
+        inboundTags={[]}
+        httpClientTags={["direct"]}
+      />,
+    );
+
+    const trigger = selectTriggerFor("HTTP 客户端 (http_client)");
+    expect(trigger.textContent).toContain("deleted-client (已失效)");
+    fireEvent.click(trigger);
+    expect(
+      screen.getAllByRole("option").some((o) => o.textContent === "deleted-client (已失效)"),
+    ).toBe(true);
+  });
+
+  it("batch http_client select rewrites every rule set, including clearing to unset", () => {
+    const onChangeMock = vi.fn();
+    const config = {
+      http_clients: [{ tag: "direct" }, { tag: "proxy" }],
+      route: {
+        rule_set: [
+          { tag: "a", type: "remote", url: "x", http_client: "proxy" },
+          { tag: "b", type: "remote", url: "y" },
+        ],
+      },
+    } as unknown as SingBoxVisualConfig;
+    render(
+      <RouteTabPanel
+        platform="linux"
+        config={config}
+        onChange={onChangeMock}
+        outboundTags={["proxy"]}
+        dnsServerTags={[]}
+        inboundTags={[]}
+        httpClientTags={["direct", "proxy"]}
+      />,
+    );
+
+    // Batch trigger is the one showing the action placeholder.
+    const batchTrigger = screen.getByText("一键修改 http_client…").closest("button") as HTMLElement;
+    fireEvent.click(batchTrigger);
+    const directOption = screen
+      .getAllByRole("option")
+      .find((o) => o.textContent === "direct") as HTMLElement;
+    fireEvent.click(directOption);
+
+    const afterSet = onChangeMock.mock.calls[0][0] as SingBoxVisualConfig;
+    expect(afterSet.route?.rule_set?.map((rs) => rs.http_client)).toEqual([
+      "direct",
+      "direct",
+    ]);
+
+    // Selecting 未指定 clears the field on every rule set.
+    fireEvent.click(screen.getByText("一键修改 http_client…").closest("button") as HTMLElement);
+    const unsetOption = screen
+      .getAllByRole("option")
+      .find((o) => o.textContent === "未指定 (清空)") as HTMLElement;
+    fireEvent.click(unsetOption);
+
+    const afterClear = onChangeMock.mock.calls[1][0] as SingBoxVisualConfig;
+    expect(
+      afterClear.route?.rule_set?.every((rs) => rs.http_client === undefined),
+    ).toBe(true);
+  });
+
+  it("batch select treats __unset__ as a normal tag when one is configured", () => {
+    const onChangeMock = vi.fn();
+    const config = {
+      route: { rule_set: [{ tag: "a", type: "remote", url: "x" }] },
+    } as unknown as SingBoxVisualConfig;
+    render(
+      <RouteTabPanel
+        platform="linux"
+        config={config}
+        onChange={onChangeMock}
+        outboundTags={[]}
+        dnsServerTags={[]}
+        inboundTags={[]}
+        httpClientTags={["__unset__", "proxy"]}
+      />,
+    );
+
+    const batchTrigger = screen
+      .getByText("一键修改 http_client…")
+      .closest("button") as HTMLElement;
+    fireEvent.click(batchTrigger);
+    // The real "__unset__" tag appears as its own option; picking it must SET it.
+    const tagOption = screen
+      .getAllByRole("option")
+      .find((o) => o.textContent === "__unset__") as HTMLElement;
+    expect(tagOption).toBeDefined();
+    fireEvent.click(tagOption);
+
+    const next = onChangeMock.mock.calls[0][0] as SingBoxVisualConfig;
+    expect(next.route?.rule_set?.[0].http_client).toBe("__unset__");
+  });
+
   const tunConfig = {
     inbounds: [
       {
