@@ -35,9 +35,113 @@ import { useToast } from "../../hooks/useToast";
 import {
   formatDate,
   formatLatency,
+  getEffectiveLatency,
   getErrorMessage,
+  getLatencyCategory,
   getTestEndpointName,
+  type LatencyCategory,
 } from "../../utils/format";
+
+type LatencyFilterValue = "all" | LatencyCategory;
+
+const LATENCY_FILTERS: {
+  value: LatencyFilterValue;
+  label: string;
+  /** 区间标注，左闭右开统一用 [) 表示，(] 表示左开右闭 */
+  range: string;
+  /** 悬浮说明：明确边界是否包含，避免区间歧义 */
+  title: string;
+  activeClass: string;
+}[] = [
+  {
+    value: "all",
+    label: "全部",
+    range: "",
+    title: "显示全部节点（不限测速结果）",
+    activeClass: "border-sky-500/50 bg-sky-500/15 text-sky-300",
+  },
+  {
+    value: "good",
+    label: "良好",
+    range: "(0, 150)ms",
+    title: "良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）",
+    activeClass: "border-emerald-500/50 bg-emerald-500/15 text-emerald-300",
+  },
+  {
+    value: "fair",
+    label: "一般",
+    range: "[150, 350)ms",
+    title: "一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350",
+    activeClass: "border-amber-500/50 bg-amber-500/15 text-amber-300",
+  },
+  {
+    value: "poor",
+    label: "较差",
+    range: "[350, +∞)ms",
+    title: "较差：延迟 ≥ 350ms，包含 350",
+    activeClass: "border-rose-500/50 bg-rose-500/15 text-rose-300",
+  },
+  {
+    value: "timeout",
+    label: "超时",
+    range: "(-∞, 0]ms",
+    title: "超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记",
+    activeClass: "border-rose-500/50 bg-rose-500/15 text-rose-300",
+  },
+  {
+    value: "untested",
+    label: "未测试",
+    range: "",
+    title: "未测试：尚无测速数据",
+    activeClass: "border-slate-500/50 bg-slate-600/40 text-slate-200",
+  },
+];
+
+const FILTER_STORAGE_KEY = "subout_nodes_filter";
+
+interface PersistedNodesFilter {
+  search: string;
+  subscription: string;
+  latency: LatencyFilterValue;
+}
+
+const DEFAULT_NODES_FILTER: PersistedNodesFilter = {
+  search: "",
+  subscription: "all",
+  latency: "all",
+};
+
+/** 读取上次的筛选条件；存储损坏或字段不合法时回退到默认值 */
+function loadPersistedFilter(): PersistedNodesFilter {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return DEFAULT_NODES_FILTER;
+  }
+  try {
+    const raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
+    if (!raw) return DEFAULT_NODES_FILTER;
+    const saved = JSON.parse(raw) as Partial<PersistedNodesFilter>;
+    return {
+      search:
+        typeof saved.search === "string"
+          ? saved.search
+          : DEFAULT_NODES_FILTER.search,
+      subscription:
+        typeof saved.subscription === "string" &&
+        (saved.subscription === "all" ||
+          saved.subscription === "custom" ||
+          /^\d+$/.test(saved.subscription))
+          ? saved.subscription
+          : DEFAULT_NODES_FILTER.subscription,
+      latency:
+        typeof saved.latency === "string" &&
+        LATENCY_FILTERS.some((f) => f.value === saved.latency)
+          ? (saved.latency as LatencyFilterValue)
+          : DEFAULT_NODES_FILTER.latency,
+    };
+  } catch {
+    return DEFAULT_NODES_FILTER;
+  }
+}
 
 interface NodesViewProps {
   nodes?: NodeItem[];
@@ -60,10 +164,32 @@ export const NodesView: React.FC<NodesViewProps> = ({
     setLocalNodes(nodes);
   }, [nodes]);
 
-  const [search, setSearch] = useState("");
-  const [selectedSubscription, setSelectedSubscription] =
-    useState<string>("all");
+  // 筛选条件在切换页面 / 刷新后保留，存储不可用时静默降级为默认筛选
+  const [initialFilter] = useState(loadPersistedFilter);
+  const [search, setSearch] = useState(initialFilter.search);
+  const [selectedSubscription, setSelectedSubscription] = useState<string>(
+    initialFilter.subscription,
+  );
+  const [latencyFilter, setLatencyFilter] = useState<LatencyFilterValue>(
+    initialFilter.latency,
+  );
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(
+        FILTER_STORAGE_KEY,
+        JSON.stringify({
+          search,
+          subscription: selectedSubscription,
+          latency: latencyFilter,
+        }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [search, selectedSubscription, latencyFilter]);
 
   // Pagination states: default 20, supports 50, 100, 200
   const [pageSize, setPageSize] = useState<number>(20);
@@ -81,7 +207,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
   // Reset to page 1 when filtering or changing page size
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, selectedSubscription, pageSize]);
+  }, [search, selectedSubscription, latencyFilter, pageSize]);
 
   // Testing states
   const [testingBatchActive, setTestingBatchActive] = useState(false);
@@ -138,7 +264,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
     }
   };
 
-  const filteredNodes = safeNodes.filter((n) => {
+  // 先应用来源与搜索条件；测速结果筛选基于这一步的结果统计数量，
+  // 这样筛选器上显示的数字始终与用户当前看到的范围一致。
+  const baseFilteredNodes = safeNodes.filter((n) => {
     // 1. Subscription filter
     if (selectedSubscription !== "all") {
       if (selectedSubscription === "custom") {
@@ -164,6 +292,26 @@ export const NodesView: React.FC<NodesViewProps> = ({
     return true;
   });
 
+  const latencyCounts: Record<LatencyFilterValue, number> = {
+    all: baseFilteredNodes.length,
+    good: 0,
+    fair: 0,
+    poor: 0,
+    timeout: 0,
+    untested: 0,
+  };
+  baseFilteredNodes.forEach((node) => {
+    latencyCounts[getLatencyCategory(getEffectiveLatency(node))] += 1;
+  });
+
+  const filteredNodes =
+    latencyFilter === "all"
+      ? baseFilteredNodes
+      : baseFilteredNodes.filter(
+          (node) =>
+            getLatencyCategory(getEffectiveLatency(node)) === latencyFilter,
+        );
+
   const sortedNodes = [...filteredNodes].sort((a, b) => {
     let cmp = 0;
     if (sortKey === "tag") {
@@ -177,16 +325,13 @@ export const NodesView: React.FC<NodesViewProps> = ({
     } else if (sortKey === "server") {
       cmp = `${a.server}:${a.port}`.localeCompare(`${b.server}:${b.port}`);
     } else if (sortKey === "latency_ms") {
-      const latA =
-        a.last_web_latency ?? a.last_tcp_latency ?? a.latency_ms ?? null;
-      const latB =
-        b.last_web_latency ?? b.last_tcp_latency ?? b.latency_ms ?? null;
-      const score = (v: number | null) => {
-        if (v === null || v === undefined) return 999999;
-        if (v <= 0) return 888888;
-        return v;
+      const score = (node: NodeItem) => {
+        const value = getEffectiveLatency(node);
+        if (value === null || value === undefined) return 999999;
+        if (value <= 0) return 888888;
+        return value;
       };
-      cmp = score(latA) - score(latB);
+      cmp = score(a) - score(b);
     } else if (sortKey === "last_tested_at") {
       const dateA = a.last_tested_at || "";
       const dateB = b.last_tested_at || "";
@@ -464,6 +609,8 @@ export const NodesView: React.FC<NodesViewProps> = ({
       ? Math.round((batchProgress.completed / batchProgress.total) * 100)
       : 0;
 
+  // 列宽按内容量分配：服务器地址最长，分配最多空间；操作列固定宽度；
+  // 内容较短的勾选/标签/订阅/协议/测速列相应收窄，避免长地址被截断成 "..."。
   const columns: Column<NodeItem>[] = [
     {
       key: "select",
@@ -495,7 +642,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
         </button>
       ),
       className: "px-2 text-center",
-      colWidthClass: "w-[6%]",
+      colWidthClass: "w-[5%]",
       sticky: "left",
     },
     {
@@ -503,7 +650,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       header: "节点标识 (Tag)",
       sortable: true,
       className: "px-2.5",
-      colWidthClass: "w-[20%]",
+      colWidthClass: "w-[15%]",
       render: (node) => (
         <div className="flex flex-col min-w-0">
           <span
@@ -523,7 +670,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       header: "所属订阅 / 来源",
       sortable: true,
       className: "px-2.5",
-      colWidthClass: "w-[16%]",
+      colWidthClass: "w-[13%]",
       render: (node) => {
         if (node.is_custom) {
           return (
@@ -547,7 +694,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       header: "协议类型",
       sortable: true,
       className: "px-2.5",
-      colWidthClass: "w-[10%]",
+      colWidthClass: "w-[9%]",
       render: (node) => (
         <Badge variant="neutral" size="sm">
           {node.node_type.toUpperCase()}
@@ -559,7 +706,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       header: "服务器与端口",
       sortable: true,
       className: "px-2.5",
-      colWidthClass: "w-[18%]",
+      colWidthClass: "w-[37%]",
       render: (node) => (
         <span
           className="font-mono text-slate-300 truncate max-w-full inline-block align-bottom"
@@ -574,7 +721,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
       header: "测速结果 / 测试点",
       sortable: true,
       className: "px-2.5",
-      colWidthClass: "w-[30%]",
+      colWidthClass: "w-[21%]",
       render: (node) => {
         const testStatus = testingNodeMap[node.id];
         const isNodeTesting = testStatus === "testing" || testingId === node.id;
@@ -583,7 +730,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
         // Dynamic testing state: render active animated progress bar
         if (isNodeTesting) {
           return (
-            <div className="flex flex-col gap-1.5 w-36 py-1">
+            <div className="flex flex-col gap-1.5 w-full py-1">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-sky-400 font-medium flex items-center gap-1.5">
                   <span className="relative flex h-2 w-2">
@@ -603,7 +750,7 @@ export const NodesView: React.FC<NodesViewProps> = ({
         // Queued state: render animated waiting progress bar
         if (isNodePending) {
           return (
-            <div className="flex flex-col gap-1.5 w-36 py-1">
+            <div className="flex flex-col gap-1.5 w-full py-1">
               <div className="flex items-center justify-between text-[11px] text-slate-400">
                 <span className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
@@ -618,21 +765,20 @@ export const NodesView: React.FC<NodesViewProps> = ({
         }
 
         // Completed / Default state: renders measured result immediately upon completion
-        const primaryLatency =
-          node.last_web_latency !== null &&
-          node.last_web_latency !== undefined &&
-          node.last_web_latency > 0
-            ? node.last_web_latency
-            : node.last_web_latency === -1 || node.last_tcp_latency === -1
-              ? -1
-              : (node.last_tcp_latency ?? node.latency_ms);
+        const primaryLatency = getEffectiveLatency(node);
         const { text, color } = formatLatency(primaryLatency);
         const endpointName = getTestEndpointName(node.last_target_url);
+        const categoryInfo = LATENCY_FILTERS.find(
+          (filter) => filter.value === getLatencyCategory(primaryLatency),
+        );
 
         return (
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`font-mono text-xs font-semibold ${color}`}>
+              <span
+                className={`font-mono text-xs font-semibold ${color}`}
+                title={categoryInfo?.title}
+              >
                 {text}
               </span>
               {node.last_tcp_latency !== null &&
@@ -906,87 +1052,132 @@ export const NodesView: React.FC<NodesViewProps> = ({
       )}
 
       {/* Filter / Search Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-2xl">
-          <div className="w-full sm:w-72">
-            <Input
-              placeholder="搜索节点名称、IP 或所属订阅..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              icon={<Search className="w-4 h-4" />}
-              clearable
-              onClear={() => setSearch("")}
-            />
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-2xl">
+            <div className="w-full sm:w-72">
+              <Input
+                placeholder="搜索节点名称、IP 或所属订阅..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                icon={<Search className="w-4 h-4" />}
+                clearable
+                onClear={() => setSearch("")}
+              />
+            </div>
+
+            <div className="w-full sm:w-60">
+              <Select
+                value={selectedSubscription}
+                onChange={setSelectedSubscription}
+                options={[
+                  {
+                    value: "all",
+                    label: `全部来源 (${safeNodes.length})`,
+                  },
+                  ...safeSubscriptions.map((s) => {
+                    const count = safeNodes.filter(
+                      (n) => n.subscription_id === s.id,
+                    ).length;
+                    return {
+                      value: String(s.id),
+                      label: `${s.label || "未命名订阅"} (${count})`,
+                    };
+                  }),
+                  ...(safeNodes.some((n) => n.is_custom)
+                    ? [
+                        {
+                          value: "custom",
+                          label: `自定义节点 (${safeNodes.filter((n) => n.is_custom).length})`,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            </div>
           </div>
 
-          <div className="w-full sm:w-60">
-            <Select
-              value={selectedSubscription}
-              onChange={setSelectedSubscription}
-              options={[
-                {
-                  value: "all",
-                  label: `全部来源 (${safeNodes.length})`,
-                },
-                ...safeSubscriptions.map((s) => {
-                  const count = safeNodes.filter(
-                    (n) => n.subscription_id === s.id,
-                  ).length;
-                  return {
-                    value: String(s.id),
-                    label: `${s.label || "未命名订阅"} (${count})`,
-                  };
-                }),
-                ...(safeNodes.some((n) => n.is_custom)
-                  ? [
-                      {
-                        value: "custom",
-                        label: `自定义节点 (${safeNodes.filter((n) => n.is_custom).length})`,
-                      },
-                    ]
-                  : []),
-              ]}
-            />
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="text-xs text-slate-400 whitespace-nowrap">
+                已选中{" "}
+                <span className="font-semibold text-sky-400">
+                  {selectedIds.length}
+                </span>{" "}
+                个节点
+              </span>
+              {!testingBatchActive && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={serviceRunning}
+                    onClick={handleTestSelected}
+                    icon={<Radio className="w-3.5 h-3.5 text-sky-400" />}
+                    title={
+                      serviceRunning
+                        ? "sing-box 正在运行，请先停止服务后再测速"
+                        : `使用 [${currentEndpoint.name}] 测速选中的 ${selectedIds.length} 个节点`
+                    }
+                  >
+                    测速所选 ({selectedIds.length})
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setBatchDeleteModalOpen(true)}
+                    icon={<Trash2 className="w-3.5 h-3.5" />}
+                  >
+                    删除所选 ({selectedIds.length})
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 测速结果快捷筛选：与表格单元格颜色/阈值一致，数字随来源与搜索条件联动 */}
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            role="group"
+            aria-label="测速结果筛选"
+          >
+            <span className="text-xs text-slate-400 mr-1 flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-slate-500" />
+              测速结果
+            </span>
+            {LATENCY_FILTERS.map((filter) => {
+              const isActive = latencyFilter === filter.value;
+              return (
+                <button
+                  key={filter.value}
+                  type="button"
+                  aria-pressed={isActive}
+                  title={filter.title}
+                  onClick={() => setLatencyFilter(filter.value)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    isActive
+                      ? filter.activeClass
+                      : "border-slate-800 bg-slate-800/50 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                  }`}
+                >
+                  {filter.label}
+                  {filter.range && (
+                    <span
+                      className={`font-mono text-[10px] ${isActive ? "opacity-75" : "text-slate-500"}`}
+                    >
+                      {filter.range}
+                    </span>
+                  )}
+                  <span
+                    className={`font-mono text-[10px] ${isActive ? "opacity-80" : "text-slate-500"}`}
+                  >
+                    {latencyCounts[filter.value]}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
-
-        {selectedIds.length > 0 && (
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="text-xs text-slate-400 whitespace-nowrap">
-              已选中{" "}
-              <span className="font-semibold text-sky-400">
-                {selectedIds.length}
-              </span>{" "}
-              个节点
-            </span>
-            {!testingBatchActive && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={serviceRunning}
-                  onClick={handleTestSelected}
-                  icon={<Radio className="w-3.5 h-3.5 text-sky-400" />}
-                  title={
-                    serviceRunning
-                      ? "sing-box 正在运行，请先停止服务后再测速"
-                      : `使用 [${currentEndpoint.name}] 测速选中的 ${selectedIds.length} 个节点`
-                  }
-                >
-                  测速所选 ({selectedIds.length})
-                </Button>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setBatchDeleteModalOpen(true)}
-                  icon={<Trash2 className="w-3.5 h-3.5" />}
-                >
-                  删除所选 ({selectedIds.length})
-                </Button>
-              </>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Nodes Table */}

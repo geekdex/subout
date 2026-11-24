@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import React from "react";
 import { NodesView } from "./NodesView";
 import {
@@ -85,6 +91,9 @@ const mockSubscriptions: Subscription[] = [
 const renderWithToast = (ui: React.ReactElement) => {
   return render(<ToastProvider>{ui}</ToastProvider>);
 };
+
+const latencyChip = (title: string) =>
+  within(screen.getByRole("group", { name: "测速结果筛选" })).getByTitle(title);
 
 describe("NodesView Component", () => {
   beforeEach(() => {
@@ -638,5 +647,301 @@ describe("NodesView Component", () => {
     // Unknown/advanced fields like multiplex must be preserved
     expect(parsedRaw.multiplex).toEqual({ enabled: true });
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  describe("测速结果快捷筛选", () => {
+    const chip = latencyChip;
+
+    it("在每个分类上标注速度区间与边界包含规则", () => {
+      renderWithToast(<NodesView nodes={mockNodes} onRefresh={vi.fn()} />);
+
+      expect(screen.getByText("(0, 150)ms")).toBeDefined();
+      expect(screen.getByText("[150, 350)ms")).toBeDefined();
+      expect(screen.getByText("[350, +∞)ms")).toBeDefined();
+      expect(screen.getByText("(-∞, 0]ms")).toBeDefined();
+    });
+
+    it("在端点值处按标注区间正确归类节点", () => {
+      const values: (number | null)[] = [0, -1, 149, 150, 349, 350, null];
+      const nodes: NodeItem[] = values.map((latency, i) => ({
+        ...mockNodes[0],
+        id: i + 1,
+        tag: `Boundary-${i + 1}`,
+        last_web_latency: latency,
+        last_tcp_latency: latency,
+        latency_ms: null,
+      }));
+      renderWithToast(<NodesView nodes={nodes} onRefresh={vi.fn()} />);
+
+      const titles = {
+        all: "显示全部节点（不限测速结果）",
+        good: "良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）",
+        fair: "一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350",
+        poor: "较差：延迟 ≥ 350ms，包含 350",
+        timeout: "超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记",
+        untested: "未测试：尚无测速数据",
+      };
+      expect(chip(titles.all).textContent).toContain("7");
+      expect(chip(titles.good).textContent).toContain("1");
+      expect(chip(titles.fair).textContent).toContain("2");
+      expect(chip(titles.poor).textContent).toContain("1");
+      expect(chip(titles.timeout).textContent).toContain("2");
+      expect(chip(titles.untested).textContent).toContain("1");
+
+      const expectVisible = (expectedIds: number[]) => {
+        for (let id = 1; id <= values.length; id++) {
+          const node = screen.queryByText(`Boundary-${id}`);
+          if (expectedIds.includes(id)) {
+            expect(node, `Boundary-${id} 应保留`).toBeDefined();
+          } else {
+            expect(node, `Boundary-${id} 应被过滤`).toBeNull();
+          }
+        }
+      };
+
+      fireEvent.click(chip(titles.good));
+      expectVisible([3]); // 149ms
+      fireEvent.click(chip(titles.fair));
+      expectVisible([4, 5]); // 150ms、349ms
+      fireEvent.click(chip(titles.poor));
+      expectVisible([6]); // 350ms
+      fireEvent.click(chip(titles.timeout));
+      expectVisible([1, 2]); // 0ms、-1ms
+      fireEvent.click(chip(titles.untested));
+      expectVisible([7]); // 无数据
+    });
+
+    it("web=0 的节点按后端口径判超时，不回退到 TCP 延迟", () => {
+      const nodes: NodeItem[] = [
+        {
+          ...mockNodes[0],
+          id: 1,
+          tag: "WebZero",
+          last_web_latency: 0,
+          last_tcp_latency: 150,
+        },
+        {
+          ...mockNodes[0],
+          id: 2,
+          tag: "TcpOnly",
+          last_web_latency: null,
+          last_tcp_latency: 150,
+        },
+      ];
+      renderWithToast(<NodesView nodes={nodes} onRefresh={vi.fn()} />);
+
+      expect(
+        chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记").textContent,
+      ).toContain("1");
+      expect(
+        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350")
+          .textContent,
+      ).toContain("1");
+
+      fireEvent.click(chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记"));
+      expect(screen.getByText("WebZero")).toBeDefined();
+      expect(screen.queryByText("TcpOnly")).toBeNull();
+
+      fireEvent.click(
+        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350"),
+      );
+      expect(screen.getByText("TcpOnly")).toBeDefined();
+      expect(screen.queryByText("WebZero")).toBeNull();
+    });
+
+    it("按良好 / 一般 / 未测试 / 超时展示实时数量", () => {
+      renderWithToast(<NodesView nodes={mockNodes} onRefresh={vi.fn()} />);
+
+      expect(chip("显示全部节点（不限测速结果）").textContent).toContain("3");
+      expect(
+        chip("良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）")
+          .textContent,
+      ).toContain("1");
+      expect(
+        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350")
+          .textContent,
+      ).toContain("1");
+      expect(chip("较差：延迟 ≥ 350ms，包含 350").textContent).toContain("0");
+      expect(
+        chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记").textContent,
+      ).toContain("0");
+      expect(chip("未测试：尚无测速数据").textContent).toContain("1");
+    });
+
+    it("点击分类后只保留对应延迟的节点", () => {
+      const { container } = renderWithToast(
+        <NodesView nodes={mockNodes} onRefresh={vi.fn()} />,
+      );
+      const rows = () => container.querySelectorAll("tbody tr").length;
+
+      fireEvent.click(
+        chip("良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）"),
+      );
+      expect(rows()).toBe(1);
+      expect(screen.getByText("HK-01-Fast")).toBeDefined();
+      expect(screen.queryByText("US-02-Cloudflare")).toBeNull();
+      expect(
+        chip(
+          "良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）",
+        ).getAttribute("aria-pressed"),
+      ).toBe("true");
+
+      fireEvent.click(
+        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350"),
+      );
+      expect(rows()).toBe(1);
+      expect(screen.getByText("US-02-Cloudflare")).toBeDefined();
+
+      fireEvent.click(chip("未测试：尚无测速数据"));
+      expect(rows()).toBe(1);
+      expect(screen.getByText("Custom-VPS")).toBeDefined();
+
+      fireEvent.click(chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记"));
+      expect(rows()).toBe(1);
+      expect(screen.getByText("暂无数据")).toBeDefined();
+    });
+
+    it("可筛选出超时和较差的节点，并与搜索条件联动", () => {
+      const nodes: NodeItem[] = [
+        ...mockNodes,
+        {
+          ...mockNodes[0],
+          id: 4,
+          tag: "Timeout-Node",
+          last_web_latency: -1,
+          last_tcp_latency: 50,
+        },
+        {
+          ...mockNodes[0],
+          id: 5,
+          tag: "Slow-Node",
+          last_web_latency: 800,
+        },
+      ];
+      const { container } = renderWithToast(
+        <NodesView nodes={nodes} onRefresh={vi.fn()} />,
+      );
+      const rows = () => container.querySelectorAll("tbody tr").length;
+
+      expect(
+        chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记").textContent,
+      ).toContain("1");
+      expect(chip("较差：延迟 ≥ 350ms，包含 350").textContent).toContain("1");
+
+      fireEvent.click(chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记"));
+      expect(rows()).toBe(1);
+      expect(screen.getByText("Timeout-Node")).toBeDefined();
+
+      fireEvent.click(chip("较差：延迟 ≥ 350ms，包含 350"));
+      expect(rows()).toBe(1);
+      expect(screen.getByText("Slow-Node")).toBeDefined();
+
+      fireEvent.click(chip("显示全部节点（不限测速结果）"));
+      fireEvent.change(
+        screen.getByPlaceholderText("搜索节点名称、IP 或所属订阅..."),
+        {
+          target: { value: "Timeout" },
+        },
+      );
+      expect(
+        chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记").textContent,
+      ).toContain("1");
+      expect(
+        chip("良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）")
+          .textContent,
+      ).toContain("0");
+      expect(rows()).toBe(1);
+    });
+  });
+
+  describe("筛选状态持久化", () => {
+    const STORAGE_KEY = "subout_nodes_filter";
+    const searchInput = () =>
+      screen.getByPlaceholderText(
+        "搜索节点名称、IP 或所属订阅...",
+      ) as HTMLInputElement;
+
+    it("刷新后恢复上次的搜索词、来源与测速结果筛选", () => {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          search: "US-02",
+          subscription: "10",
+          latency: "fair",
+        }),
+      );
+      const { container } = renderWithToast(
+        <NodesView
+          nodes={mockNodes}
+          subscriptions={mockSubscriptions}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      expect(searchInput().value).toBe("US-02");
+      expect(
+        screen.getByRole("button", { name: /香港主力机场/i }),
+      ).toBeDefined();
+      expect(
+        latencyChip(
+          "一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350",
+        ).getAttribute("aria-pressed"),
+      ).toBe("true");
+      expect(container.querySelectorAll("tbody tr").length).toBe(1);
+      expect(screen.getByText("US-02-Cloudflare")).toBeDefined();
+    });
+
+    it("修改任一筛选条件后写回 localStorage", () => {
+      renderWithToast(
+        <NodesView
+          nodes={mockNodes}
+          subscriptions={mockSubscriptions}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(latencyChip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记"));
+      fireEvent.click(screen.getByRole("button", { name: /全部来源/i }));
+      fireEvent.click(screen.getByText(/自定义节点 \(1\)/i));
+      fireEvent.change(searchInput(), { target: { value: "HK" } });
+
+      expect(
+        JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}"),
+      ).toEqual({
+        search: "HK",
+        subscription: "custom",
+        latency: "timeout",
+      });
+    });
+
+    it("存储内容损坏或字段非法时回退到默认筛选", () => {
+      window.localStorage.setItem(STORAGE_KEY, "{broken-json");
+      const first = renderWithToast(
+        <NodesView nodes={mockNodes} onRefresh={vi.fn()} />,
+      );
+      expect(searchInput().value).toBe("");
+      expect(
+        latencyChip("显示全部节点（不限测速结果）").getAttribute(
+          "aria-pressed",
+        ),
+      ).toBe("true");
+      expect(first.container.querySelectorAll("tbody tr").length).toBe(3);
+      first.unmount();
+
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ search: 42, subscription: {}, latency: "unknown" }),
+      );
+      const second = renderWithToast(
+        <NodesView nodes={mockNodes} onRefresh={vi.fn()} />,
+      );
+      expect(searchInput().value).toBe("");
+      expect(
+        latencyChip("显示全部节点（不限测速结果）").getAttribute(
+          "aria-pressed",
+        ),
+      ).toBe("true");
+      expect(second.container.querySelectorAll("tbody tr").length).toBe(3);
+    });
   });
 });

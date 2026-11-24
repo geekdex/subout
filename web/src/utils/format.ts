@@ -1,3 +1,5 @@
+import type { NodeItem } from "../types/api";
+
 export function formatBytes(
   bytes: number | null | undefined,
   decimals = 2,
@@ -50,6 +52,36 @@ export function formatDate(
   }
 }
 
+/** 测速结果的分类，阈值与测速单元格的颜色/文案保持一致 */
+export type LatencyCategory = "untested" | "timeout" | "good" | "fair" | "poor";
+
+export function getLatencyCategory(
+  latencyMs: number | null | undefined,
+): LatencyCategory {
+  if (latencyMs === null || latencyMs === undefined) return "untested";
+  if (latencyMs <= 0) return "timeout";
+  if (latencyMs < 150) return "good";
+  if (latencyMs < 350) return "fair";
+  return "poor";
+}
+
+/**
+ * 节点当前生效的延迟，口径与后端 primary latency（web/nodes.rs）一致：
+ * 只要测过 Web 就以 Web 为准，非正值（含 0 / -1 / -2）一律判超时，不回退 TCP；
+ * 没测 Web 时才看 TCP，TCP 也没有才回退旧版 latency_ms（仍为 null 表示未测试）。
+ * 测速单元格展示、排序与筛选共用此口径，避免三者判定不一致。
+ */
+export function getEffectiveLatency(node: NodeItem): number | null | undefined {
+  const {
+    last_web_latency: web,
+    last_tcp_latency: tcp,
+    latency_ms: legacy,
+  } = node;
+  if (web !== null && web !== undefined) return web > 0 ? web : -1;
+  if (tcp !== null && tcp !== undefined) return tcp > 0 ? tcp : -1;
+  return legacy ?? null;
+}
+
 export function formatLatency(latencyMs: number | null | undefined): {
   text: string;
   color: string;
@@ -57,16 +89,19 @@ export function formatLatency(latencyMs: number | null | undefined): {
   if (latencyMs === null || latencyMs === undefined) {
     return { text: "未测试", color: "text-slate-500" };
   }
-  if (latencyMs <= 0) {
+  const category = getLatencyCategory(latencyMs);
+  if (category === "timeout") {
     return { text: "超时", color: "text-rose-400" };
   }
-  if (latencyMs < 150) {
-    return { text: `${latencyMs} ms`, color: "text-emerald-400" };
-  }
-  if (latencyMs < 350) {
-    return { text: `${latencyMs} ms`, color: "text-amber-400" };
-  }
-  return { text: `${latencyMs} ms`, color: "text-rose-400" };
+  return {
+    text: `${latencyMs} ms`,
+    color:
+      category === "good"
+        ? "text-emerald-400"
+        : category === "fair"
+          ? "text-amber-400"
+          : "text-rose-400",
+  };
 }
 
 export const KNOWN_SPEED_TEST_ENDPOINTS: Record<string, string> = {
