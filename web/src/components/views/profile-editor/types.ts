@@ -160,6 +160,14 @@ export interface InboundItem {
   auto_route?: boolean;
   auto_redirect?: boolean;
   strict_route?: boolean;
+  /** TUN 入站层排除路由：命中这些目标 IP / CIDR 的流量不进入 TUN。 */
+  route_exclude_address?: string[];
+  /** TUN 入站层排除路由：命中规则集中 IP CIDR 的流量不进入 TUN。 */
+  route_exclude_address_set?: string[];
+  /** TUN 入站层按来源网卡排除（仅 Linux，需 auto_route）。 */
+  exclude_interface?: string[];
+  /** 与 exclude_interface 冲突；仅作类型声明，编辑器不暴露。 */
+  include_interface?: string[];
   dns_mode?: "" | "direct" | "fakeip" | "hosts" | string;
   set_system_proxy?: boolean;
   include_package?: string[];
@@ -615,6 +623,19 @@ export function parseConfigToVisualState(rawJson: string): SingBoxVisualConfig {
             const pkgArr = toStrArray(copy.exclude_package);
             if (pkgArr) copy.exclude_package = pkgArr;
             else delete copy.exclude_package;
+          }
+          // sing-box 允许这些字段写单个字符串，UI 的 TagListInput 只接受数组，
+          // 这里统一归一化，不改变语义（数组与单值在 schema 中等价）。
+          for (const key of [
+            "route_exclude_address",
+            "route_exclude_address_set",
+            "exclude_interface",
+          ] as const) {
+            if (key in copy) {
+              const arr = toStrArray(copy[key]);
+              if (arr) copy[key] = arr;
+              else delete copy[key];
+            }
           }
           return copy as InboundItem;
         })
@@ -1162,6 +1183,26 @@ export function validateExplicitPlatformConstraints(
       ) {
         errors.push(
           `inbounds[${i}]: Android 应用分流字段 (include_package / exclude_package) 仅适用于 Android 平台，当前平台 (${platUpper}) 不支持，请清空该项`,
+        );
+      }
+      const hasExcludeInterface =
+        Array.isArray(inb.exclude_interface) &&
+        inb.exclude_interface.length > 0;
+      const hasIncludeInterface =
+        Array.isArray(inb.include_interface) &&
+        inb.include_interface.length > 0;
+      if (platform !== "linux" && (hasExcludeInterface || hasIncludeInterface)) {
+        const fieldNames = [
+          hasExcludeInterface ? "exclude_interface" : null,
+          hasIncludeInterface ? "include_interface" : null,
+        ].filter(Boolean);
+        errors.push(
+          `inbounds[${i}].${fieldNames.join(" / ")}: 网卡名称分流仅适用于 Linux 平台，当前平台 (${platUpper}) 不支持，请清空该项`,
+        );
+      }
+      if (platform === "linux" && hasExcludeInterface && hasIncludeInterface) {
+        errors.push(
+          `inbounds[${i}]: exclude_interface 与 include_interface 冲突，二者只能保留一项`,
         );
       }
       if (

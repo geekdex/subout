@@ -1196,6 +1196,38 @@ mod tests {
     }
 
     #[test]
+    fn test_tun_traffic_exclusion_fields_validate_per_platform() {
+        // route_exclude_* 是 TUN 入站层的目标地址排除，跨平台可用。
+        let by_destination = json!({
+            "inbounds": [{
+                "type": "tun",
+                "tag": "tun-in",
+                "address": ["172.19.0.1/30"],
+                "auto_route": true,
+                "route_exclude_address": ["10.0.0.0/8", "fd00::/8"],
+                "route_exclude_address_set": ["geoip-cn"]
+            }]
+        });
+        for plat in ["linux", "macos", "windows"] {
+            validate_singbox_config_for_platform(&by_destination, Some(plat))
+                .unwrap_or_else(|e| panic!("{plat} 应允许 route_exclude_* 字段: {e:?}"));
+        }
+
+        // exclude_interface 按来源网卡排除，仅 Linux 支持。
+        let by_interface = json!({
+            "inbounds": [{
+                "type": "tun",
+                "address": ["172.19.0.1/30"],
+                "auto_route": true,
+                "exclude_interface": ["zt0"]
+            }]
+        });
+        validate_singbox_config_for_platform(&by_interface, Some("linux")).unwrap();
+        let errs = validate_singbox_config_for_platform(&by_interface, Some("macos")).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("exclude_interface")));
+    }
+
+    #[test]
     fn test_empty_strategy_group_is_rejected() {
         let cfg = json!({
             "outbounds": [{ "type": "selector", "tag": "proxy", "outbounds": [] }]

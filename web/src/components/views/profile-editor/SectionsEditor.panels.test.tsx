@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
-import { SingBoxVisualConfig } from "./types";
+import {
+  SingBoxVisualConfig,
+  parseConfigToVisualState,
+  serializeVisualStateToConfig,
+  validateExplicitPlatformConstraints,
+} from "./types";
 import {
   RouteTabPanel,
   DnsTabPanel,
@@ -170,5 +175,137 @@ describe("split editor panels keep their onChange contracts", () => {
     expect(onChangeMock).toHaveBeenCalledTimes(1);
     const next = onChangeMock.mock.calls[0][0] as SingBoxVisualConfig;
     expect(next.route?.rule_set).toEqual([]);
+  });
+
+  const tunConfig = {
+    inbounds: [
+      {
+        type: "tun",
+        tag: "tun-in",
+        address: ["172.19.0.1/30"],
+        auto_route: true,
+      },
+    ],
+  } as unknown as SingBoxVisualConfig;
+
+  it("TUN expert panel edits route_exclude_address without adding hidden fields", () => {
+    const onChangeMock = vi.fn();
+    render(
+      <InboundsTabPanel
+        platform="linux"
+        config={tunConfig}
+        onChange={onChangeMock}
+      />,
+    );
+
+    const input = screen.getByLabelText(
+      "排除目标 IP / IP 段 (route_exclude_address)",
+    );
+    fireEvent.change(input, { target: { value: "10.0.0.0/8, 192.168.1.100" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const next = onChangeMock.mock.calls.at(-1)![0] as SingBoxVisualConfig;
+    expect(next.inbounds![0]).toEqual({
+      ...tunConfig.inbounds![0],
+      route_exclude_address: ["10.0.0.0/8", "192.168.1.100"],
+    });
+  });
+
+  it("TUN expert panel edits exclude_interface and warns on non-Linux", () => {
+    const onChangeMock = vi.fn();
+    const { rerender } = render(
+      <InboundsTabPanel
+        platform="linux"
+        config={tunConfig}
+        onChange={onChangeMock}
+      />,
+    );
+
+    const input = screen.getByLabelText("排除网卡名称 (exclude_interface)");
+    fireEvent.change(input, { target: { value: "zt0" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const next = onChangeMock.mock.calls.at(-1)![0] as SingBoxVisualConfig;
+    expect(next.inbounds![0].exclude_interface).toEqual(["zt0"]);
+
+    rerender(
+      <InboundsTabPanel
+        platform="macos"
+        config={next}
+        onChange={onChangeMock}
+      />,
+    );
+    expect(screen.getByText(/仅 Linux 支持网卡名称分流/)).toBeDefined();
+  });
+
+  it("TUN expert panel documents the strict_route return-traffic caveat", () => {
+    render(
+      <InboundsTabPanel
+        platform="linux"
+        config={tunConfig}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/回程流量不会自动排除/).textContent).toContain(
+      "br-lan",
+    );
+  });
+});
+
+describe("TUN exclusion fields validation and serialization", () => {
+  const configWithExcludeIface = {
+    inbounds: [{ type: "tun", exclude_interface: ["zt0"] }],
+  } as unknown as SingBoxVisualConfig;
+
+  it("accepts exclude_interface on Linux, rejects elsewhere, and names only the set field", () => {
+    expect(
+      validateExplicitPlatformConstraints(configWithExcludeIface, "linux"),
+    ).toEqual([]);
+    const errors = validateExplicitPlatformConstraints(
+      configWithExcludeIface,
+      "macos",
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("exclude_interface");
+    expect(errors[0]).not.toContain("include_interface");
+  });
+
+  it("rejects include_interface and exclude_interface used together on Linux", () => {
+    const config = {
+      inbounds: [
+        {
+          type: "tun",
+          exclude_interface: ["zt0"],
+          include_interface: ["eth0"],
+        },
+      ],
+    } as unknown as SingBoxVisualConfig;
+    const errors = validateExplicitPlatformConstraints(config, "linux");
+    expect(errors.some((e) => e.includes("二者只能保留一项"))).toBe(true);
+  });
+
+  it("round-trips single-string and array forms without dropping fields", () => {
+    const raw = JSON.stringify({
+      inbounds: [
+        {
+          type: "tun",
+          route_exclude_address: "10.0.0.0/8",
+          exclude_interface: ["zt0"],
+          route_exclude_address_set: "geoip-cn",
+        },
+      ],
+    });
+    const state = parseConfigToVisualState(raw);
+    expect(state.inbounds![0].route_exclude_address).toEqual(["10.0.0.0/8"]);
+
+    const out = serializeVisualStateToConfig(state, "linux");
+    expect(out.inbounds).toEqual([
+      {
+        type: "tun",
+        route_exclude_address: ["10.0.0.0/8"],
+        exclude_interface: ["zt0"],
+        route_exclude_address_set: ["geoip-cn"],
+      },
+    ]);
   });
 });

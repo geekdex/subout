@@ -516,6 +516,86 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                         </select>
                       </div>
 
+                      {/* TUN 入站层排除：命中条件的流量不进入 TUN，由系统按原路由直连 */}
+                      <div className="space-y-2.5 pt-1 border-t border-slate-800/80">
+                        <div className="flex flex-wrap items-center justify-between gap-1">
+                          <span className="text-xs font-semibold text-slate-200">
+                            排除路由 / 不劫持流量 (TUN 入站层)
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            命中条件的流量不进入 TUN，由系统按原路由直连
+                          </span>
+                        </div>
+
+                        <TagListInput
+                          label="排除目标 IP / IP 段 (route_exclude_address)"
+                          values={inb.route_exclude_address || []}
+                          onChange={(v) =>
+                            updateInboundAt(idx, {
+                              ...inb,
+                              route_exclude_address: v.length ? v : undefined,
+                            })
+                          }
+                          placeholder="如: 10.0.0.0/8, 192.168.1.100, fd00::/8"
+                          hint={
+                            inb.auto_route
+                              ? undefined
+                              : "需开启 auto_route 才生效"
+                          }
+                        />
+
+                        <div
+                          className={
+                            platform !== "linux" &&
+                            Boolean(inb.exclude_interface?.length)
+                              ? "p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 space-y-1.5"
+                              : "space-y-1.5"
+                          }
+                        >
+                          <TagListInput
+                            label="排除网卡名称 (exclude_interface)"
+                            values={inb.exclude_interface || []}
+                            onChange={(v) =>
+                              updateInboundAt(idx, {
+                                ...inb,
+                                exclude_interface: v.length ? v : undefined,
+                              })
+                            }
+                            placeholder="如: tailscale0, zt0, wg0"
+                            hint="按来源网卡排除，适合 P2P 组网虚拟网卡"
+                          />
+                          {platform !== "linux" &&
+                            Boolean(inb.exclude_interface?.length) && (
+                              <div className="text-[10px] text-rose-300">
+                                仅 Linux 支持网卡名称分流，当前平台不支持，请清空后再保存
+                              </div>
+                            )}
+                        </div>
+
+                        <TagListInput
+                          label="排除 IP 规则集 (route_exclude_address_set)"
+                          values={inb.route_exclude_address_set || []}
+                          onChange={(v) =>
+                            updateInboundAt(idx, {
+                              ...inb,
+                              route_exclude_address_set: v.length
+                                ? v
+                                : undefined,
+                            })
+                          }
+                          placeholder="如: geoip-cn"
+                          hint="需先在 route.rule_set 中定义同名规则集"
+                        />
+
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          P2P 组网建议同时填写 exclude_interface（按来源网卡）与
+                          route_exclude_address（按对端网段）。若开启 strict_route，
+                          回程流量不会自动排除，需把相关接口（如 br-lan、
+                          pppoe-wan）一并加入 exclude_interface，或把对应网段加入
+                          route_exclude_address。
+                        </p>
+                      </div>
+
                       {(isAndroid ||
                         Boolean(
                           inb.include_package?.length ||
