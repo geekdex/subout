@@ -6,6 +6,7 @@ describe("router utils", () => {
     expect(parseRoute("#/settings").tab).toBe("settings");
     expect(parseRoute("#/nodes").tab).toBe("nodes");
     expect(parseRoute("#/auto-update").tab).toBe("auto-update");
+    expect(parseRoute("#/site-test").tab).toBe("site-test");
     expect(parseRoute("#simple").tab).toBe("simple");
   });
 

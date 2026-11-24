@@ -27,6 +27,7 @@ import { ProfilesView } from "./components/views/ProfilesView";
 import { SubscriptionsView } from "./components/views/SubscriptionsView";
 import { NodesView } from "./components/views/NodesView";
 import { NodeGroupsView } from "./components/views/NodeGroupsView";
+import { SiteTestView } from "./components/views/SiteTestView";
 import { AutoUpdateView } from "./components/views/AutoUpdateView";
 import { ServiceLogsView } from "./components/views/ServiceLogsView";
 import { SettingsView } from "./components/views/SettingsView";
@@ -380,6 +381,8 @@ const AppContent: React.FC = () => {
               onRefresh={loadAllData}
             />
           )}
+
+          {currentTab === "site-test" && <SiteTestView />}
 
           {currentTab === "auto-update" && <AutoUpdateView />}
 

@@ -491,6 +491,14 @@ pub struct SiteProbeResponse {
     pub status_code: Option<u16>,
     pub success: bool,
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns_rule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns_server: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_rule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outbound: Option<String>,
 }
 
 /// Directly tests site reachability from the host server.
@@ -501,24 +509,53 @@ pub async fn probe_site_connectivity(
     Json(payload): Json<SiteProbeRequest>,
 ) -> Result<Json<SiteProbeResponse>, StatusCode> {
     check_auth(&state, &headers).await?;
+    Ok(Json(
+        probe_site(&payload.url, payload.timeout_ms, &state).await,
+    ))
+}
 
-    let mut url = payload.url.trim().to_string();
+/// Shared probe implementation used by both `/api/system/site-probe` and the
+/// legacy `/api/nodes/site-test` endpoint, so both get the same bounded,
+/// single-source-of-truth probing logic.
+pub(crate) async fn probe_site(
+    url_input: &str,
+    timeout_ms: Option<u64>,
+    state: &AppState,
+) -> SiteProbeResponse {
+    let mut url = url_input.trim().to_string();
     if url.is_empty() {
-        return Ok(Json(SiteProbeResponse {
+        return SiteProbeResponse {
             url,
             latency_ms: None,
             status_code: None,
             success: false,
             error: Some("网址不能为空".to_string()),
-        }));
+            dns_rule: None,
+            dns_server: None,
+            route_rule: None,
+            outbound: None,
+        };
     }
 
     if !url.starts_with("http://") && !url.starts_with("https://") {
         url = format!("https://{url}");
     }
 
+    // Which DNS/route rules would apply to this URL under the active config.
+    // No active config (e.g. hosting mode) simply means no trace to display.
+    let (dns_rule, dns_server, route_rule, outbound) =
+        match crate::rule_matcher::evaluate_site_trace(state, &url) {
+            Some(t) => (
+                Some(t.dns_rule),
+                Some(t.dns_server),
+                Some(t.route_rule),
+                Some(t.outbound),
+            ),
+            None => (None, None, None, None),
+        };
+
     let timeout_duration =
-        std::time::Duration::from_millis(payload.timeout_ms.unwrap_or(5000).clamp(1000, 10000));
+        std::time::Duration::from_millis(timeout_ms.unwrap_or(5000).clamp(1000, 10000));
     let direct_timeout = std::time::Duration::from_millis(2500);
     let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -548,13 +585,17 @@ pub async fn probe_site_connectivity(
                 let elapsed = start.elapsed().as_millis() as u64;
                 let status = resp.status().as_u16();
                 let success = status < 400 || status == 403 || status == 405 || status == 429;
-                return Ok(Json(SiteProbeResponse {
+                return SiteProbeResponse {
                     url,
                     latency_ms: Some(elapsed),
                     status_code: Some(status),
                     success,
                     error: None,
-                }));
+                    dns_rule,
+                    dns_server,
+                    route_rule,
+                    outbound,
+                };
             }
             Err(e) => {
                 last_err = Some(e.to_string());
@@ -581,13 +622,17 @@ pub async fn probe_site_connectivity(
                     let elapsed = proxy_start.elapsed().as_millis() as u64;
                     let status = resp.status().as_u16();
                     let success = status < 400 || status == 403 || status == 405 || status == 429;
-                    return Ok(Json(SiteProbeResponse {
+                    return SiteProbeResponse {
                         url,
                         latency_ms: Some(elapsed),
                         status_code: Some(status),
                         success,
                         error: None,
-                    }));
+                        dns_rule,
+                        dns_server,
+                        route_rule,
+                        outbound,
+                    };
                 }
                 Err(e) => {
                     last_err = Some(e.to_string());
@@ -596,13 +641,17 @@ pub async fn probe_site_connectivity(
         }
     }
 
-    Ok(Json(SiteProbeResponse {
+    SiteProbeResponse {
         url,
         latency_ms: None,
         status_code: None,
         success: false,
         error: Some(last_err.unwrap_or_else(|| "网络请求超时或连接失败".to_string())),
-    }))
+        dns_rule,
+        dns_server,
+        route_rule,
+        outbound,
+    }
 }
 
 #[cfg(test)]
@@ -634,10 +683,32 @@ mod tests {
             status_code: Some(200),
             success: true,
             error: None,
+            dns_rule: Some("规则集 (geosite-cn)".to_string()),
+            dns_server: Some("dns_local (UDP 223.5.5.5)".to_string()),
+            route_rule: Some("规则集 (geosite-cn)".to_string()),
+            outbound: Some("direct (直连出站)".to_string()),
         };
         let resp_json = serde_json::to_value(&resp).unwrap();
         assert_eq!(resp_json["latency_ms"], 25);
         assert_eq!(resp_json["success"], true);
+        assert_eq!(resp_json["dns_rule"], "规则集 (geosite-cn)");
+        assert_eq!(resp_json["outbound"], "direct (直连出站)");
+
+        // Absent trace info must not clutter the response for older clients.
+        let no_trace = SiteProbeResponse {
+            url: "https://www.baidu.com".to_string(),
+            latency_ms: None,
+            status_code: None,
+            success: false,
+            error: Some("网络请求超时或连接失败".to_string()),
+            dns_rule: None,
+            dns_server: None,
+            route_rule: None,
+            outbound: None,
+        };
+        let no_trace_json = serde_json::to_value(&no_trace).unwrap();
+        assert!(no_trace_json.get("dns_rule").is_none());
+        assert!(no_trace_json.get("outbound").is_none());
     }
 
     #[test]

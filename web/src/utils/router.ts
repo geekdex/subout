@@ -7,6 +7,7 @@ export const VALID_TABS: readonly NavTab[] = [
   "subscriptions",
   "nodes",
   "groups",
+  "site-test",
   "auto-update",
   "logs",
   "settings",

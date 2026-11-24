@@ -548,6 +548,9 @@ fn gatekeeper_requires_kernel(run_mode: &str, path: &str) -> bool {
         || path == "/api/system/info"
         || path.starts_with("/api/auth/")
         || path.starts_with("/api/system/run-mode")
+        // Network detection is useful precisely before a kernel is installed;
+        // it still requires authentication via check_auth in its handler.
+        || path == "/api/system/site-probe"
         || path.starts_with("/sub/");
     if is_whitelisted {
         return false;
@@ -645,6 +648,16 @@ mod tests {
         assert!(gatekeeper_requires_kernel("local", "/api/service/start"));
         assert!(!gatekeeper_requires_kernel("local", "/sub/abc"));
         assert!(!gatekeeper_requires_kernel("local", "/api/auth/login"));
+        // Network diagnosis must work before a kernel is installed; only this
+        // exact path is exempt, lookalike paths stay gated.
+        assert!(!gatekeeper_requires_kernel(
+            "local",
+            "/api/system/site-probe"
+        ));
+        assert!(gatekeeper_requires_kernel(
+            "local",
+            "/api/system/site-probe-extra"
+        ));
     }
 
     #[test]
@@ -656,7 +669,10 @@ mod tests {
             );
             assert!(!gatekeeper_requires_kernel(mode, "/api/subscriptions"));
             assert!(!gatekeeper_requires_kernel(mode, "/api/node-groups"));
-            assert!(!gatekeeper_requires_kernel(mode, "/api/auto-update/history"));
+            assert!(!gatekeeper_requires_kernel(
+                mode,
+                "/api/auto-update/history"
+            ));
             assert!(gatekeeper_requires_kernel(mode, "/api/service/start"));
             assert!(gatekeeper_requires_kernel(mode, "/api/simple-config"));
             assert!(!gatekeeper_requires_kernel(mode, "/sub/abc"));

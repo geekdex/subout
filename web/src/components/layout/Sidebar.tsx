@@ -7,6 +7,7 @@ import {
   Rss,
   Server,
   FolderKanban,
+  Globe2,
   RefreshCw,
   FileText,
   Settings,
@@ -27,6 +28,7 @@ export type NavTab =
   | "subscriptions"
   | "nodes"
   | "groups"
+  | "site-test"
   | "auto-update"
   | "logs"
   | "settings";
@@ -109,6 +111,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       requiresKernel: true,
       badge: versionCode ? `v${String(versionCode).slice(-4)}` : undefined,
       showInMode: "expert",
+    },
+    {
+      id: "site-test",
+      label: "网络检测",
+      icon: <Globe2 className="w-4 h-4" />,
+      requiresKernel: false,
+      showInMode: "all",
     },
     {
       id: "auto-update",

@@ -1284,17 +1284,9 @@ pub struct SiteTestResponse {
     pub outbound: Option<String>,
 }
 
-async fn try_fetch_url(client: &reqwest::Client, url: &str) -> Option<(u16, u64)> {
-    let start = Instant::now();
-    if let Ok(resp) = client.get(url).send().await {
-        let status = resp.status().as_u16();
-        let elapsed = start.elapsed().as_millis() as u64;
-        Some((status, elapsed))
-    } else {
-        None
-    }
-}
-
+/// Backward-compatible adapter for the legacy `/api/nodes/site-test` route.
+/// The actual probing lives in `web::system::probe_site`, so both endpoints
+/// share one bounded implementation (no hardcoded proxy ports / 60s loop).
 pub async fn test_site_reachability(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1302,105 +1294,17 @@ pub async fn test_site_reachability(
 ) -> Result<Json<SiteTestResponse>, StatusCode> {
     check_auth(&state, &headers).await?;
 
-    let url = payload.url.trim().to_string();
-    if url.is_empty() {
-        return Ok(Json(SiteTestResponse {
-            url,
-            status_code: None,
-            latency: None,
-            success: false,
-            error: Some("网址不能为空".to_string()),
-            dns_rule: None,
-            dns_server: None,
-            route_rule: None,
-            outbound: None,
-        }));
-    }
-
-    // Evaluate DNS and Route rule matching against active sing-box configuration
-    let trace_info = crate::rule_matcher::evaluate_site_trace(&state, &url);
-    let (dns_rule, dns_server, route_rule, outbound) = match trace_info {
-        Some(t) => (
-            Some(t.dns_rule),
-            Some(t.dns_server),
-            Some(t.route_rule),
-            Some(t.outbound),
-        ),
-        None => (None, None, None, None),
-    };
-
-    let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-    // 1. Try standard client (uses environment proxy / TUN mode / direct sockets)
-    if let Ok(client) = reqwest::Client::builder()
-        .user_agent(user_agent)
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .timeout(Duration::from_secs(8))
-        .build()
-        && let Some((status, elapsed)) = try_fetch_url(&client, &url).await
-    {
-        let success = status < 400 || status == 403 || status == 405 || status == 429;
-        return Ok(Json(SiteTestResponse {
-            url,
-            status_code: Some(status),
-            latency: Some(elapsed),
-            success,
-            error: None,
-            dns_rule,
-            dns_server,
-            route_rule,
-            outbound,
-        }));
-    }
-
-    // 2. Fallback: If system env proxy was missing or failed, probe common local proxy ports
-    let candidate_proxy_urls = [
-        "http://127.0.0.1:12334",
-        "socks5://127.0.0.1:12334",
-        "http://127.0.0.1:7890",
-        "socks5://127.0.0.1:7890",
-        "http://127.0.0.1:2334",
-        "socks5://127.0.0.1:2334",
-        "http://127.0.0.1:10809",
-        "socks5://127.0.0.1:10808",
-        "http://127.0.0.1:2080",
-    ];
-
-    for proxy_str in &candidate_proxy_urls {
-        if let Ok(proxy) = reqwest::Proxy::all(*proxy_str)
-            && let Ok(client) = reqwest::Client::builder()
-                .proxy(proxy)
-                .user_agent(user_agent)
-                .redirect(reqwest::redirect::Policy::limited(10))
-                .timeout(Duration::from_secs(6))
-                .build()
-            && let Some((status, elapsed)) = try_fetch_url(&client, &url).await
-        {
-            let success = status < 400 || status == 403 || status == 405 || status == 429;
-            return Ok(Json(SiteTestResponse {
-                url,
-                status_code: Some(status),
-                latency: Some(elapsed),
-                success,
-                error: None,
-                dns_rule,
-                dns_server,
-                route_rule,
-                outbound,
-            }));
-        }
-    }
-
+    let probed = crate::web::system::probe_site(&payload.url, None, &state).await;
     Ok(Json(SiteTestResponse {
-        url,
-        status_code: None,
-        latency: None,
-        success: false,
-        error: Some("网络无法在 10 秒内连通目标网站，请确认外部代理软件已正常连接".to_string()),
-        dns_rule,
-        dns_server,
-        route_rule,
-        outbound,
+        url: probed.url,
+        status_code: probed.status_code,
+        latency: probed.latency_ms,
+        success: probed.success,
+        error: probed.error,
+        dns_rule: probed.dns_rule,
+        dns_server: probed.dns_server,
+        route_rule: probed.route_rule,
+        outbound: probed.outbound,
     }))
 }
 

@@ -125,6 +125,12 @@ export interface SiteProbeResponse {
   status_code: number | null;
   success: boolean;
   error?: string | null;
+  /** 当前激活配置下，该网址会命中的 DNS 规则 / 服务器（无配置时不返回） */
+  dns_rule?: string | null;
+  dns_server?: string | null;
+  /** 当前激活配置下，该网址会命中的路由规则 / 出站（无配置时不返回） */
+  route_rule?: string | null;
+  outbound?: string | null;
 }
 
 export interface NodeItem {
