@@ -42,8 +42,55 @@ import {
   type LatencyCategory,
 } from "../../utils/format";
 
-type LatencyFilterValue = "all" | LatencyCategory;
+type LatencyFilterValue = "all" | "better" | "poor" | "timeout" | "untested";
 
+/**
+ * 精细延迟分类的展示信息。表格单元格的 tooltip 用它标注精确边界，
+ * 与快捷筛选项解耦——合并筛选项后单元格仍能说明自己所属的细分区间。
+ */
+const LATENCY_CATEGORY_META: Record<
+  LatencyCategory,
+  { label: string; range: string; title: string }
+> = {
+  good: {
+    label: "良好",
+    range: "(0, 150)ms",
+    title: "良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）",
+  },
+  fair: {
+    label: "一般",
+    range: "[150, 350)ms",
+    title: "一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350",
+  },
+  poor: {
+    label: "较差",
+    range: "[350, +∞)ms",
+    title: "较差：延迟 ≥ 350ms，包含 350",
+  },
+  timeout: {
+    label: "超时",
+    range: "(-∞, 0]ms",
+    title: "超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记",
+  },
+  untested: {
+    label: "未测试",
+    range: "",
+    title: "未测试：尚无测速数据",
+  },
+};
+
+const FILTER_ACTIVE_CLASS: Record<LatencyFilterValue, string> = {
+  all: "border-sky-500/50 bg-sky-500/15 text-sky-300",
+  better: "border-emerald-500/50 bg-emerald-500/15 text-emerald-300",
+  poor: "border-rose-500/50 bg-rose-500/15 text-rose-300",
+  timeout: "border-rose-500/50 bg-rose-500/15 text-rose-300",
+  untested: "border-slate-500/50 bg-slate-600/40 text-slate-200",
+};
+
+/**
+ * 测速结果快捷筛选项。将原「良好」「一般」合并为「较好」以减少标签数量，
+ * 避免 1080px 宽的 PC 页面出现换行；表格单元格仍按精细分类着色。
+ */
 const LATENCY_FILTERS: {
   value: LatencyFilterValue;
   label: string;
@@ -58,44 +105,43 @@ const LATENCY_FILTERS: {
     label: "全部",
     range: "",
     title: "显示全部节点（不限测速结果）",
-    activeClass: "border-sky-500/50 bg-sky-500/15 text-sky-300",
+    activeClass: FILTER_ACTIVE_CLASS.all,
   },
   {
-    value: "good",
-    label: "良好",
-    range: "(0, 150)ms",
-    title: "良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）",
-    activeClass: "border-emerald-500/50 bg-emerald-500/15 text-emerald-300",
-  },
-  {
-    value: "fair",
-    label: "一般",
-    range: "[150, 350)ms",
-    title: "一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350",
-    activeClass: "border-amber-500/50 bg-amber-500/15 text-amber-300",
+    value: "better",
+    label: "较好",
+    range: "(0, 350)ms",
+    title: "较好：0ms < 延迟 < 350ms（合并原「良好」与「一般」）",
+    activeClass: FILTER_ACTIVE_CLASS.better,
   },
   {
     value: "poor",
-    label: "较差",
-    range: "[350, +∞)ms",
-    title: "较差：延迟 ≥ 350ms，包含 350",
-    activeClass: "border-rose-500/50 bg-rose-500/15 text-rose-300",
+    ...LATENCY_CATEGORY_META.poor,
+    activeClass: FILTER_ACTIVE_CLASS.poor,
   },
   {
     value: "timeout",
-    label: "超时",
-    range: "(-∞, 0]ms",
-    title: "超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记",
-    activeClass: "border-rose-500/50 bg-rose-500/15 text-rose-300",
+    ...LATENCY_CATEGORY_META.timeout,
+    activeClass: FILTER_ACTIVE_CLASS.timeout,
   },
   {
     value: "untested",
-    label: "未测试",
-    range: "",
-    title: "未测试：尚无测速数据",
-    activeClass: "border-slate-500/50 bg-slate-600/40 text-slate-200",
+    ...LATENCY_CATEGORY_META.untested,
+    activeClass: FILTER_ACTIVE_CLASS.untested,
   },
 ];
+
+/** 精细分类 → 快捷筛选项：计数与筛选共用同一口径 */
+const CATEGORY_TO_FILTER: Record<
+  LatencyCategory,
+  Exclude<LatencyFilterValue, "all">
+> = {
+  good: "better",
+  fair: "better",
+  poor: "poor",
+  timeout: "timeout",
+  untested: "untested",
+};
 
 const FILTER_STORAGE_KEY = "subout_nodes_filter";
 
@@ -120,6 +166,12 @@ function loadPersistedFilter(): PersistedNodesFilter {
     const raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
     if (!raw) return DEFAULT_NODES_FILTER;
     const saved = JSON.parse(raw) as Partial<PersistedNodesFilter>;
+    // 合并前的「良好」「一般」迁移到「较好」，避免老用户刷新后丢失筛选状态
+    const legacyLatency = saved.latency as string | undefined;
+    const rawLatency =
+      legacyLatency === "good" || legacyLatency === "fair"
+        ? "better"
+        : legacyLatency;
     return {
       search:
         typeof saved.search === "string"
@@ -133,9 +185,9 @@ function loadPersistedFilter(): PersistedNodesFilter {
           ? saved.subscription
           : DEFAULT_NODES_FILTER.subscription,
       latency:
-        typeof saved.latency === "string" &&
-        LATENCY_FILTERS.some((f) => f.value === saved.latency)
-          ? (saved.latency as LatencyFilterValue)
+        typeof rawLatency === "string" &&
+        LATENCY_FILTERS.some((f) => f.value === rawLatency)
+          ? (rawLatency as LatencyFilterValue)
           : DEFAULT_NODES_FILTER.latency,
     };
   } catch {
@@ -294,14 +346,14 @@ export const NodesView: React.FC<NodesViewProps> = ({
 
   const latencyCounts: Record<LatencyFilterValue, number> = {
     all: baseFilteredNodes.length,
-    good: 0,
-    fair: 0,
+    better: 0,
     poor: 0,
     timeout: 0,
     untested: 0,
   };
   baseFilteredNodes.forEach((node) => {
-    latencyCounts[getLatencyCategory(getEffectiveLatency(node))] += 1;
+    const category = getLatencyCategory(getEffectiveLatency(node));
+    latencyCounts[CATEGORY_TO_FILTER[category]] += 1;
   });
 
   const filteredNodes =
@@ -309,7 +361,9 @@ export const NodesView: React.FC<NodesViewProps> = ({
       ? baseFilteredNodes
       : baseFilteredNodes.filter(
           (node) =>
-            getLatencyCategory(getEffectiveLatency(node)) === latencyFilter,
+            CATEGORY_TO_FILTER[
+              getLatencyCategory(getEffectiveLatency(node))
+            ] === latencyFilter,
         );
 
   const sortedNodes = [...filteredNodes].sort((a, b) => {
@@ -768,16 +822,15 @@ export const NodesView: React.FC<NodesViewProps> = ({
         const primaryLatency = getEffectiveLatency(node);
         const { text, color } = formatLatency(primaryLatency);
         const endpointName = getTestEndpointName(node.last_target_url);
-        const categoryInfo = LATENCY_FILTERS.find(
-          (filter) => filter.value === getLatencyCategory(primaryLatency),
-        );
+        const categoryInfo =
+          LATENCY_CATEGORY_META[getLatencyCategory(primaryLatency)];
 
         return (
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span
                 className={`font-mono text-xs font-semibold ${color}`}
-                title={categoryInfo?.title}
+                title={categoryInfo.title}
               >
                 {text}
               </span>

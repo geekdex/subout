@@ -95,6 +95,8 @@ const renderWithToast = (ui: React.ReactElement) => {
 const latencyChip = (title: string) =>
   within(screen.getByRole("group", { name: "测速结果筛选" })).getByTitle(title);
 
+const BETTER_TITLE = "较好：0ms < 延迟 < 350ms（合并原「良好」与「一般」）";
+
 describe("NodesView Component", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -655,10 +657,27 @@ describe("NodesView Component", () => {
     it("在每个分类上标注速度区间与边界包含规则", () => {
       renderWithToast(<NodesView nodes={mockNodes} onRefresh={vi.fn()} />);
 
-      expect(screen.getByText("(0, 150)ms")).toBeDefined();
-      expect(screen.getByText("[150, 350)ms")).toBeDefined();
+      expect(screen.getByText("(0, 350)ms")).toBeDefined();
       expect(screen.getByText("[350, +∞)ms")).toBeDefined();
       expect(screen.getByText("(-∞, 0]ms")).toBeDefined();
+      expect(screen.queryByText("(0, 150)ms")).toBeNull();
+      expect(screen.queryByText("[150, 350)ms")).toBeNull();
+    });
+
+    it("筛选标签数量为 5，避免 1080px 页面换行", () => {
+      renderWithToast(<NodesView nodes={mockNodes} onRefresh={vi.fn()} />);
+
+      const buttons = within(
+        screen.getByRole("group", { name: "测速结果筛选" }),
+      ).getAllByRole("button");
+      expect(buttons).toHaveLength(5);
+      expect(buttons.map((b) => b.textContent)).toEqual([
+        expect.stringContaining("全部"),
+        expect.stringContaining("较好"),
+        expect.stringContaining("较差"),
+        expect.stringContaining("超时"),
+        expect.stringContaining("未测试"),
+      ]);
     });
 
     it("在端点值处按标注区间正确归类节点", () => {
@@ -675,15 +694,13 @@ describe("NodesView Component", () => {
 
       const titles = {
         all: "显示全部节点（不限测速结果）",
-        good: "良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）",
-        fair: "一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350",
+        better: BETTER_TITLE,
         poor: "较差：延迟 ≥ 350ms，包含 350",
         timeout: "超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记",
         untested: "未测试：尚无测速数据",
       };
       expect(chip(titles.all).textContent).toContain("7");
-      expect(chip(titles.good).textContent).toContain("1");
-      expect(chip(titles.fair).textContent).toContain("2");
+      expect(chip(titles.better).textContent).toContain("3"); // 149、150、349ms
       expect(chip(titles.poor).textContent).toContain("1");
       expect(chip(titles.timeout).textContent).toContain("2");
       expect(chip(titles.untested).textContent).toContain("1");
@@ -699,10 +716,8 @@ describe("NodesView Component", () => {
         }
       };
 
-      fireEvent.click(chip(titles.good));
-      expectVisible([3]); // 149ms
-      fireEvent.click(chip(titles.fair));
-      expectVisible([4, 5]); // 150ms、349ms
+      fireEvent.click(chip(titles.better));
+      expectVisible([3, 4, 5]); // 149、150、349ms 合并为「较好」
       fireEvent.click(chip(titles.poor));
       expectVisible([6]); // 350ms
       fireEvent.click(chip(titles.timeout));
@@ -733,34 +748,22 @@ describe("NodesView Component", () => {
       expect(
         chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记").textContent,
       ).toContain("1");
-      expect(
-        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350")
-          .textContent,
-      ).toContain("1");
+      expect(chip(BETTER_TITLE).textContent).toContain("1");
 
       fireEvent.click(chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记"));
       expect(screen.getByText("WebZero")).toBeDefined();
       expect(screen.queryByText("TcpOnly")).toBeNull();
 
-      fireEvent.click(
-        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350"),
-      );
+      fireEvent.click(chip(BETTER_TITLE));
       expect(screen.getByText("TcpOnly")).toBeDefined();
       expect(screen.queryByText("WebZero")).toBeNull();
     });
 
-    it("按良好 / 一般 / 未测试 / 超时展示实时数量", () => {
+    it("按较好 / 较差 / 未测试 / 超时展示实时数量", () => {
       renderWithToast(<NodesView nodes={mockNodes} onRefresh={vi.fn()} />);
 
       expect(chip("显示全部节点（不限测速结果）").textContent).toContain("3");
-      expect(
-        chip("良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）")
-          .textContent,
-      ).toContain("1");
-      expect(
-        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350")
-          .textContent,
-      ).toContain("1");
+      expect(chip(BETTER_TITLE).textContent).toContain("2"); // 良好 + 一般
       expect(chip("较差：延迟 ≥ 350ms，包含 350").textContent).toContain("0");
       expect(
         chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记").textContent,
@@ -774,23 +777,11 @@ describe("NodesView Component", () => {
       );
       const rows = () => container.querySelectorAll("tbody tr").length;
 
-      fireEvent.click(
-        chip("良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）"),
-      );
-      expect(rows()).toBe(1);
+      fireEvent.click(chip(BETTER_TITLE));
+      expect(rows()).toBe(2);
       expect(screen.getByText("HK-01-Fast")).toBeDefined();
-      expect(screen.queryByText("US-02-Cloudflare")).toBeNull();
-      expect(
-        chip(
-          "良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）",
-        ).getAttribute("aria-pressed"),
-      ).toBe("true");
-
-      fireEvent.click(
-        chip("一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350"),
-      );
-      expect(rows()).toBe(1);
       expect(screen.getByText("US-02-Cloudflare")).toBeDefined();
+      expect(chip(BETTER_TITLE).getAttribute("aria-pressed")).toBe("true");
 
       fireEvent.click(chip("未测试：尚无测速数据"));
       expect(rows()).toBe(1);
@@ -846,10 +837,7 @@ describe("NodesView Component", () => {
       expect(
         chip("超时：延迟 ≤ 0ms，包含 0 及 -1 等失败标记").textContent,
       ).toContain("1");
-      expect(
-        chip("良好：0ms < 延迟 < 150ms，不含 0 和 150（0 及以下计入超时）")
-          .textContent,
-      ).toContain("0");
+      expect(chip(BETTER_TITLE).textContent).toContain("0");
       expect(rows()).toBe(1);
     });
   });
@@ -882,13 +870,27 @@ describe("NodesView Component", () => {
       expect(
         screen.getByRole("button", { name: /香港主力机场/i }),
       ).toBeDefined();
-      expect(
-        latencyChip(
-          "一般：150ms ≤ 延迟 < 350ms，左闭右开，包含 150、不含 350",
-        ).getAttribute("aria-pressed"),
-      ).toBe("true");
+      expect(latencyChip(BETTER_TITLE).getAttribute("aria-pressed")).toBe(
+        "true",
+      );
       expect(container.querySelectorAll("tbody tr").length).toBe(1);
       expect(screen.getByText("US-02-Cloudflare")).toBeDefined();
+    });
+
+    it("合并前的良好/一般筛选值迁移到较好", () => {
+      for (const legacy of ["good", "fair"]) {
+        window.localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ search: "", subscription: "all", latency: legacy }),
+        );
+        const view = renderWithToast(
+          <NodesView nodes={mockNodes} onRefresh={vi.fn()} />,
+        );
+        expect(latencyChip(BETTER_TITLE).getAttribute("aria-pressed")).toBe(
+          "true",
+        );
+        view.unmount();
+      }
     });
 
     it("修改任一筛选条件后写回 localStorage", () => {
