@@ -5,6 +5,26 @@ use std::sync::OnceLock;
 
 static OFFICIAL_SCHEMA: OnceLock<Value> = OnceLock::new();
 
+/// DNS server addresses that are well-known plaintext-only resolvers (UDP 53).
+/// These IPs do not serve encrypted DNS (DoH/DoT/DoQ) on their standard ports,
+/// so configuring one with an encrypted `type` is always a runtime failure
+/// (e.g. `dial tcp 119.29.29.29:443: i/o timeout` on startup).
+///
+/// This is deliberately a small, explicit list rather than a network probe:
+/// validation is offline and must never make a hidden decision for the user.
+/// Valid encrypted resolvers (1.1.1.1, 8.8.8.8, 223.5.5.5, 1.12.12.12, ...) are
+/// intentionally absent so they are never flagged.
+const PLAINTEXT_ONLY_DNS_IPS: &[&str] = &[
+    "119.29.29.29",   // DNSPod public DNS — UDP only
+    "114.114.114.114", // 114DNS — UDP only
+    "180.76.76.76",   // Baidu DNS — UDP only
+];
+
+/// Returns true for encrypted DNS transports (DoH / DoT / DoH3 / DoQ).
+fn is_encrypted_dns_type(t: &str) -> bool {
+    matches!(t, "https" | "tls" | "h3" | "quic")
+}
+
 /// Returns a reference to the parsed official sing-box JSON Schema (`schema.json`).
 pub fn get_official_schema() -> &'static Value {
     OFFICIAL_SCHEMA.get_or_init(|| {
@@ -324,6 +344,25 @@ fn validate_config_semantics(root: &serde_json::Map<String, Value>, errors: &mut
             if has_tun && srv_type == "local" {
                 errors.push(format!(
                     "dns.servers[{idx}].type: 使用 TUN 入站时 'local' DNS 会与隧道形成回环；请改用明确的 upstream DNS 服务器（如 udp / https / tls 类型）并填写 server 地址"
+                ));
+            }
+
+            // Encrypted DNS (DoH/DoT/DoQ) pointed at a known plaintext-only
+            // resolver IP can never connect: those IPs do not listen on 443/853/7844.
+            // Catch the common mistake of switching `type` from udp to https while
+            // keeping a UDP DNS IP as `server`. WYSIWYG: report the field, never
+            // silently rewrite the type or address.
+            let server_host = obj
+                .get("server")
+                .and_then(Value::as_str)
+                .map(|addr| addr.rsplit_once(':').map_or(addr, |(h, _)| h));
+            if is_encrypted_dns_type(srv_type)
+                && server_host.is_some_and(|h| PLAINTEXT_ONLY_DNS_IPS.contains(&h))
+            {
+                errors.push(format!(
+                    "dns.servers[{idx}].server: 地址 {} 是纯明文 DNS 服务器，不提供加密 DNS（{}）；请改用 udp 类型，或更换为支持加密 DNS 的地址（如 1.1.1.1 / 8.8.8.8 / 223.5.5.5 / 1.12.12.12）",
+                    server_host.unwrap_or_default(),
+                    srv_type
                 ));
             }
 
@@ -1250,6 +1289,51 @@ mod tests {
         let mut errors = Vec::new();
         validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
         assert!(errors.iter().any(|e| e.contains("dns.servers[0].type")));
+    }
+
+    #[test]
+    fn test_encrypted_dns_with_plaintext_only_ip_is_rejected() {
+        for (encrypted_type, ip) in [
+            ("https", "119.29.29.29"),
+            ("tls", "114.114.114.114"),
+            ("h3", "180.76.76.76"),
+            ("quic", "119.29.29.29"),
+        ] {
+            let cfg = json!({
+                "dns": { "servers": [{ "type": encrypted_type, "tag": "dns-remote", "server": ip }] }
+            });
+            let mut errors = Vec::new();
+            validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+            assert!(
+                errors.iter().any(|e| e.contains("dns.servers[0].server")),
+                "expected error for {encrypted_type} + {ip}, got: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_encrypted_dns_with_valid_doh_ip_is_accepted() {
+        for ip in ["1.1.1.1", "8.8.8.8", "223.5.5.5", "1.12.12.12"] {
+            let cfg = json!({
+                "dns": { "servers": [{ "type": "https", "tag": "dns-remote", "server": ip }] }
+            });
+            let mut errors = Vec::new();
+            validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+            assert!(
+                errors.is_empty(),
+                "{ip} is a valid DoH IP and must not be flagged, got: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_udp_dns_with_plaintext_ip_is_accepted() {
+        let cfg = json!({
+            "dns": { "servers": [{ "type": "udp", "tag": "dns-local", "server": "119.29.29.29" }] }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(errors.is_empty(), "udp + 119.29.29.29 is valid, got: {errors:?}");
     }
 
     #[test]

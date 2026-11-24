@@ -67,19 +67,25 @@ export const ProfilesView: React.FC<ProfilesViewProps> = ({
     }
     setCreating(true);
     try {
-      // Default empty sing-box 1.14 basic skeleton
+      // Explicit v0.3 skeleton: every field that used to be auto-filled is
+      // written out so the editor shows exactly what sing-box will run.
+      // Keep in sync with `default_new_config_template()` in configs_api.rs.
       const defaultConfig = {
         $schema: "https://sing-box.sagernet.org/schema.json",
-        log: {},
-        dns: {},
+        log: { level: "info", timestamp: true },
+        dns: {
+          servers: [{ tag: "dns-local", type: "udp", server: "223.5.5.5" }],
+          final: "dns-local",
+          strategy: "ipv4_only",
+        },
         ntp: {},
         certificate: {},
         certificate_providers: [],
-        http_clients: [],
+        http_clients: [{ tag: "direct" }],
         endpoints: [],
         inbounds: [],
-        outbounds: [],
-        route: {},
+        outbounds: [{ type: "direct", tag: "direct" }],
+        route: { auto_detect_interface: true, final: "direct" },
         services: [],
         experimental: {},
       };

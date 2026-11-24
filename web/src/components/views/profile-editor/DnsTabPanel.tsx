@@ -10,6 +10,7 @@ import {
   ArrowDown,
   GitBranch,
   Wand2,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "../../ui/Button";
 import { Badge } from "../../ui/Badge";
@@ -30,7 +31,7 @@ import {
 import { CollapsibleToolbar } from "./CollapsibleToolbar";
 import { RuleTreeEditor } from "./RuleTreeEditor";
 
-import { moveArrayItem } from "./shared";
+import { moveArrayItem, isPlaintextIpForEncryptedDns } from "./shared";
 
 /* ============================================================================
  * 2. DNS Tab (Top Collapsible Toolbar + Bottom Servers & Rules Reorderable Lists)
@@ -858,11 +859,27 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
                 ].includes(srv.type || "udp");
                 const isFakeIp = srv.type === "fakeip";
 
+                const incompatibleType = isPlaintextIpForEncryptedDns(
+                  srv.type || "udp",
+                  srv.server || "",
+                );
+
                 return (
                   <div
                     key={`dns-server-${idx}`}
                     className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
                   >
+                    {incompatibleType && (
+                      <div className="sm:col-span-12 flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
+                        <span>
+                          地址 <code className="font-mono">{srv.server}</code> 是纯明文 DNS
+                          服务器，不提供加密 DNS（{srv.type.toUpperCase()}）。启动时会因连接超时失败。
+                          请改用 <code className="font-mono">udp</code> 类型，或更换为支持加密 DNS 的地址（如
+                          1.1.1.1 / 8.8.8.8 / 223.5.5.5 / 1.12.12.12）。
+                        </span>
+                      </div>
+                    )}
                     <div className="sm:col-span-3">
                       <Input
                         label={`#${idx + 1} 标签 (tag)`}

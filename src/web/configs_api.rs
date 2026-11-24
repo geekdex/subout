@@ -8,6 +8,35 @@ use serde::{Deserialize, Serialize};
 use crate::db;
 use crate::web::{AppState, check_auth, get_db_conn};
 
+/// Default skeleton used when creating a new configuration profile.
+///
+/// v0.3 no longer auto-fills fields that were previously implicit (log level,
+/// DNS strategy/final, `route.auto_detect_interface`, ...). A new profile must
+/// therefore start from an explicit, valid skeleton so that what the editor
+/// shows is exactly what sing-box will run. Keep this in sync with the
+/// frontend template in `ProfilesView.tsx`.
+pub fn default_new_config_template() -> serde_json::Value {
+    serde_json::json!({
+        "$schema": "https://sing-box.sagernet.org/schema.json",
+        "log": { "level": "info", "timestamp": true },
+        "dns": {
+            "servers": [{ "tag": "dns-local", "type": "udp", "server": "223.5.5.5" }],
+            "final": "dns-local",
+            "strategy": "ipv4_only"
+        },
+        "ntp": {},
+        "certificate": {},
+        "certificate_providers": [],
+        "http_clients": [{ "tag": "direct" }],
+        "endpoints": [],
+        "inbounds": [],
+        "outbounds": [{ "type": "direct", "tag": "direct" }],
+        "route": { "auto_detect_interface": true, "final": "direct" },
+        "services": [],
+        "experimental": {}
+    })
+}
+
 #[derive(Deserialize)]
 pub struct ConfigsQuery {
     pub platform: Option<String>,
@@ -136,24 +165,9 @@ pub async fn create_config(
         ));
     }
 
-    let content = payload.content.unwrap_or_else(|| {
-        serde_json::json!({
-            "$schema": "https://sing-box.sagernet.org/schema.json",
-            "log": {},
-            "dns": {},
-            "ntp": {},
-            "certificate": {},
-            "certificate_providers": [],
-            "http_clients": [],
-            "endpoints": [],
-            "inbounds": [],
-            "outbounds": [],
-            "route": {},
-            "services": [],
-            "experimental": {}
-        })
-        .to_string()
-    });
+    let content = payload
+        .content
+        .unwrap_or_else(|| default_new_config_template().to_string());
 
     let validated_val = crate::schema_validator::validate_singbox_config_str_for_platform(
         &content,
@@ -531,4 +545,36 @@ pub async fn save_editor_preferences(
     Ok(Json(EditorPreferencesPayload {
         show_json_preview: payload.show_json_preview,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_template_passes_strict_validation() {
+        let tpl = default_new_config_template();
+        let result =
+            crate::schema_validator::validate_singbox_config_for_platform(&tpl, Some("macos"));
+        assert!(result.is_ok(), "default template must be valid: {result:?}");
+    }
+
+    #[test]
+    fn default_template_has_explicit_required_fields() {
+        let tpl = default_new_config_template();
+        assert_eq!(tpl["log"]["level"], "info");
+        assert_eq!(tpl["log"]["timestamp"], true);
+        assert_eq!(tpl["dns"]["strategy"], "ipv4_only");
+        assert!(tpl["dns"]["final"].as_str().is_some());
+        assert_eq!(tpl["route"]["auto_detect_interface"], true);
+    }
+
+    #[test]
+    fn default_template_valid_for_all_platforms() {
+        let tpl = default_new_config_template();
+        for p in ["linux", "macos", "windows", "android"] {
+            let result = crate::schema_validator::validate_singbox_config_for_platform(&tpl, Some(p));
+            assert!(result.is_ok(), "default template invalid on {p}: {result:?}");
+        }
+    }
 }
