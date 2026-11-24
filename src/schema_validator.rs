@@ -373,6 +373,90 @@ fn validate_config_semantics(root: &serde_json::Map<String, Value>, errors: &mut
             }
         }
     }
+
+    validate_http_client_references_impl(root, errors);
+}
+
+/// Reports string-form `http_client` references that have no matching entry in the
+/// top-level `http_clients` array. sing-box resolves such strings by looking up a
+/// client tag at startup; a missing tag makes rule-set initialization fail with a
+/// fatal error (e.g. `create rule-set http client: http_client not found: proxy`).
+///
+/// WYSIWYG: this only reports field-named errors — it never injects a client,
+/// rewrites the reference, or falls back to a deprecated default.
+fn validate_http_client_references_impl(
+    root: &serde_json::Map<String, Value>,
+    errors: &mut Vec<String>,
+) {
+    fn report(tag: &str, path: &str, defined: &HashSet<&str>, errors: &mut Vec<String>) {
+        if !defined.contains(tag) {
+            errors.push(format!(
+                "{path}: 引用了不存在的 http_client 标签 \"{tag}\"；请在顶层 http_clients 中添加 tag 为 \"{tag}\" 的客户端，或将此引用改为已配置的 http_client 标签（例如 \"direct\"）"
+            ));
+        }
+    }
+
+    // Recursively scan every `http_client` key. Only the string form is a named
+    // reference; the object form is an inline client definition (schema.json:5404)
+    // and is intentionally skipped, including its `detour` (an outbound tag).
+    fn walk(node: &Value, path: &str, defined: &HashSet<&str>, errors: &mut Vec<String>) {
+        match node {
+            Value::Object(map) => {
+                for (key, value) in map {
+                    let child = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    if key == "http_client" {
+                        if let Some(tag) = value.as_str().filter(|tag| !tag.is_empty()) {
+                            report(tag, &child, defined, errors);
+                        }
+                        continue;
+                    }
+                    walk(value, &child, defined, errors);
+                }
+            }
+            Value::Array(arr) => {
+                for (idx, value) in arr.iter().enumerate() {
+                    walk(value, &format!("{path}[{idx}]"), defined, errors);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let defined: HashSet<&str> = root
+        .get("http_clients")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|client| client.get("tag").and_then(Value::as_str))
+        .collect();
+
+    // `route.default_http_client` is a plain string reference with a different key.
+    // An empty string is legal (it selects the first client).
+    if let Some(default_client) = root
+        .get("route")
+        .and_then(|r| r.get("default_http_client"))
+        .and_then(Value::as_str)
+        .filter(|tag| !tag.is_empty())
+    {
+        report(default_client, "route.default_http_client", &defined, errors);
+    }
+
+    walk(&Value::Object(root.clone()), "", &defined, errors);
+}
+
+/// Narrow, standalone interface for the http_client reference check. Used by the
+/// save/validate and service-start paths that shell out to `sing-box check` but do
+/// not otherwise run the full schema validator.
+pub fn validate_http_client_references(config: &Value) -> Vec<String> {
+    let mut errors = Vec::new();
+    if let Some(root) = config.as_object() {
+        validate_http_client_references_impl(root, &mut errors);
+    }
+    errors
 }
 
 fn resolve_ref<'a>(root_schema: &'a Value, reference: &str) -> Option<&'a Value> {
@@ -1235,5 +1319,131 @@ mod tests {
         let mut errors = Vec::new();
         validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
         assert!(errors.iter().any(|e| e.contains("outbounds[0].outbounds")));
+    }
+
+    #[test]
+    fn test_dangling_rule_set_http_client_reference_is_rejected() {
+        let cfg = json!({
+            "http_clients": [{ "tag": "direct" }],
+            "route": {
+                "rule_set": [{
+                    "type": "remote",
+                    "format": "binary",
+                    "url": "https://example.com/rule.srs",
+                    "http_client": "proxy"
+                }]
+            }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("route.rule_set[0].http_client") && e.contains("proxy")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_existing_http_client_reference_is_accepted() {
+        let cfg = json!({
+            "http_clients": [{ "tag": "direct" }, { "tag": "proxy", "detour": "proxy" }],
+            "route": {
+                "rule_set": [{
+                    "type": "remote",
+                    "format": "binary",
+                    "url": "https://example.com/rule.srs",
+                    "http_client": "proxy"
+                }]
+            }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn test_dangling_default_http_client_reference_is_rejected() {
+        let cfg = json!({
+            "http_clients": [{ "tag": "direct" }],
+            "route": { "default_http_client": "proxy" }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(
+            errors.iter().any(|e| e.contains("route.default_http_client")),
+            "unexpected errors: {errors:?}"
+        );
+
+        // Empty string is legal: it selects the first configured client.
+        let empty = json!({ "route": { "default_http_client": "" } });
+        let mut errors = Vec::new();
+        validate_config_semantics(empty.as_object().unwrap(), &mut errors);
+        assert!(
+            !errors.iter().any(|e| e.contains("http_client")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_http_client_reference_without_http_clients_array_is_rejected() {
+        let cfg = json!({
+            "route": {
+                "rule_set": [{
+                    "type": "remote",
+                    "format": "binary",
+                    "url": "https://example.com/rule.srs",
+                    "http_client": "direct"
+                }]
+            }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("route.rule_set[0].http_client") && e.contains("direct")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_inline_http_client_object_is_not_checked_as_tag() {
+        let cfg = json!({
+            "route": {
+                "rule_set": [{
+                    "type": "remote",
+                    "format": "binary",
+                    "url": "https://example.com/rule.srs",
+                    "http_client": { "engine": "go", "detour": "proxy" }
+                }]
+            }
+        });
+        let mut errors = Vec::new();
+        validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
+        assert!(
+            !errors.iter().any(|e| e.contains("http_client")),
+            "inline client must not be treated as a tag reference: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn test_dangling_reference_surfaces_via_platform_validator() {
+        let cfg = json!({
+            "http_clients": [{ "tag": "direct" }],
+            "route": {
+                "rule_set": [{
+                    "type": "remote",
+                    "format": "binary",
+                    "url": "https://example.com/rule.srs",
+                    "http_client": "proxy"
+                }]
+            }
+        });
+        let errs = validate_singbox_config_for_platform(&cfg, Some("linux")).unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("route.rule_set[0].http_client")),
+            "unexpected errors: {errs:?}"
+        );
     }
 }

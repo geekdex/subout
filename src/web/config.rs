@@ -632,6 +632,14 @@ pub fn validate_config_with_singbox(
     }
     generator::sanitize_runtime_config(&mut config);
 
+    // Catch dangling http_client references up front: sing-box would otherwise
+    // accept the config here but fail asynchronously at runtime with a fatal
+    // rule-set initialization error. Report instead of silently fixing (WYSIWYG).
+    let hc_errs = crate::schema_validator::validate_http_client_references(&config);
+    if !hc_errs.is_empty() {
+        return Err(format!("配置校验失败: {}", hc_errs.join("；")));
+    }
+
     let temp_file_path = crate::paths::AppPaths::get().temp_file_path("singbox_val", ".json");
 
     let config_str =
@@ -714,6 +722,14 @@ fn format_singbox_error(raw: &str, config: Option<&Value>) -> String {
         return format!(
             "出站连接 (outbounds) 中存在重复的 tag: \"{}\"，请修改重复的 tag 名称。",
             tag_name.trim()
+        );
+    }
+
+    if let Some(tag_pos) = msg.find("http_client not found: ") {
+        let tag_name = &msg[tag_pos + 23..];
+        let tag = tag_name.trim().trim_end_matches(['.', '\n', '\r']);
+        return format!(
+            "引用了不存在的 http_client 标签 \"{tag}\"；请在顶层 http_clients 中添加 tag 为 \"{tag}\" 的客户端，或把 rule_set / default_http_client 中的引用改为已配置的标签（例如 \"direct\"）。"
         );
     }
 

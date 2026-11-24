@@ -1143,6 +1143,17 @@ impl SingBoxServiceManager {
             return Err(e);
         }
 
+        // Reject dangling http_client references before spawning sing-box. Otherwise
+        // rule-set initialization fails asynchronously and the user is told the
+        // service started successfully until a later status poll notices the crash.
+        let hc_errs = crate::schema_validator::validate_http_client_references(config_json);
+        if !hc_errs.is_empty() {
+            let e = anyhow!("配置校验失败: {}", hc_errs.join("；"));
+            self.append_log(&format!("❌ {e}")).await;
+            *self.last_error.write().await = Some(e.to_string());
+            return Err(e);
+        }
+
         let paths = crate::paths::AppPaths::get();
         paths
             .ensure_dirs()
