@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Save,
   AlertTriangle,
@@ -6,8 +6,10 @@ import {
   Smartphone,
   Monitor,
   Code2,
-  ChevronDown,
-  ChevronUp,
+  Eye,
+  EyeOff,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ShieldCheck,
   Route as RouteIcon,
   Globe,
@@ -45,6 +47,10 @@ import {
   BasicDirectTabPanel,
 } from "./profile-editor/SectionsEditor";
 import { QuickRoutingStrategies } from "./profile-editor/QuickRoutingStrategies";
+import {
+  JsonTreeView,
+  type JsonTreeViewHandle,
+} from "./profile-editor/JsonTreeView";
 
 interface ProfileEditorProps {
   profile: ConfigProfile;
@@ -109,9 +115,9 @@ function SanitizeChangeRow({ change }: { change: SanitizeChange }) {
   );
 }
 
-/// The preview is always mounted; this only controls whether its body is
-/// expanded. Persisted "false" therefore means "collapsed", never "hidden".
-function readPersistedJsonPreviewExpanded(): boolean {
+/// Persisted "false" means the whole preview panel is hidden. It stays hidden
+/// across reopenings until the user explicitly shows it again.
+function readPersistedJsonPreviewVisible(): boolean {
   try {
     const stored = window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY);
     if (stored === "false") return false;
@@ -139,9 +145,10 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   const [editorView, setEditorView] = useState<EditorViewMode>(() =>
     readPersistedEditorView(),
   );
-  const [jsonPreviewExpanded, setJsonPreviewExpanded] = useState<boolean>(() =>
-    readPersistedJsonPreviewExpanded(),
+  const [jsonPreviewVisible, setJsonPreviewVisible] = useState<boolean>(() =>
+    readPersistedJsonPreviewVisible(),
   );
+  const jsonTreeRef = useRef<JsonTreeViewHandle>(null);
   const [isClosing, setIsClosing] = useState(false);
   const [schemaErrors, setSchemaErrors] = useState<string[]>([]);
   const [schemaValidatedOk, setSchemaValidatedOk] = useState(false);
@@ -177,7 +184,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         .getEditorPreferences()
         .then((res) => {
           if (cancelled || typeof res?.show_json_preview !== "boolean") return;
-          setJsonPreviewExpanded(res.show_json_preview);
+          setJsonPreviewVisible(res.show_json_preview);
           try {
             window.localStorage.setItem(
               JSON_PREVIEW_STORAGE_KEY,
@@ -195,8 +202,8 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   }, []);
 
   const handleToggleJsonPreview = () => {
-    const next = !jsonPreviewExpanded;
-    setJsonPreviewExpanded(next);
+    const next = !jsonPreviewVisible;
+    setJsonPreviewVisible(next);
     try {
       window.localStorage.setItem(JSON_PREVIEW_STORAGE_KEY, String(next));
     } catch {
@@ -233,6 +240,16 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
     );
     return JSON.stringify(serialized, null, 2);
   }, [visualState, profile.platform]);
+
+  // The serializer always produces valid JSON; the fallback only guards
+  // against an unexpected partial state so the tree never crashes.
+  const liveJsonValue = useMemo(() => {
+    try {
+      return JSON.parse(liveJsonString) as unknown;
+    } catch {
+      return null;
+    }
+  }, [liveJsonString]);
 
   const isDirty =
     name !== profile.name ||
@@ -513,7 +530,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
           )}
         </div>
       }
-      description={`正在通过可视化界面编辑 ${profile.platform.toUpperCase()} 平台 sing-box 配置。各标签页采用「上工具栏（可折叠快捷键）+ 下内容/列表编辑」布局，右侧提供只读 JSON 实时预览，点击「保存配置」并通过官方 Schema 校验后才落库。`}
+      description={`正在通过可视化界面编辑 ${profile.platform.toUpperCase()} 平台 sing-box 配置。各标签页采用「上工具栏（可折叠快捷键）+ 下内容/列表编辑」布局，右侧提供可隐藏的只读 JSON 实时预览（节点可逐个折叠，也支持全部折叠/展开），点击「保存配置」并通过官方 Schema 校验后才落库。`}
       footer={
         <div className="w-full flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -624,7 +641,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
           {/* Left Column: Visual Editor */}
           <div
-            className={`${jsonPreviewExpanded ? "xl:col-span-7" : "xl:col-span-9"} space-y-4`}
+            className={`${jsonPreviewVisible ? "xl:col-span-7" : "xl:col-span-12"} space-y-4`}
           >
             {/* Editor view switch: quick = curated shortcuts, expert = all raw fields */}
             <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-800">
@@ -648,6 +665,16 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                   专家模式
                 </button>
               </div>
+              {!jsonPreviewVisible && (
+                <button
+                  type="button"
+                  onClick={handleToggleJsonPreview}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  显示 JSON 预览
+                </button>
+              )}
             </div>
 
             {editorView === "quick" && (
@@ -806,82 +833,83 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
             )}
           </div>
 
-          {/* Right Column: always-visible, collapsible read-only JSON preview */}
-          <div
-            data-testid="json-preview-panel"
-            className={`${jsonPreviewExpanded ? "xl:col-span-5" : "xl:col-span-3"} xl:sticky xl:top-0 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col shadow-xl`}
-          >
-            <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <Code2 className="w-4 h-4 text-sky-400 shrink-0" />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-100">
-                      实时完整 JSON 预览
-                    </span>
-                    <Badge variant="neutral" size="sm">
-                      只读预览
-                    </Badge>
-                    {!jsonPreviewExpanded && (
-                      <Badge variant="warning" size="sm">
-                        已折叠
+          {/* Right Column: hideable read-only JSON tree preview */}
+          {jsonPreviewVisible && (
+            <div
+              data-testid="json-preview-panel"
+              className="xl:col-span-5 xl:sticky xl:top-0 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col shadow-xl"
+            >
+              <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Code2 className="w-4 h-4 text-sky-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-100">
+                        实时完整 JSON 预览
+                      </span>
+                      <Badge variant="neutral" size="sm">
+                        只读预览
                       </Badge>
-                    )}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      随左侧配置实时同步 · 节点可逐个折叠，也支持全部折叠/展开
+                    </p>
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    {jsonPreviewExpanded
-                      ? "随左侧可视化配置实时同步生成 · 支持一键复制与划选复制"
-                      : "预览已折叠，点击展开查看完整 JSON"}
-                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <CopyButton
+                    text={liveJsonString}
+                    label="一键复制 JSON"
+                    copiedLabel="已复制完整 JSON"
+                    variant="secondary"
+                    size="sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleToggleJsonPreview}
+                    aria-label="隐藏 JSON 预览"
+                    title="隐藏 JSON 预览（下次打开仍保持隐藏）"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/70 transition-colors"
+                  >
+                    <EyeOff className="w-3.5 h-3.5 text-sky-400" />
+                    隐藏预览
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 shrink-0">
-                <CopyButton
-                  text={liveJsonString}
-                  label="一键复制 JSON"
-                  copiedLabel="已复制完整 JSON"
-                  variant="secondary"
-                  size="sm"
-                />
+              <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 bg-slate-900/50 border-b border-slate-800">
                 <button
                   type="button"
-                  onClick={handleToggleJsonPreview}
-                  aria-expanded={jsonPreviewExpanded}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/70 transition-colors"
+                  onClick={() => jsonTreeRef.current?.expandAll()}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-300 hover:text-sky-300 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-700/60 transition-colors"
                 >
-                  {jsonPreviewExpanded ? (
-                    <ChevronUp className="w-3.5 h-3.5 text-sky-400" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-sky-400" />
-                  )}
-                  {jsonPreviewExpanded ? "折叠预览" : "展开预览"}
+                  <ChevronsUpDown className="w-3 h-3" />
+                  展开所有节点
                 </button>
+                <button
+                  type="button"
+                  onClick={() => jsonTreeRef.current?.collapseAll()}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-300 hover:text-sky-300 bg-slate-800/70 hover:bg-slate-700/70 border border-slate-700/60 transition-colors"
+                >
+                  <ChevronsDownUp className="w-3 h-3" />
+                  折叠所有节点
+                </button>
+                <span className="text-[10px] text-slate-500 ml-auto">
+                  点击节点箭头可单独折叠/展开
+                </span>
+              </div>
+
+              <div className="relative overflow-auto p-4 bg-slate-950 max-h-[70vh]">
+                <div
+                  data-testid="json-preview-content"
+                  className="font-mono text-xs text-slate-200 leading-relaxed select-text cursor-text"
+                >
+                  <JsonTreeView ref={jsonTreeRef} value={liveJsonValue} />
+                </div>
               </div>
             </div>
-
-            {jsonPreviewExpanded ? (
-              <div className="relative overflow-x-auto overflow-y-hidden p-4 bg-slate-950">
-                <pre
-                  data-testid="json-preview-content"
-                  className="font-mono text-xs text-slate-200 leading-relaxed whitespace-pre select-text cursor-text"
-                >
-                  <code>{liveJsonString}</code>
-                </pre>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleToggleJsonPreview}
-                aria-label="展开 JSON 预览"
-                className="w-full text-left px-4 py-3 bg-slate-950 hover:bg-slate-900/80 transition-colors border-t border-slate-800"
-              >
-                <span className="font-mono text-[11px] text-slate-500 break-all">
-                  {liveJsonString.slice(0, 120)}…
-                </span>
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 

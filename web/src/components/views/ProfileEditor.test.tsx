@@ -382,7 +382,7 @@ describe("ProfileEditor Visual Configuration Component", () => {
     expect(updatedJson.log.level).toBe("warn");
   });
 
-  it("keeps the JSON preview mounted and persists its collapsed/expanded state globally", () => {
+  it("hides the whole JSON preview panel and persists visibility until shown again", () => {
     const { unmount } = render(
       <ToastProvider>
         <ProfileEditor
@@ -393,17 +393,18 @@ describe("ProfileEditor Visual Configuration Component", () => {
       </ToastProvider>,
     );
 
-    // Expanded by default; the panel itself is always present.
+    // Visible by default; the panel itself is present.
     expect(screen.getByTestId("json-preview-panel")).toBeDefined();
     expect(screen.getByTestId("json-preview-content")).toBeDefined();
-    expect(screen.getByText("折叠预览")).toBeDefined();
+    expect(screen.getByText("隐藏预览")).toBeDefined();
 
-    fireEvent.click(screen.getByText("折叠预览"));
-    // Collapsing must not hide the preview panel completely.
-    expect(screen.getByTestId("json-preview-panel")).toBeDefined();
+    fireEvent.click(screen.getByText("隐藏预览"));
+    // Hiding removes the whole panel instead of leaving a collapsed snippet.
+    expect(screen.queryByTestId("json-preview-panel")).toBeNull();
     expect(screen.queryByTestId("json-preview-content")).toBeNull();
-    expect(screen.getByText("已折叠")).toBeDefined();
-    expect(screen.getByText("展开预览")).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "显示 JSON 预览" }),
+    ).toBeDefined();
     expect(window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY)).toBe("false");
     expect(api.saveEditorPreferences).toHaveBeenCalledWith({
       show_json_preview: false,
@@ -420,14 +421,15 @@ describe("ProfileEditor Visual Configuration Component", () => {
       </ToastProvider>,
     );
 
-    // New profile restores the collapsed state but still shows the panel.
-    expect(screen.getByTestId("json-preview-panel")).toBeDefined();
-    expect(screen.queryByTestId("json-preview-content")).toBeNull();
-    expect(screen.getByText("展开预览")).toBeDefined();
+    // New profile restores the hidden state without mounting any panel.
+    expect(screen.queryByTestId("json-preview-panel")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "显示 JSON 预览" }),
+    ).toBeDefined();
 
-    fireEvent.click(screen.getByText("展开预览"));
+    fireEvent.click(screen.getByRole("button", { name: "显示 JSON 预览" }));
+    expect(screen.getByTestId("json-preview-panel")).toBeDefined();
     expect(screen.getByTestId("json-preview-content")).toBeDefined();
-    expect(screen.getByText("折叠预览")).toBeDefined();
     expect(window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY)).toBe("true");
     expect(api.saveEditorPreferences).toHaveBeenCalledWith({
       show_json_preview: true,
@@ -811,15 +813,41 @@ describe("ProfileEditor quick-mode persistence and collapsed preview", () => {
     expect(preview()).toContain("socks-in");
   });
 
-  it("keeps the copy action and a JSON snippet available while collapsed", () => {
+  it("folds JSON nodes individually and supports fold-all / expand-all", () => {
     renderEditor();
-    const fullJson = screen.getByTestId("json-preview-content").textContent || "";
+    const content = screen.getByTestId("json-preview-content");
 
-    fireEvent.click(screen.getByText("折叠预览"));
+    // Fully expanded by default: textContent is still valid JSON.
+    expect(JSON.parse(content.textContent || "{}").dns.servers).toBeDefined();
 
+    // Fold a single node from its arrow button; children become an ellipsis.
+    fireEvent.click(screen.getByRole("button", { name: "折叠 dns" }));
+    expect(screen.getByRole("button", { name: "展开 dns" })).toBeDefined();
+    expect(content.textContent).toContain("…");
+    expect(content.textContent).not.toContain("remote-dns");
+
+    // Clicking the same node again unfolds just that node.
+    fireEvent.click(screen.getByRole("button", { name: "展开 dns" }));
+    expect(content.textContent).toContain("remote-dns");
+    expect(content.textContent).not.toContain("…");
+
+    // Fold all collapses every container, including the root.
+    fireEvent.click(screen.getByText("折叠所有节点"));
+    expect(content.textContent).toContain("…");
+    expect(screen.getByRole("button", { name: "展开 根节点" })).toBeDefined();
+
+    // Expand all restores the full tree and valid JSON text.
+    fireEvent.click(screen.getByText("展开所有节点"));
+    expect(content.textContent).not.toContain("…");
+    expect(JSON.parse(content.textContent || "{}").dns.servers).toBeDefined();
+  });
+
+  it("keeps the one-click full JSON copy action while nodes are folded", () => {
+    renderEditor();
+    expect(screen.getByText("一键复制 JSON")).toBeDefined();
+
+    fireEvent.click(screen.getByText("折叠所有节点"));
     expect(screen.getByTestId("json-preview-panel")).toBeDefined();
     expect(screen.getByText("一键复制 JSON")).toBeDefined();
-    const summaryButton = screen.getByRole("button", { name: "展开 JSON 预览" });
-    expect(summaryButton.textContent).toContain(fullJson.slice(0, 40));
   });
 });
