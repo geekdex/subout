@@ -177,22 +177,24 @@ pub async fn set_run_mode(
     }
 
     let old_mode = crate::web::current_run_mode(&state.db_path);
-    let conn = get_db_conn(&state.db_path)
-        .map_err(|s| (s, "数据库连接失败".to_string()))?;
-    crate::db::update_setting(&conn, "run_mode", mode)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "保存运行模式失败".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
+    crate::db::update_setting(&conn, "run_mode", mode).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "保存运行模式失败".to_string(),
+        )
+    })?;
 
     // Hosting mode never runs a local proxy. Stop it first so switching modes
     // cannot leave an unexpected proxy running on the host.
     let mut stopped_local_service = false;
     if mode == "hosting" && old_mode != "hosting" && state.service_manager.is_running().await {
-        state
-            .service_manager
-            .stop()
-            .await
-            .map_err(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("切换到托管模式前停止本机服务失败: {e}"))
-            })?;
+        state.service_manager.stop().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("切换到托管模式前停止本机服务失败: {e}"),
+            )
+        })?;
         stopped_local_service = true;
     }
 
