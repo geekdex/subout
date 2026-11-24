@@ -490,16 +490,21 @@ pub async fn rollback_snapshot(
         )
     })?;
 
-    // 4. Overwrite config in configs table
-    let latest_vcode = snapshot
-        .version_code
-        .unwrap_or_else(|| db::get_node_group_version_code(&conn).unwrap_or(0));
+    // 4. Overwrite config in configs table.
+    // Mark the restored content as already synced against the CURRENT global
+    // version cursor. Writing the snapshot's old version here would make the
+    // next `/sub/:token` request treat the profile as stale and immediately
+    // regenerate it from today's node pool, silently undoing the rollback.
+    let current_vcode = db::get_node_group_version_code(&conn).unwrap_or(0);
     conn.execute(
         "UPDATE configs SET content = ?, version_code = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-        rusqlite::params![snapshot_content, latest_vcode, target_profile.id],
+        rusqlite::params![snapshot_content, current_vcode, target_profile.id],
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("回滚配置数据库写入失败: {e}")))?;
-    rollback_log.push_str("  -> 目标配置内容与版本号在数据库中已成功恢复\n");
+    let _ = writeln!(
+        rollback_log,
+        "  -> 目标配置内容已恢复；同步版本号标记为当前全局版本 {current_vcode}，避免懒同步覆盖回滚结果"
+    );
 
     // 5. If this is the active running config, deploy to disk and reload if running
     if target_profile.is_running_config {
@@ -558,4 +563,94 @@ pub async fn rollback_snapshot(
         "status": "success",
         "message": format!("已成功将配置 [{}] 回滚至快照 #{} ({})", target_profile.name, snapshot.id, now_str)
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::{Path, State};
+    use axum::http::{HeaderMap, HeaderValue};
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    fn test_state(db_path: &str) -> AppState {
+        let (tx, _) = tokio::sync::broadcast::channel(16);
+        AppState {
+            db_path: db_path.to_string(),
+            session_token: Arc::new(RwLock::new(Some("test-token".to_string()))),
+            kernel_download_status: Arc::new(RwLock::new(Default::default())),
+            kernel_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            service_manager: Arc::new(crate::service::SingBoxServiceManager::new()),
+            auto_update_status: Arc::new(RwLock::new(Default::default())),
+            auto_update_tx: tx,
+        }
+    }
+
+    #[tokio::test]
+    async fn rollback_marks_profile_synced_to_current_version() {
+        let db_path = std::env::temp_dir()
+            .join(format!("subout-rollback-{}.db", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
+        let conn = db::init_db(&db_path).unwrap();
+
+        // A snapshot taken at an old version, for a non-running profile so the
+        // handler does not touch the on-disk running config.
+        let profile = db::create_config_profile(
+            &conn,
+            "rollback-target",
+            "linux",
+            None,
+            r#"{"outbounds":[]}"#,
+        )
+        .unwrap();
+        let snapshot_content = r#"{"outbounds":[{"type":"direct","tag":"direct"}]}"#;
+        let snapshot_id = db::log_history_full(
+            &conn,
+            Some(profile.id),
+            "manual",
+            "save",
+            "old snapshot",
+            Some(snapshot_content),
+            Some("success"),
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        // Advance the global cursor well past the snapshot's version.
+        db::refresh_node_group_version_code(&conn).unwrap();
+        let current_vcode = db::refresh_node_group_version_code(&conn).unwrap();
+        drop(conn);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_static("Bearer test-token"),
+        );
+        let state = test_state(&db_path);
+        let _ = rollback_snapshot(State(state), headers, Path(snapshot_id))
+            .await
+            .expect("rollback should succeed");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let (content, version_code): (String, i64) = conn
+            .query_row(
+                "SELECT content, version_code FROM configs WHERE id = ?",
+                [profile.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(content, snapshot_content);
+        assert_eq!(
+            version_code, current_vcode,
+            "rollback must mark the profile as synced to the current global cursor"
+        );
+
+        // The lazy-sync predicate in /sub/:token must now be false.
+        assert_eq!(version_code != current_vcode, false);
+
+        drop(conn);
+        let _ = std::fs::remove_file(&db_path);
+    }
 }

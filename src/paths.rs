@@ -552,8 +552,10 @@ pub fn is_version_ge(v: &str, min_v: &str) -> bool {
         (Some((v_maj, v_min, v_pat)), Some((m_maj, m_min, m_pat))) => {
             (v_maj, v_min, v_pat) >= (m_maj, m_min, m_pat)
         }
-        // If parsing fails for custom nightly builds, accept it
-        _ => true,
+        // Fail closed: an unrecognised version must not be treated as a valid
+        // candidate and then rejected later by the kernel gatekeeper with a
+        // confusing error. Surface it as "not ready" instead.
+        _ => false,
     }
 }
 
@@ -741,6 +743,11 @@ mod tests {
         assert!(is_version_ge("sing-box version 1.14.0", "1.13.0"));
         assert!(is_version_ge("sing-box version 1.12.0", "1.12.0"));
         assert!(!is_version_ge("sing-box version 1.11.8", "1.12.0"));
+
+        // Unrecognised versions fail closed instead of being accepted as a
+        // candidate and rejected later by the gatekeeper.
+        assert!(!is_version_ge("sing-box version unknown", "1.12.0"));
+        assert!(!is_version_ge("not a version", "1.12.0"));
     }
 
     #[test]

@@ -112,9 +112,7 @@ impl PlatformStrategy for FallbackPlatform {
 
     fn disable_system_proxy(&self, _sudo_pass: Option<&str>) {}
 
-    fn enable_tun_dns(&self, _dns_ip: &str, _sudo_pass: Option<&str>) {}
-
-    fn disable_tun_dns(&self, _sudo_pass: Option<&str>) {}
+    fn cleanup_tun_network(&self, _sudo_pass: Option<&str>) {}
 
     fn sanitize_inbound(&self, inbound: &mut Value) {
         if let Some(obj) = inbound.as_object_mut() {

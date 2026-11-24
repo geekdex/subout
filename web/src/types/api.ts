@@ -346,6 +346,8 @@ export interface SystemInfo {
   permission_level?: "root" | "admin" | "limited";
   portable_mode?: boolean;
   app_mode: "simple" | "expert";
+  /** local (default) | hosting | hybrid — controls kernel gatekeeper scope */
+  run_mode?: "local" | "hosting" | "hybrid";
   running_config_id: number | null;
   primary_lan_ip?: string | null;
   lan_ips?: string[];

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { SettingsView } from "./SettingsView";
 import { SystemInfo } from "../../types/api";
+import { api } from "../../api/client";
 import { ToastProvider } from "../ui/Toast";
 
 const baseInfo: SystemInfo = {
@@ -63,5 +64,27 @@ describe("SettingsView Component", () => {
     expect(screen.getByText("确认修改密码")).toBeDefined();
     expect(screen.getByText("主机环境状态")).toBeDefined();
     expect(screen.getByText("管理员 (永久有效)")).toBeDefined();
+  });
+
+  it("requires the confirmation field before changing the admin password", async () => {
+    const setWebPassword = vi
+      .spyOn(api, "setWebPassword")
+      .mockResolvedValue({ success: true });
+
+    renderWithToast(
+      <SettingsView systemInfo={baseInfo} onRefreshSystemInfo={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("输入旧密码..."), {
+      target: { value: "old-pass" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("输入新密码..."), {
+      target: { value: "new-pass" },
+    });
+    fireEvent.click(screen.getByText("确认修改密码"));
+
+    expect(await screen.findByText("请再次输入新密码，且两次输入必须一致")).toBeDefined();
+    expect(setWebPassword).not.toHaveBeenCalled();
+    setWebPassword.mockRestore();
   });
 });

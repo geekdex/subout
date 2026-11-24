@@ -421,17 +421,25 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         )?;
     }
 
-    // Bootstrap v0.3 settings
-    let now_code: i64 = chrono::Local::now()
-        .format("%Y%m%d%H%M%S")
-        .to_string()
-        .parse()
-        .unwrap_or(0);
+    // Bootstrap v0.3 settings. The version code is a monotonic cursor, not a
+    // wall-clock timestamp: initialising from epoch millis keeps new databases
+    // on the same numeric scale as `refresh_node_group_version_code`.
     if get_setting(conn, "node_group_version_code")?.is_none() {
-        update_setting(conn, "node_group_version_code", &now_code.to_string())?;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        update_setting(conn, "node_group_version_code", &now_ms.to_string())?;
+        update_setting(
+            conn,
+            "node_group_updated_at",
+            &chrono::Local::now()
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string(),
+        )?;
     }
     if get_setting(conn, "app_mode")?.is_none() {
         update_setting(conn, "app_mode", "simple")?;
+    }
+    if get_setting(conn, "run_mode")?.is_none() {
+        update_setting(conn, "run_mode", "local")?;
     }
     if get_setting(conn, "auto_update_cron")?.is_none() {
         update_setting(conn, "auto_update_cron", "0 4 * * *")?;
@@ -507,7 +515,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
                 host_os,
                 "系统默认运行配置",
                 default_token,
-                now_code,
+                get_node_group_version_code(conn)?,
                 content_json
             ],
         )?;
@@ -1246,14 +1254,31 @@ pub fn get_node_group_version_code(conn: &Connection) -> Result<i64> {
     Ok(val.parse::<i64>().unwrap_or(0))
 }
 
+/// Advance the global node-group version cursor.
+///
+/// The value MUST be strictly monotonically increasing, otherwise the lazy sync
+/// in `/sub/:token` cannot detect changes. Two failure modes of the old
+/// timestamp-based scheme are avoided here:
+///   - two changes within the same second produced the same value;
+///   - NTP / timezone / manual edits could move the clock backwards.
+///
+/// A single atomic UPDATE keeps concurrent callers from handing out duplicate
+/// versions. `MAX(old + 1, now_ms)` guarantees progress even if the stored value
+/// came from an older, larger timestamp-format database.
 pub fn refresh_node_group_version_code(conn: &Connection) -> Result<i64> {
-    let now_code: i64 = chrono::Local::now()
-        .format("%Y%m%d%H%M%S")
-        .to_string()
-        .parse()
-        .unwrap_or(0);
-    update_setting(conn, "node_group_version_code", &now_code.to_string())?;
-    Ok(now_code)
+    let now_ms: i64 = chrono::Utc::now().timestamp_millis();
+    conn.execute(
+        "UPDATE settings SET value = CAST(MAX(CAST(value AS INTEGER) + 1, ?1) AS TEXT) WHERE key = 'node_group_version_code'",
+        rusqlite::params![now_ms],
+    )?;
+    update_setting(
+        conn,
+        "node_group_updated_at",
+        &chrono::Local::now()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+    )?;
+    get_node_group_version_code(conn)
 }
 
 pub fn get_config_profiles(
@@ -1843,6 +1868,50 @@ mod tests {
         assert_eq!(summary.avg_web_latency, None);
         assert_eq!(summary.avg_tcp_latency, None);
         assert_eq!(summary.fastest_node, None);
+    }
+
+    #[test]
+    fn test_refresh_node_group_version_code_is_strictly_monotonic() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        let mut previous = get_node_group_version_code(&conn).unwrap();
+        assert!(previous > 0);
+
+        // Rapid consecutive refreshes used to collide on the same second.
+        for _ in 0..8 {
+            let next = refresh_node_group_version_code(&conn).unwrap();
+            assert!(
+                next > previous,
+                "version code must strictly increase: {previous} -> {next}"
+            );
+            previous = next;
+        }
+    }
+
+    #[test]
+    fn test_refresh_node_group_version_code_handles_backwards_clock() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        // Simulate an old timestamp-format DB, or a backwards NTP adjustment.
+        let inflated = 9_000_000_000_000_000_000_i64;
+        update_setting(&conn, "node_group_version_code", &inflated.to_string()).unwrap();
+
+        let next = refresh_node_group_version_code(&conn).unwrap();
+        assert_eq!(next, inflated + 1);
+        assert_eq!(get_node_group_version_code(&conn).unwrap(), next);
+    }
+
+    #[test]
+    fn test_refresh_node_group_version_code_records_human_readable_time() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database(&conn).unwrap();
+
+        refresh_node_group_version_code(&conn).unwrap();
+        let stamp = get_setting(&conn, "node_group_updated_at").unwrap().unwrap();
+        assert_eq!(stamp.len(), 19, "expected YYYY-MM-DD HH:MM:SS, got {stamp}");
+        assert!(stamp.contains('-'));
     }
 
     #[test]

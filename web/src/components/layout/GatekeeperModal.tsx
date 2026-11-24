@@ -22,6 +22,7 @@ import { SudoModal } from "./SudoModal";
 import { formatBytes } from "../../utils/format";
 
 export interface GatekeeperModalProps {
+  runMode?: "local" | "hosting" | "hybrid";
   kernelInfo: KernelInfo | null;
   takeoverDiagnose: TakeoverDiagnoseResult | null;
   loading?: boolean;
@@ -40,6 +41,7 @@ export interface GatekeeperModalProps {
 }
 
 export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
+  runMode = "local",
   kernelInfo,
   takeoverDiagnose,
   loading = false,
@@ -237,6 +239,12 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
   // When initial data is still loading or kernelInfo is not yet resolved,
   // do NOT flash the scary "kernel not found / blocked" warning!
   if (loading || kernelInfo === null) {
+    return sudoModalElement;
+  }
+
+  // A hosting/hybrid server is not supposed to run a local kernel. Management
+  // APIs are fully usable there; only local proxy controls are gated (428).
+  if (runMode !== "local") {
     return sudoModalElement;
   }
 

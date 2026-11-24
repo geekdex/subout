@@ -57,6 +57,8 @@ const AppContent: React.FC = () => {
   const { success, error, warning } = useToast();
 
   const isAuthed = isAuthenticated === true;
+  // Hosting/hybrid servers have no local kernel and must not be locked out.
+  const runMode: "local" | "hosting" | "hybrid" = systemInfo?.run_mode ?? "local";
   const {
     kernelInfo,
     loading: kernelLoading,
@@ -139,10 +141,15 @@ const AppContent: React.FC = () => {
       "groups",
       "auto-update",
     ];
-    if (!kernelLoading && !isKernelReady && lockedTabs.includes(currentTab)) {
+    if (
+      runMode === "local" &&
+      !kernelLoading &&
+      !isKernelReady &&
+      lockedTabs.includes(currentTab)
+    ) {
       navigate("dashboard", undefined, true);
     }
-  }, [kernelLoading, isKernelReady, currentTab, navigate]);
+  }, [runMode, kernelLoading, isKernelReady, currentTab, navigate]);
 
   const handleSwitchMode = async (mode: "simple" | "expert") => {
     try {
@@ -233,6 +240,7 @@ const AppContent: React.FC = () => {
           setMobileMenuOpen(false);
         }}
         isKernelReady={isKernelReady}
+        runMode={runMode}
         downloadStatus={downloadStatus}
         appMode={systemInfo?.app_mode ?? "simple"}
         versionCode={versionCode}
@@ -272,6 +280,7 @@ const AppContent: React.FC = () => {
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-5 lg:p-8">
           {/* Gatekeeper Warning Card when kernel is invalid or has conflicts */}
           <GatekeeperModal
+            runMode={runMode}
             kernelInfo={kernelInfo}
             takeoverDiagnose={takeoverDiagnose}
             loading={kernelLoading}

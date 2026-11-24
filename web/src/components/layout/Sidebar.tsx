@@ -35,6 +35,7 @@ interface SidebarProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   isKernelReady: boolean;
+  runMode?: "local" | "hosting" | "hybrid";
   downloadStatus?: KernelDownloadStatus | null;
   appMode: "simple" | "expert";
   versionCode?: string | number;
@@ -49,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   onSelectTab,
   isKernelReady,
+  runMode = "local",
   downloadStatus,
   appMode,
   versionCode,
@@ -291,6 +293,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <p className="text-[11px] text-slate-400">
               sing-box 订阅与配置中台
             </p>
+            {runMode !== "local" && (
+              <p className="text-[10px] text-amber-300 mt-0.5">
+                托管模式 · 本机代理已停用
+              </p>
+            )}
           </div>
         </div>
         {isMobileView && onCloseMobile && (
@@ -353,7 +360,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
         {visibleNavItems.map((item) => {
-          const isLocked = item.requiresKernel && !isKernelReady;
+          // Only local mode gates the whole UI. A hosting server has no local
+          // kernel by design and must keep node/config/profile management open.
+          const isLocked =
+            item.requiresKernel && !isKernelReady && runMode === "local";
           const isActive = currentTab === item.id;
 
           const buttonContent = (

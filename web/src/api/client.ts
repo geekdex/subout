@@ -139,6 +139,12 @@ export const api = {
     }
     return res;
   },
+  async getPasswordState(): Promise<{
+    is_default: boolean;
+    is_env_set: boolean;
+  }> {
+    return request("/api/auth/password-state");
+  },
   async checkAuth(): Promise<boolean> {
     try {
       await request("/api/system/info");
@@ -321,6 +327,14 @@ export const api = {
       body: JSON.stringify({ url, timeout_ms: timeoutMs }),
     });
   },
+  async setRunMode(
+    mode: "local" | "hosting" | "hybrid",
+  ): Promise<{ success: boolean; run_mode: string; stopped_local_service?: boolean }> {
+    return request("/api/system/run-mode", {
+      method: "POST",
+      body: JSON.stringify({ run_mode: mode }),
+    });
+  },
   async setAppMode(
     mode: "simple" | "expert",
     restart = false,
@@ -349,8 +363,8 @@ export const api = {
   async setWebPassword(
     oldPassword: string,
     newPassword: string,
-  ): Promise<{ success: boolean }> {
-    return request("/api/auth/password", {
+  ): Promise<{ success: boolean; message?: string }> {
+    return request("/api/auth/change-password", {
       method: "POST",
       body: JSON.stringify({
         old_password: oldPassword,

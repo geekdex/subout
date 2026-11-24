@@ -287,7 +287,7 @@ pub trait PlatformStrategy: Send + Sync {
     fn get_process_resource_usage(&self, pid: u32) -> (f64, u64);
 
     // ------------------------------------------------------------------------
-    // 4. System Proxy & DNS Integration
+    // 4. System Proxy Integration
     // ------------------------------------------------------------------------
     fn is_system_proxy_supported(&self) -> bool {
         true
@@ -297,8 +297,10 @@ pub trait PlatformStrategy: Send + Sync {
     }
     fn enable_system_proxy(&self, port: u16, sudo_pass: Option<&str>);
     fn disable_system_proxy(&self, sudo_pass: Option<&str>);
-    fn enable_tun_dns(&self, dns_ip: &str, sudo_pass: Option<&str>);
-    fn disable_tun_dns(&self, sudo_pass: Option<&str>);
+    /// Remove leftover TUN routes/interfaces after sing-box stops. DNS is not
+    /// touched here: sing-box owns system DNS integration via its TUN + dns/route
+    /// configuration, so the application must never rewrite host resolver settings.
+    fn cleanup_tun_network(&self, sudo_pass: Option<&str>);
 
     // ------------------------------------------------------------------------
     // 5. Config Sanitization & Generation

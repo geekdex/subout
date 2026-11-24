@@ -6,8 +6,8 @@ import {
   Smartphone,
   Monitor,
   Code2,
-  Eye,
-  EyeOff,
+  ChevronDown,
+  ChevronUp,
   ShieldCheck,
   Route as RouteIcon,
   Globe,
@@ -44,6 +44,7 @@ import {
   OutboundsTabPanel,
   BasicDirectTabPanel,
 } from "./profile-editor/SectionsEditor";
+import { QuickRoutingStrategies } from "./profile-editor/QuickRoutingStrategies";
 
 interface ProfileEditorProps {
   profile: ConfigProfile;
@@ -56,6 +57,20 @@ interface ProfileEditorProps {
 type EditorTabKey = "inbounds" | "dns" | "outbounds" | "route" | "basic";
 
 export const JSON_PREVIEW_STORAGE_KEY = "subout_profile_editor_json_preview";
+export const EDITOR_VIEW_STORAGE_KEY = "subout_profile_editor_view";
+export type EditorViewMode = "quick" | "expert";
+
+function readPersistedEditorView(): EditorViewMode {
+  try {
+    if (window.localStorage.getItem(EDITOR_VIEW_STORAGE_KEY) === "expert") {
+      return "expert";
+    }
+  } catch {
+    // ignore storage access errors
+  }
+  // Quick view is the default: novice users should not face raw sing-box fields.
+  return "quick";
+}
 
 const SANITIZE_ACTION_LABELS: Record<SanitizeChange["action"], string> = {
   removed: "移除",
@@ -94,7 +109,9 @@ function SanitizeChangeRow({ change }: { change: SanitizeChange }) {
   );
 }
 
-function readPersistedJsonPreviewState(): boolean {
+/// The preview is always mounted; this only controls whether its body is
+/// expanded. Persisted "false" therefore means "collapsed", never "hidden".
+function readPersistedJsonPreviewExpanded(): boolean {
   try {
     const stored = window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY);
     if (stored === "false") return false;
@@ -119,8 +136,11 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
     parseConfigToVisualState(initialRawJson),
   );
   const [activeTab, setActiveTab] = useState<EditorTabKey>("inbounds");
-  const [showJsonPreview, setShowJsonPreview] = useState<boolean>(() =>
-    readPersistedJsonPreviewState(),
+  const [editorView, setEditorView] = useState<EditorViewMode>(() =>
+    readPersistedEditorView(),
+  );
+  const [jsonPreviewExpanded, setJsonPreviewExpanded] = useState<boolean>(() =>
+    readPersistedJsonPreviewExpanded(),
   );
   const [isClosing, setIsClosing] = useState(false);
   const [schemaErrors, setSchemaErrors] = useState<string[]>([]);
@@ -133,6 +153,14 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
 
   const { success, error } = useToast();
   const isAndroid = profile.platform === "android";
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(EDITOR_VIEW_STORAGE_KEY, editorView);
+    } catch {
+      // ignore storage access errors
+    }
+  }, [editorView]);
 
   useEffect(() => {
     let hasLocalValue = false;
@@ -149,7 +177,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         .getEditorPreferences()
         .then((res) => {
           if (cancelled || typeof res?.show_json_preview !== "boolean") return;
-          setShowJsonPreview(res.show_json_preview);
+          setJsonPreviewExpanded(res.show_json_preview);
           try {
             window.localStorage.setItem(
               JSON_PREVIEW_STORAGE_KEY,
@@ -167,8 +195,8 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
   }, []);
 
   const handleToggleJsonPreview = () => {
-    const next = !showJsonPreview;
-    setShowJsonPreview(next);
+    const next = !jsonPreviewExpanded;
+    setJsonPreviewExpanded(next);
     try {
       window.localStorage.setItem(JSON_PREVIEW_STORAGE_KEY, String(next));
     } catch {
@@ -564,20 +592,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                   : `${profile.platform.toUpperCase()} 桌面专属：支持 process_name / process_path`}
               </span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleToggleJsonPreview}
-              icon={
-                showJsonPreview ? (
-                  <EyeOff className="w-3.5 h-3.5" />
-                ) : (
-                  <Eye className="w-3.5 h-3.5" />
-                )
-              }
-            >
-              {showJsonPreview ? "隐藏 JSON 预览" : "打开 JSON 预览"}
-            </Button>
           </div>
         </div>
 
@@ -607,63 +621,74 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         )}
 
         {/* Main Workspace: Visual Editor (Left) + Live Read-Only JSON Preview (Right) */}
-        <div
-          className={`grid grid-cols-1 ${
-            showJsonPreview ? "xl:grid-cols-12" : ""
-          } gap-5 items-start`}
-        >
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
           {/* Left Column: Visual Editor */}
           <div
-            className={`${
-              showJsonPreview ? "xl:col-span-7" : "w-full"
-            } space-y-4`}
+            className={`${jsonPreviewExpanded ? "xl:col-span-7" : "xl:col-span-9"} space-y-4`}
           >
-            {/* Section Navigation Tabs (Ordered by Client Proxy Flow: Inbounds -> DNS -> Outbounds -> Route -> Basic) */}
-            <div className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-xl bg-slate-950/80 border border-slate-800">
-              {tabs.map((t) => {
-                const active = activeTab === t.key;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setActiveTab(t.key)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                      active
-                        ? "bg-sky-500 text-white shadow-sm shadow-sky-500/30"
-                        : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
-                    }`}
-                  >
-                    <span
-                      className={`w-4 h-4 rounded-full inline-flex items-center justify-center text-[10px] font-bold ${
-                        active
-                          ? "bg-white/25 text-white"
-                          : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {t.step}
-                    </span>
-                    {t.icon}
-                    <span>{t.label}</span>
-                    {t.badge !== undefined && (
-                      <span
-                        className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                          active
-                            ? "bg-white/20 text-white"
-                            : "bg-slate-800 text-slate-400"
-                        }`}
-                      >
-                        {t.badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+            {/* Editor view switch: quick = curated shortcuts, expert = all raw fields */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-800">
+              <div className="flex items-center gap-2 px-2 text-[11px] text-slate-400">
+                <Sliders className="w-3.5 h-3.5 text-sky-400" />
+                <span>编辑器视图（偏好会保留，与全局工作模式独立）</span>
+              </div>
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditorView("quick")}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${editorView === "quick" ? "bg-sky-500 text-white" : "text-slate-400 hover:text-slate-100"}`}
+                >
+                  快速配置
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditorView("expert")}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${editorView === "expert" ? "bg-sky-500 text-white" : "text-slate-400 hover:text-slate-100"}`}
+                >
+                  专家模式
+                </button>
+              </div>
             </div>
 
-            {/* Active Tab Content (Each Tab: Top Collapsible Toolbar + Bottom Content/Reorderable List) */}
-            <div key={activeTab} className="animate-tab-fade-in">
-              {activeTab === "route" && (
+            {editorView === "quick" && (
+              <div className="space-y-4">
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-200 leading-relaxed">
+                  快速视图只展示常用预设：平台入站、DNS 预设、节点组合导入、路由策略与日志级别。
+                  需要调整 sing-box 原始字段时切换到「专家模式」，当前配置不会丢失。
+                </div>
+                <InboundsTabPanel
+                  quick
+                  platform={profile.platform}
+                  config={visualState}
+                  onChange={handleUpdateVisualState}
+                />
+                <DnsTabPanel
+                  quick
+                  platform={profile.platform}
+                  config={visualState}
+                  onChange={handleUpdateVisualState}
+                  outboundTags={outboundTags}
+                  inboundTags={inboundTags}
+                  ruleSetTags={ruleSetTags}
+                />
+                <OutboundsTabPanel
+                  quick
+                  config={visualState}
+                  onChange={handleUpdateVisualState}
+                  nodes={nodes}
+                  nodeGroups={nodeGroups}
+                  onSyncFromNodePool={() => void handleSyncNodesFromPool()}
+                  syncing={syncingNodes}
+                />
+                <QuickRoutingStrategies
+                  config={visualState}
+                  onChange={handleUpdateVisualState}
+                  proxyTag={
+                    outboundTags.find((t) => t !== "direct") || "proxy"
+                  }
+                />
                 <RouteTabPanel
+                  quick
                   platform={profile.platform}
                   config={visualState}
                   onChange={handleUpdateVisualState}
@@ -672,80 +697,170 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                   inboundTags={inboundTags}
                   httpClientTags={httpClientTags}
                 />
-              )}
-
-              {activeTab === "dns" && (
-                <DnsTabPanel
-                  platform={profile.platform}
-                  config={visualState}
-                  onChange={handleUpdateVisualState}
-                  outboundTags={outboundTags}
-                  inboundTags={inboundTags}
-                  ruleSetTags={ruleSetTags}
-                />
-              )}
-
-              {activeTab === "inbounds" && (
-                <InboundsTabPanel
-                  platform={profile.platform}
-                  config={visualState}
-                  onChange={handleUpdateVisualState}
-                />
-              )}
-
-              {activeTab === "outbounds" && (
-                <OutboundsTabPanel
-                  config={visualState}
-                  onChange={handleUpdateVisualState}
-                  nodes={nodes}
-                  nodeGroups={nodeGroups}
-                  onSyncFromNodePool={() => void handleSyncNodesFromPool()}
-                  syncing={syncingNodes}
-                />
-              )}
-
-              {activeTab === "basic" && (
                 <BasicDirectTabPanel
+                  quick
                   config={visualState}
                   onChange={handleUpdateVisualState}
                   outboundTags={outboundTags}
                 />
-              )}
-            </div>
-          </div>
+              </div>
+            )}
 
-          {/* Right Column: Live Read-Only JSON Preview Panel */}
-          {showJsonPreview && (
-            <div className="xl:col-span-5 xl:sticky xl:top-0 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col shadow-xl animate-tab-fade-in">
-              <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Code2 className="w-4 h-4 text-sky-400 shrink-0" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-100">
-                        实时完整 JSON 预览
-                      </span>
-                      <Badge variant="neutral" size="sm">
-                        只读预览
-                      </Badge>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      随左侧可视化配置实时同步生成 · 支持一键复制与划选复制
-                    </p>
-                  </div>
+            {editorView === "expert" && (
+              <>
+                {/* Section Navigation Tabs (Ordered by Client Proxy Flow: Inbounds -> DNS -> Outbounds -> Route -> Basic) */}
+                <div className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-xl bg-slate-950/80 border border-slate-800">
+                  {tabs.map((t) => {
+                    const active = activeTab === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setActiveTab(t.key)}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                          active
+                            ? "bg-sky-500 text-white shadow-sm shadow-sky-500/30"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+                        }`}
+                      >
+                        <span
+                          className={`w-4 h-4 rounded-full inline-flex items-center justify-center text-[10px] font-bold ${
+                            active
+                              ? "bg-white/25 text-white"
+                              : "bg-slate-800 text-slate-400"
+                          }`}
+                        >
+                          {t.step}
+                        </span>
+                        {t.icon}
+                        <span>{t.label}</span>
+                        {t.badge !== undefined && (
+                          <span
+                            className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                              active
+                                ? "bg-white/20 text-white"
+                                : "bg-slate-800 text-slate-400"
+                            }`}
+                          >
+                            {t.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <CopyButton
-                    text={liveJsonString}
-                    label="一键复制 JSON"
-                    copiedLabel="已复制完整 JSON"
-                    variant="secondary"
-                    size="sm"
-                  />
+                {/* Active Tab Content (Each Tab: Top Collapsible Toolbar + Bottom Content/Reorderable List) */}
+                <div key={activeTab} className="animate-tab-fade-in">
+                  {activeTab === "route" && (
+                    <RouteTabPanel
+                      platform={profile.platform}
+                      config={visualState}
+                      onChange={handleUpdateVisualState}
+                      outboundTags={outboundTags}
+                      dnsServerTags={dnsServerTags}
+                      inboundTags={inboundTags}
+                      httpClientTags={httpClientTags}
+                    />
+                  )}
+
+                  {activeTab === "dns" && (
+                    <DnsTabPanel
+                      platform={profile.platform}
+                      config={visualState}
+                      onChange={handleUpdateVisualState}
+                      outboundTags={outboundTags}
+                      inboundTags={inboundTags}
+                      ruleSetTags={ruleSetTags}
+                    />
+                  )}
+
+                  {activeTab === "inbounds" && (
+                    <InboundsTabPanel
+                      platform={profile.platform}
+                      config={visualState}
+                      onChange={handleUpdateVisualState}
+                    />
+                  )}
+
+                  {activeTab === "outbounds" && (
+                    <OutboundsTabPanel
+                      config={visualState}
+                      onChange={handleUpdateVisualState}
+                      nodes={nodes}
+                      nodeGroups={nodeGroups}
+                      onSyncFromNodePool={() => void handleSyncNodesFromPool()}
+                      syncing={syncingNodes}
+                    />
+                  )}
+
+                  {activeTab === "basic" && (
+                    <BasicDirectTabPanel
+                      config={visualState}
+                      onChange={handleUpdateVisualState}
+                      outboundTags={outboundTags}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Right Column: always-visible, collapsible read-only JSON preview */}
+          <div
+            data-testid="json-preview-panel"
+            className={`${jsonPreviewExpanded ? "xl:col-span-5" : "xl:col-span-3"} xl:sticky xl:top-0 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col shadow-xl`}
+          >
+            <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Code2 className="w-4 h-4 text-sky-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-100">
+                      实时完整 JSON 预览
+                    </span>
+                    <Badge variant="neutral" size="sm">
+                      只读预览
+                    </Badge>
+                    {!jsonPreviewExpanded && (
+                      <Badge variant="warning" size="sm">
+                        已折叠
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {jsonPreviewExpanded
+                      ? "随左侧可视化配置实时同步生成 · 支持一键复制与划选复制"
+                      : "预览已折叠，点击展开查看完整 JSON"}
+                  </p>
                 </div>
               </div>
 
+              <div className="flex items-center gap-1.5 shrink-0">
+                <CopyButton
+                  text={liveJsonString}
+                  label="一键复制 JSON"
+                  copiedLabel="已复制完整 JSON"
+                  variant="secondary"
+                  size="sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleToggleJsonPreview}
+                  aria-expanded={jsonPreviewExpanded}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/70 transition-colors"
+                >
+                  {jsonPreviewExpanded ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-sky-400" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-sky-400" />
+                  )}
+                  {jsonPreviewExpanded ? "折叠预览" : "展开预览"}
+                </button>
+              </div>
+            </div>
+
+            {jsonPreviewExpanded ? (
               <div className="relative overflow-x-auto overflow-y-hidden p-4 bg-slate-950">
                 <pre
                   data-testid="json-preview-content"
@@ -754,8 +869,19 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                   <code>{liveJsonString}</code>
                 </pre>
               </div>
-            </div>
-          )}
+            ) : (
+              <button
+                type="button"
+                onClick={handleToggleJsonPreview}
+                aria-label="展开 JSON 预览"
+                className="w-full text-left px-4 py-3 bg-slate-950 hover:bg-slate-900/80 transition-colors border-t border-slate-800"
+              >
+                <span className="font-mono text-[11px] text-slate-500 break-all">
+                  {liveJsonString.slice(0, 120)}…
+                </span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

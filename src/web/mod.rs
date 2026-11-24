@@ -125,6 +125,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/status", get(auth::auth_status))
+        .route("/api/auth/password-state", get(auth::password_state))
         .route("/api/auth/change-password", post(auth::change_password))
         // Settings APIs
         .route("/api/settings", get(settings::get_settings))
@@ -317,6 +318,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
         // System path & mode
         .route("/api/system/info", get(system::get_system_info))
         .route(
+            "/api/system/run-mode",
+            get(system::get_run_mode).post(system::set_run_mode),
+        )
+        .route(
             "/api/system/mode",
             get(system::get_system_mode).post(system::set_system_mode),
         )
@@ -367,7 +372,10 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             post(simple_api::preview_simple_config),
         )
         .fallback(serve_spa_fallback)
-        .layer(axum::middleware::from_fn(gatekeeper_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            gatekeeper_middleware,
+        ))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -457,7 +465,7 @@ pub async fn run_server(port_opt: Option<u16>) -> Result<(), Box<dyn std::error:
             }
         });
 
-        // Stop sing-box and clean up system proxy settings (disable_system_proxy / disable_tun_dns).
+        // Stop sing-box and clean up system proxy / TUN routes (host DNS is left to sing-box).
         // This MUST happen BEFORE signaling shutdown_tx and draining axum connections so that
         // the 300ms HTTP drain timeout never cancels stop() before system DNS/proxy is restored.
         let _ = service_mgr_for_shutdown.stop().await;
@@ -513,26 +521,65 @@ pub async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Sta
     Err(StatusCode::UNAUTHORIZED)
 }
 
-// Gatekeeper Middleware: Returns 428 Precondition Required for business APIs when sing-box is not ready
-async fn gatekeeper_middleware(
-    request: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
-    let path = request.uri().path();
+/// The active run mode. `local` (default) runs sing-box on this host;
+/// `hosting` only serves configuration to remote clients, and `hybrid` does
+/// both. Invalid/unreadable values fall back to the safe `local` default.
+pub fn current_run_mode(db_path: &str) -> String {
+    let mode = get_db_conn(db_path)
+        .ok()
+        .and_then(|conn| db::get_setting(&conn, "run_mode").ok().flatten())
+        .unwrap_or_else(|| "local".to_string());
+    match mode.as_str() {
+        "hosting" | "hybrid" => mode,
+        _ => "local".to_string(),
+    }
+}
+
+/// APIs that always require a local kernel regardless of run mode, because
+/// they start/stop the local process or rewrite the local proxy config.
+fn requires_local_kernel(path: &str) -> bool {
+    path.starts_with("/api/service/") || path.starts_with("/api/simple-config")
+}
+
+/// Pure gatekeeper policy so it can be unit-tested without a kernel present.
+fn gatekeeper_requires_kernel(run_mode: &str, path: &str) -> bool {
     let is_whitelisted = path == "/"
         || path.starts_with("/api/kernel/")
         || path == "/api/system/info"
         || path.starts_with("/api/auth/")
+        || path.starts_with("/api/system/run-mode")
         || path.starts_with("/sub/");
+    if is_whitelisted {
+        return false;
+    }
+    if run_mode == "local" {
+        return true;
+    }
+    requires_local_kernel(path)
+}
 
-    if is_whitelisted || crate::kernel::is_kernel_ready() {
+// Gatekeeper Middleware: Returns 428 Precondition Required when a request
+// needs a local kernel that is not ready. In hosting/hybrid mode only APIs
+// that actually touch the local process/network are gated; configuration,
+// subscription and node management stay usable on a kernel-less server.
+async fn gatekeeper_middleware(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
+    let path = request.uri().path();
+    let run_mode = current_run_mode(&state.db_path);
+    let needs_kernel = gatekeeper_requires_kernel(&run_mode, path);
+
+    if !needs_kernel || crate::kernel::is_kernel_ready() {
         Ok(next.run(request).await)
     } else {
         Err((
             StatusCode::PRECONDITION_REQUIRED,
             Json(serde_json::json!({
-                "error": "sing-box 内核未就绪或版本不合规，请先安装或配置 1.14.* 内核",
+                "error": "本机代理所需的 sing-box 内核未就绪或版本不合规，请先安装或配置 1.14.* 内核（托管模式不受影响）",
                 "code": 428,
+                "run_mode": run_mode,
                 "pinned_version": crate::kernel::PINNED_KERNEL_VERSION,
                 "supported_versions": crate::kernel::SUPPORTED_KERNEL_VERSIONS
             })),
@@ -585,4 +632,53 @@ async fn get_dashboard_stats(
         nodes,
         groups,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gatekeeper_local_mode_gates_all_business_apis() {
+        assert!(gatekeeper_requires_kernel("local", "/api/configs"));
+        assert!(gatekeeper_requires_kernel("local", "/api/nodes"));
+        assert!(gatekeeper_requires_kernel("local", "/api/service/start"));
+        assert!(!gatekeeper_requires_kernel("local", "/sub/abc"));
+        assert!(!gatekeeper_requires_kernel("local", "/api/auth/login"));
+    }
+
+    #[test]
+    fn gatekeeper_hosting_modes_only_gate_local_proxy_apis() {
+        for mode in ["hosting", "hybrid"] {
+            assert!(
+                !gatekeeper_requires_kernel(mode, "/api/configs"),
+                "{mode} must allow config management without a kernel"
+            );
+            assert!(!gatekeeper_requires_kernel(mode, "/api/subscriptions"));
+            assert!(!gatekeeper_requires_kernel(mode, "/api/node-groups"));
+            assert!(!gatekeeper_requires_kernel(mode, "/api/auto-update/history"));
+            assert!(gatekeeper_requires_kernel(mode, "/api/service/start"));
+            assert!(gatekeeper_requires_kernel(mode, "/api/simple-config"));
+            assert!(!gatekeeper_requires_kernel(mode, "/sub/abc"));
+        }
+    }
+
+    #[test]
+    fn current_run_mode_is_validated_and_defaults_to_local() {
+        let db_path = std::env::temp_dir()
+            .join(format!("subout-run-mode-{}.db", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
+        let conn = db::init_db(&db_path).unwrap();
+        assert_eq!(current_run_mode(&db_path), "local");
+
+        db::update_setting(&conn, "run_mode", "hosting").unwrap();
+        assert_eq!(current_run_mode(&db_path), "hosting");
+
+        db::update_setting(&conn, "run_mode", "nonsense").unwrap();
+        assert_eq!(current_run_mode(&db_path), "local");
+
+        drop(conn);
+        let _ = std::fs::remove_file(&db_path);
+    }
 }

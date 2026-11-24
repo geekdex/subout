@@ -1,8 +1,9 @@
-import React, { useState } from "react";
-import { Lock, ArrowRight } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Lock, ArrowRight, HelpCircle } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { ThemeSwitcher } from "../ui/ThemeSwitcher";
+import { Dialog } from "../ui/Dialog";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import { getErrorMessage } from "../../utils/format";
@@ -14,7 +15,25 @@ interface LoginViewProps {
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [passwordState, setPasswordState] = useState({
+    is_default: false,
+    is_env_set: false,
+  });
   const { success, error } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getPasswordState()
+      .then((state) => {
+        if (!cancelled) setPasswordState(state);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,9 +98,63 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           </Button>
         </form>
 
-        <div className="mt-6 pt-4 border-t border-slate-800/80 text-center text-[11px] text-slate-500 font-mono">
-          默认密码: admin (首次启动请前往设置修改)
+        <div className="mt-4 text-center">
+          <button
+            type="button"
+            onClick={() => setForgotOpen(true)}
+            className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-sky-300 transition-colors"
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
+            忘记密码？
+          </button>
         </div>
+
+        {passwordState.is_default && !passwordState.is_env_set && (
+          <div className="mt-4 pt-4 border-t border-slate-800/80 text-center text-[11px] text-slate-500 font-mono">
+            当前仍在使用默认密码: admin，登录后请尽快修改
+          </div>
+        )}
+
+        <Dialog
+          open={forgotOpen}
+          onClose={() => setForgotOpen(false)}
+          title="重置管理密码"
+          description="出于安全考虑，面板不提供在线找回密码。请在运行 Subout 的宿主机上手动重置。"
+          size="md"
+          footer={
+            <Button variant="primary" onClick={() => setForgotOpen(false)}>
+              我知道了
+            </Button>
+          }
+        >
+          {passwordState.is_env_set ? (
+            <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+              <p>
+                当前密码由环境变量 <code className="text-sky-300">ADMIN_PASSWORD</code>{" "}
+                管理，命令行重置无效。
+              </p>
+              <p>请修改该环境变量后重启 Subout 服务，再用新密码登录。</p>
+            </div>
+          ) : (
+            <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+              <p>在宿主机执行（需使用启动 Subout 的同一用户）：</p>
+              <pre className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-sky-200 overflow-x-auto">
+                <code>subout reset-password</code>
+              </pre>
+              <p>
+                密码会重置为 <code className="text-amber-300">admin</code>
+                ，登录后请立即到「系统与安全设置」修改。
+              </p>
+              <p>也可直接指定新密码（注意命令行历史会记录该参数）：</p>
+              <pre className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-sky-200 overflow-x-auto">
+                <code>subout reset-password --new-password '你的新密码'</code>
+              </pre>
+              <p className="text-rose-300">
+                不要删除数据库文件来"重置"，那会同时丢失订阅、节点与配置。
+              </p>
+            </div>
+          )}
+        </Dialog>
       </div>
     </div>
   );

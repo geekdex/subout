@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import React from "react";
-import { ProfileEditor, JSON_PREVIEW_STORAGE_KEY } from "./ProfileEditor";
+import {
+  ProfileEditor,
+  JSON_PREVIEW_STORAGE_KEY,
+  EDITOR_VIEW_STORAGE_KEY,
+} from "./ProfileEditor";
 import { ToastProvider } from "../ui/Toast";
 import { api } from "../../api/client";
 import { ConfigProfile } from "../../types/api";
@@ -100,6 +104,8 @@ describe("ProfileEditor Visual Configuration Component", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    // Legacy assertions below exercise the full raw-field editor.
+    window.localStorage.setItem(EDITOR_VIEW_STORAGE_KEY, "expert");
   });
 
   it("renders visual editor and read-only selectable JSON preview without editable textarea, and plays smooth enter/exit transitions", async () => {
@@ -376,7 +382,7 @@ describe("ProfileEditor Visual Configuration Component", () => {
     expect(updatedJson.log.level).toBe("warn");
   });
 
-  it("persists JSON preview open/hide toggle state permanently and globally across all profiles", () => {
+  it("keeps the JSON preview mounted and persists its collapsed/expanded state globally", () => {
     const { unmount } = render(
       <ToastProvider>
         <ProfileEditor
@@ -387,22 +393,23 @@ describe("ProfileEditor Visual Configuration Component", () => {
       </ToastProvider>,
     );
 
-    // Initially open by default
+    // Expanded by default; the panel itself is always present.
+    expect(screen.getByTestId("json-preview-panel")).toBeDefined();
     expect(screen.getByTestId("json-preview-content")).toBeDefined();
-    expect(screen.getByText("隐藏 JSON 预览")).toBeDefined();
+    expect(screen.getByText("折叠预览")).toBeDefined();
 
-    // Hide JSON preview
-    fireEvent.click(screen.getByText("隐藏 JSON 预览"));
+    fireEvent.click(screen.getByText("折叠预览"));
+    // Collapsing must not hide the preview panel completely.
+    expect(screen.getByTestId("json-preview-panel")).toBeDefined();
     expect(screen.queryByTestId("json-preview-content")).toBeNull();
-    expect(screen.getByText("打开 JSON 预览")).toBeDefined();
+    expect(screen.getByText("已折叠")).toBeDefined();
+    expect(screen.getByText("展开预览")).toBeDefined();
     expect(window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY)).toBe("false");
     expect(api.saveEditorPreferences).toHaveBeenCalledWith({
       show_json_preview: false,
     });
 
-    // Unmount and open a different profile (Android profile)
     unmount();
-
     render(
       <ToastProvider>
         <ProfileEditor
@@ -413,14 +420,14 @@ describe("ProfileEditor Visual Configuration Component", () => {
       </ToastProvider>,
     );
 
-    // JSON preview remains hidden by default on the newly opened profile
+    // New profile restores the collapsed state but still shows the panel.
+    expect(screen.getByTestId("json-preview-panel")).toBeDefined();
     expect(screen.queryByTestId("json-preview-content")).toBeNull();
-    expect(screen.getByText("打开 JSON 预览")).toBeDefined();
+    expect(screen.getByText("展开预览")).toBeDefined();
 
-    // Open JSON preview again -> persists "true" globally
-    fireEvent.click(screen.getByText("打开 JSON 预览"));
+    fireEvent.click(screen.getByText("展开预览"));
     expect(screen.getByTestId("json-preview-content")).toBeDefined();
-    expect(screen.getByText("隐藏 JSON 预览")).toBeDefined();
+    expect(screen.getByText("折叠预览")).toBeDefined();
     expect(window.localStorage.getItem(JSON_PREVIEW_STORAGE_KEY)).toBe("true");
     expect(api.saveEditorPreferences).toHaveBeenCalledWith({
       show_json_preview: true,
@@ -661,5 +668,158 @@ describe("parseConfigToVisualState logical DNS rule normalization", () => {
       expect(screen.getAllByText(/网络中断/).length).toBeGreaterThan(0),
     );
     expect(api.updateConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProfileEditor quick / expert view", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  const renderEditor = () =>
+    render(
+      <ToastProvider>
+        <ProfileEditor
+          profile={baseLinuxProfile}
+          nodes={[]}
+          nodeGroups={[]}
+          onClose={vi.fn()}
+          onSaved={vi.fn()}
+        />
+      </ToastProvider>,
+    );
+
+  it("defaults to quick view with curated shortcuts and hides raw sing-box fields", () => {
+    renderEditor();
+
+    expect(screen.getByText("快速配置")).toBeDefined();
+    expect(screen.getByText("专家模式")).toBeDefined();
+    expect(screen.getByText(/快速视图只展示常用预设/)).toBeDefined();
+
+    // Expert-only tab bar and raw field lists must not be present.
+    expect(screen.queryByText("路由与分流 (route)")).toBeNull();
+    expect(screen.queryByText("已配置规则集列表 (route.rule_set)")).toBeNull();
+    expect(screen.queryByText("DNS 服务器列表 (dns.servers)")).toBeNull();
+
+    // Curated toolbars are expanded in quick mode.
+    expect(screen.getByText(/入站监听快捷工具箱/)).toBeDefined();
+    expect(screen.getByText(/DNS 服务器与解析分流工具箱/)).toBeDefined();
+    expect(screen.getByText("新增 SOCKS5 入站")).toBeDefined();
+    expect(screen.getByText("智能分流")).toBeDefined();
+    expect(screen.getByText("全部直连")).toBeDefined();
+    expect(screen.getByText(/日志配置 \(log\)/)).toBeDefined();
+  });
+
+  it("restores the full tabbed editor and raw fields in expert mode", async () => {
+    renderEditor();
+    fireEvent.click(screen.getByText("专家模式"));
+
+    expect(await screen.findByText("路由与分流 (route)")).toBeDefined();
+    expect(window.localStorage.getItem(EDITOR_VIEW_STORAGE_KEY)).toBe("expert");
+
+    fireEvent.click(screen.getByText("路由与分流 (route)"));
+    expect(screen.getByText("已配置规则集列表 (route.rule_set)")).toBeDefined();
+  });
+
+  it("persists the chosen view across remounts", () => {
+    const { unmount } = renderEditor();
+    fireEvent.click(screen.getByText("专家模式"));
+    unmount();
+
+    renderEditor();
+    expect(screen.getByText("路由与分流 (route)")).toBeDefined();
+  });
+
+  it("keeps editing and live JSON preview fully functional in quick mode", () => {
+    renderEditor();
+
+    fireEvent.click(screen.getByText("新增 SOCKS5 入站"));
+
+    const preview = screen.getByTestId("json-preview-content");
+    expect(preview.textContent).toContain("socks-in");
+  });
+});
+
+describe("ProfileEditor quick-mode persistence and collapsed preview", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  const renderEditor = (profile = baseLinuxProfile, onSaved = vi.fn()) => ({
+    onSaved,
+    ...render(
+      <ToastProvider>
+        <ProfileEditor
+          profile={profile}
+          onClose={vi.fn()}
+          onSaved={onSaved}
+        />
+      </ToastProvider>,
+    ),
+  });
+
+  it("validates and saves edits made in quick view", async () => {
+    const { onSaved } = renderEditor();
+
+    fireEvent.click(screen.getByText("新增 SOCKS5 入站"));
+    fireEvent.click(screen.getByText("校验官方 Schema"));
+    await waitFor(() =>
+      expect(api.validateConfigSchema).toHaveBeenCalled(),
+    );
+
+    fireEvent.click(screen.getByText("保存配置"));
+    await waitFor(() => expect(api.updateConfig).toHaveBeenCalled());
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    const savedConfig = JSON.parse(
+      (api.updateConfig as ReturnType<typeof vi.fn>).mock.calls[0][1].content,
+    );
+    expect(savedConfig.inbounds.some((i: { tag: string }) => i.tag === "socks-in")).toBe(true);
+  });
+
+  it("blocks saving in quick view when schema validation fails", async () => {
+    vi.mocked(api.validateConfigSchema).mockResolvedValueOnce({
+      valid: false,
+      errors: ["route.final: 未知出站"],
+    } as never);
+    const { onSaved } = renderEditor();
+
+    fireEvent.click(screen.getByText("保存配置"));
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/未知出站/).length).toBeGreaterThan(0),
+    );
+    expect(api.updateConfig).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("keeps the edited config when switching quick -> expert -> quick", () => {
+    renderEditor();
+
+    fireEvent.click(screen.getByText("新增 SOCKS5 入站"));
+    const preview = () => screen.getByTestId("json-preview-content").textContent || "";
+    expect(preview()).toContain("socks-in");
+
+    fireEvent.click(screen.getByText("专家模式"));
+    expect(screen.getByText("路由与分流 (route)")).toBeDefined();
+    expect(preview()).toContain("socks-in");
+
+    fireEvent.click(screen.getByText("快速配置"));
+    expect(screen.getByText(/快速视图只展示常用预设/)).toBeDefined();
+    expect(preview()).toContain("socks-in");
+  });
+
+  it("keeps the copy action and a JSON snippet available while collapsed", () => {
+    renderEditor();
+    const fullJson = screen.getByTestId("json-preview-content").textContent || "";
+
+    fireEvent.click(screen.getByText("折叠预览"));
+
+    expect(screen.getByTestId("json-preview-panel")).toBeDefined();
+    expect(screen.getByText("一键复制 JSON")).toBeDefined();
+    const summaryButton = screen.getByRole("button", { name: "展开 JSON 预览" });
+    expect(summaryButton.textContent).toContain(fullJson.slice(0, 40));
   });
 });

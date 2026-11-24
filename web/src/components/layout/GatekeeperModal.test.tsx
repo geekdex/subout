@@ -87,6 +87,31 @@ describe("GatekeeperModal", () => {
     expect(handleDownload).toHaveBeenCalledTimes(1);
   });
 
+  it("does not show the kernel warning in hosting mode without a kernel", () => {
+    const { container } = render(
+      <GatekeeperModal
+        runMode="hosting"
+        kernelInfo={{
+          binary_path: "",
+          installed: false,
+          version: null,
+          supported_versions: ["1.14.*"],
+          pinned_version: "1.14.4",
+          ready: false,
+          gatekeeper_blocked: false,
+          message: null,
+        }}
+        takeoverDiagnose={null}
+        downloading={false}
+        onDownloadKernel={vi.fn()}
+        onTakeover={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/内核门禁警告/)).toBeNull();
+    expect(container.firstChild).toBeNull();
+  });
+
   it("renders process conflict banner and takeover button when kernel is ready but conflict exists", () => {
     const handleTakeover = vi.fn();
     render(

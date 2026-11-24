@@ -877,7 +877,7 @@ impl SingBoxServiceManager {
         if conflicts.is_empty() {
             if !self.is_running().await {
                 platform.disable_system_proxy(sudo_pass);
-                platform.disable_tun_dns(sudo_pass);
+                platform.cleanup_tun_network(sudo_pass);
                 *self.system_proxy_active.write().await = false;
             }
             return Ok(());
@@ -904,14 +904,15 @@ impl SingBoxServiceManager {
             return Err(anyhow!(msg));
         }
 
-        // Network Safety Guard: If Subout is not running proxy service, immediately restore
-        // system network proxy & TUN DNS to prevent orphaned settings from causing an internet outage
+        // Network Safety Guard: if Subout is not running a proxy service, clear
+        // leftover system proxy / TUN routes so orphaned settings cannot break
+        // connectivity. Host DNS is never touched by the application.
         let is_running = self.is_running().await;
         if !is_running {
             platform.disable_system_proxy(sudo_pass);
-            platform.disable_tun_dns(sudo_pass);
+            platform.cleanup_tun_network(sudo_pass);
             *self.system_proxy_active.write().await = false;
-            self.append_log("🌐 已恢复系统直连网络与 DNS，保障网络连接不中断")
+            self.append_log("🌐 已恢复系统直连网络与 TUN 路由，保障网络连接不中断")
                 .await;
         }
 
@@ -1480,13 +1481,11 @@ impl SingBoxServiceManager {
             *self.system_proxy_active.write().await = false;
         }
         if tun_mode {
-            let tun_dns_ip =
-                get_tun_dns_ip_from_config(config_json).unwrap_or_else(|| "172.19.0.2".to_string());
-            platform.enable_tun_dns(&tun_dns_ip, cached_pass.as_deref());
-            self.append_log(&format!(
-                "🌐 TUN 模式已接管系统 DNS (主: {tun_dns_ip}，兜底: 223.5.5.5)，停止服务时自动还原"
-            ))
-            .await;
+            // System DNS integration is sing-box's responsibility (TUN inbound
+            // plus dns/route rules in the user's config). The application never
+            // rewrites host resolver settings, so there is nothing to restore.
+            self.append_log("🌐 TUN 模式已启动，系统 DNS 分流由 sing-box 配置负责")
+                .await;
         }
 
         let summary = get_inbounds_summary_from_config(&config_path);
@@ -1576,9 +1575,9 @@ impl SingBoxServiceManager {
             .await;
 
         platform.disable_system_proxy(cached_pass.as_deref());
-        platform.disable_tun_dns(cached_pass.as_deref());
+        platform.cleanup_tun_network(cached_pass.as_deref());
         *self.system_proxy_active.write().await = false;
-        self.append_log("🌐 已恢复系统原始网络代理与路由设置").await;
+        self.append_log("🌐 已恢复系统原始网络代理与 TUN 路由设置").await;
 
         if had_child {
             self.append_log("⏹️ sing-box 服务已停止").await;

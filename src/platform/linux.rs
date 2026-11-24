@@ -1017,28 +1017,9 @@ impl PlatformStrategy for LinuxPlatform {
         }
     }
 
-    fn enable_tun_dns(&self, dns_ip: &str, sudo_pass: Option<&str>) {
-        // 针对使用 systemd-resolved 的 Linux 环境：
-        // 1. 若宿主机全局配置了 DNSOverTLS=yes，systemd-resolved 默认会对所有接口尝试 TLS (853)，
-        //    而 sing-box tun DNS 仅提供标准 DNS (53)，必须显式为该 TUN 网卡关闭 DNSOverTLS，防止解析超时。
-        // 2. 确保该网卡设置为默认 DNS 路由 (~.)。
-        // 3. 安全：若目标网卡名被外部程序（如组网工具）占用，跳过写操作，绝不改别人的 DNS。
-        //    网卡名从实际配置解析（配置未指定时用默认 tun0），不再写死 tun0。
-        let iface = resolved_tun_interface_name();
-        if !is_tun_interface_safe_to_delete(&iface) {
-            eprintln!(
-                "[subout] 跳过 enable_tun_dns：网卡 {iface} 疑似由其他程序持有，避免覆盖其 DNS 设置"
-            );
-            return;
-        }
-        let _ = run_linux_admin_cmd("resolvectl", &["dnsovertls", &iface, "no"], sudo_pass);
-        let _ = run_linux_admin_cmd("resolvectl", &["dns", &iface, dns_ip], sudo_pass);
-        let _ = run_linux_admin_cmd("resolvectl", &["domain", &iface, "~."], sudo_pass);
-        let _ = run_linux_admin_cmd("resolvectl", &["default-route", &iface, "true"], sudo_pass);
-        let _ = run_linux_admin_cmd("resolvectl", &["flush-caches"], sudo_pass);
-    }
-
-    fn disable_tun_dns(&self, sudo_pass: Option<&str>) {
+    fn cleanup_tun_network(&self, sudo_pass: Option<&str>) {
+        // Only residual routes/interfaces are cleaned here. sing-box handles
+        // DNS hijacking itself through the TUN inbound + dns/route config.
         clean_linux_tun_network(sudo_pass);
     }
 
@@ -1302,17 +1283,8 @@ pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
         }
     }
 
-    // 4. 若系统启用了 systemd-resolved，还原 tun0 配置并刷新 DNS 解析缓存
-    //    仅 revert 我们确认由 subout 配置过的网卡，避免改掉其他工具（如组网工具）的 DNS。
-    let tun_iface = resolved_tun_interface_name();
-    if is_tun_interface_safe_to_delete(&tun_iface) {
-        let _ = run_linux_admin_cmd("resolvectl", &["revert", &tun_iface], sudo_pass);
-    } else {
-        eprintln!(
-            "[subout] 跳过 resolvectl revert {tun_iface}：该网卡可能由其他程序持有，避免修改其 DNS"
-        );
-    }
-    let _ = run_linux_admin_cmd("resolvectl", &["flush-caches"], sudo_pass);
+    // DNS is intentionally NOT reverted here: the application never modifies
+    // host DNS settings. sing-box owns that via its TUN + dns/route config.
 }
 
 // ---------------------------------------------------------------------------

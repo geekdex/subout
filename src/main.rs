@@ -14,6 +14,8 @@ struct CliArgs {
     runtime_dir: Option<String>,
     kernel_path: Option<String>,
     portable: bool,
+    reset_password: bool,
+    new_password: Option<String>,
 }
 
 fn parse_args() -> Result<CliArgs, String> {
@@ -30,12 +32,18 @@ fn parse_args() -> Result<CliArgs, String> {
     let mut runtime_dir = None;
     let mut kernel_path = None;
     let mut portable = false;
+    let mut reset_password = false;
+    let mut new_password = None;
 
-    // Check if the first argument is a subcommand 'web' or 'server'
+    // Check if the first argument is a subcommand
     if let Some(arg) = std::env::args().nth(1)
-        && (arg == "web" || arg == "server")
+        && (arg == "web" || arg == "server" || arg == "reset-password")
     {
-        web = true;
+        if arg == "reset-password" {
+            reset_password = true;
+        } else {
+            web = true;
+        }
         args_iter.next(); // Consume subcommand
     }
 
@@ -111,8 +119,18 @@ fn parse_args() -> Result<CliArgs, String> {
             "--portable" => {
                 portable = true;
             }
+            "--new-password" => {
+                if let Some(pw) = args_iter.next() {
+                    new_password = Some(pw);
+                } else {
+                    return Err("Error: Parameter '--new-password' requires a value.".to_string());
+                }
+            }
             "web" | "server" => {
                 web = true;
+            }
+            "reset-password" => {
+                reset_password = true;
             }
             "--kernel-path" | "--singbox-path" => {
                 if let Some(k) = args_iter.next() {
@@ -130,7 +148,7 @@ fn parse_args() -> Result<CliArgs, String> {
     }
 
     // If neither source nor output is provided and help was not requested, default to web mode
-    if source.is_none() && output.is_none() {
+    if source.is_none() && output.is_none() && !reset_password {
         web = true;
     }
 
@@ -147,6 +165,8 @@ fn parse_args() -> Result<CliArgs, String> {
         runtime_dir,
         kernel_path,
         portable,
+        reset_password,
+        new_password,
     })
 }
 
@@ -157,6 +177,7 @@ fn print_help() {
 Usage:
   subout -s <source> -o <output> [options]   Run CLI to export outbounds configuration.
   subout web [options]                       Start the web configuration management panel.
+  subout reset-password [--new-password pw]   Reset the panel password on the host machine.
   subout -h | --help                         Show this help menu.
 
 Required Parameters (CLI mode):
@@ -172,6 +193,7 @@ Options:
   --runtime-dir <dir>   Set custom runtime temporary data directory.
   --portable            Run in portable mode (uses ./data, ./config, ./logs, ./run).
   --kernel-path <path>  Set custom sing-box binary path.
+  --new-password <pw>   With reset-password, set a specific password instead of 'admin'.
   -h, --help            Show this help menu."
     );
 }
@@ -204,6 +226,34 @@ async fn main() {
     ) {
         eprintln!("错误: 目录初始化失败: {e}");
         std::process::exit(1);
+    }
+
+    if args.reset_password {
+        let db_path = match subout::paths::AppPaths::get().initialize_db_path() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(e) => {
+                eprintln!("错误: 无法定位数据库文件: {e}");
+                std::process::exit(1);
+            }
+        };
+        let new_password = args.new_password.as_deref().unwrap_or("admin");
+        match subout::web::auth::reset_admin_password(&db_path, new_password) {
+            Ok(()) => {
+                if args.new_password.is_some() {
+                    // Never echo a user-supplied password into terminal logs.
+                    println!("管理密码已重置为您指定的新密码。");
+                } else {
+                    println!("管理密码已重置为默认值: admin");
+                    println!("提示: 使用 --new-password 可直接设置新密码，避免沿用默认值。");
+                }
+                println!("请立即登录面板并在「系统与安全设置」中修改为强密码。");
+            }
+            Err(e) => {
+                eprintln!("重置密码失败: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
     }
 
     if args.web {

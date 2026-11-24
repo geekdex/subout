@@ -35,6 +35,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newWebPassword, setNewWebPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingWebPassword, setSavingWebPassword] = useState(false);
+  const [savingRunMode, setSavingRunMode] = useState(false);
+
+  const runMode: "local" | "hosting" | "hybrid" =
+    systemInfo?.run_mode ?? "local";
 
   // Preference states persisted in localStorage
   const [logInterval, setLogInterval] = useState(() => {
@@ -80,8 +84,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       error("请完整输入当前密码和新密码");
       return;
     }
-    if (confirmPassword && newWebPassword !== confirmPassword) {
-      error("两次输入的新密码不一致，请重新检查");
+    if (newWebPassword !== confirmPassword) {
+      error("请再次输入新密码，且两次输入必须一致");
       return;
     }
     setSavingWebPassword(true);
@@ -95,6 +99,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       error("修改密码失败", getErrorMessage(err));
     } finally {
       setSavingWebPassword(false);
+    }
+  };
+
+  const handleSaveRunMode = async (mode: "local" | "hosting" | "hybrid") => {
+    if (mode === runMode) return;
+    setSavingRunMode(true);
+    try {
+      const res = await api.setRunMode(mode);
+      success(
+        "运行模式已切换",
+        res.stopped_local_service
+          ? "已切换并停止本机代理服务"
+          : `当前运行模式：${mode}`,
+      );
+      onRefreshSystemInfo();
+    } catch (err: unknown) {
+      error("切换运行模式失败", getErrorMessage(err));
+    } finally {
+      setSavingRunMode(false);
     }
   };
 
@@ -243,6 +266,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   确认修改密码
                 </Button>
               </div>
+            </div>
+          </div>
+
+          {/* Run Mode: local proxy vs configuration hosting */}
+          <div className="glass-panel p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-sky-400" />
+                <h3 className="text-sm font-semibold text-slate-100">
+                  运行模式与内核门禁
+                </h3>
+              </div>
+              <Badge variant="neutral" size="sm">
+                内核无关业务放行
+              </Badge>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              本机代理需要 1.14.* 内核；纯托管模式只做订阅更新与配置下发，不启动 sing-box，
+              因此节点、配置、自动更新等管理接口不再被内核门禁拦截。
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {(
+                [
+                  { id: "local", label: "本机代理", desc: "默认，受完整内核门禁保护" },
+                  { id: "hybrid", label: "混合模式", desc: "本机代理 + 对外托管" },
+                  { id: "hosting", label: "纯托管", desc: "不跑本机代理，仅下发配置" },
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={savingRunMode}
+                  onClick={() => void handleSaveRunMode(item.id)}
+                  className={`text-left rounded-lg border px-3 py-2.5 transition-colors disabled:opacity-50 ${
+                    runMode === item.id
+                      ? "border-sky-500 bg-sky-500/10"
+                      : "border-slate-700 hover:border-slate-500"
+                  }`}
+                >
+                  <span className="block text-xs font-semibold text-slate-100">
+                    {item.label}
+                  </span>
+                  <span className="block text-[10px] text-slate-400 mt-1">
+                    {item.desc}
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
 

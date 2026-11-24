@@ -37,8 +37,8 @@ describe("Table component", () => {
 
   it("pins sticky columns with header above body", () => {
     const stickyColumns: Column<Row>[] = [
-      { key: "id", header: "ID", sticky: "left", stickyWidth: 40 },
-      ...columns,
+      { ...columns[1], sticky: "left", stickyWidth: 40 },
+      columns[0],
       { key: "actions", header: "操作", sticky: "right" },
     ];
     const { container } = render(<Table columns={stickyColumns} data={data} />);

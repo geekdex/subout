@@ -604,7 +604,10 @@ pub fn sync_config_with_latest_resources(
                 "tag": group.tag,
                 "outbounds": resolved,
             });
-            if group.group_type == "urltest" {
+            // sing-box supports url / interval / tolerance on both `urltest`
+            // and `fallback` strategy groups. Dropping them for fallback made
+            // generated configs differ from what the user configured.
+            if matches!(group.group_type.as_str(), "urltest" | "fallback") {
                 if let Some(ref u) = group.url {
                     g_val
                         .as_object_mut()
@@ -1134,6 +1137,46 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(servers[0].get("detour").unwrap().as_str(), Some("direct"));
+    }
+
+    #[test]
+    fn test_sync_config_preserves_fallback_tuning_fields() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::setup_database(&conn).unwrap();
+
+        crate::db::save_outbound_group(
+            &conn,
+            "fallback-test",
+            "fallback",
+            Some("auto"),
+            Some("https://example.com/generate_204"),
+            Some("5m"),
+            Some(1500),
+            Some("[\"direct\"]"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let base = json!({
+            "outbounds": [{"type": "direct", "tag": "direct"}],
+            "route": {},
+            "dns": {}
+        });
+        let (synced, _) = sync_config_with_latest_resources(&conn, &base, &[]).unwrap();
+
+        let group = synced["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["tag"] == "fallback-test")
+            .expect("fallback group should be generated");
+        assert_eq!(group["type"], "fallback");
+        assert_eq!(group["url"], "https://example.com/generate_204");
+        assert_eq!(group["interval"], "5m");
+        assert_eq!(group["tolerance"], 1500);
     }
 
     #[test]

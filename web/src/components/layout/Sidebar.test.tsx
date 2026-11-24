@@ -415,3 +415,33 @@ describe("Sidebar & Header with numeric version_code", () => {
     expect(proxySwitch.hasAttribute("disabled")).toBe(true);
   });
 });
+
+describe("Sidebar run mode gating", () => {
+  it("locks management tabs in local mode without kernel but keeps them open in hosting mode", () => {
+    const { unmount } = render(
+      <Sidebar
+        currentTab="dashboard"
+        onSelectTab={vi.fn()}
+        isKernelReady={false}
+        runMode="local"
+        appMode="expert"
+      />,
+    );
+    const locked = screen.getByText("配置中心").closest("button");
+    expect(locked?.disabled).toBe(true);
+    unmount();
+
+    render(
+      <Sidebar
+        currentTab="dashboard"
+        onSelectTab={vi.fn()}
+        isKernelReady={false}
+        runMode="hosting"
+        appMode="expert"
+      />,
+    );
+    const unlocked = screen.getByText("配置中心").closest("button");
+    expect(unlocked?.disabled).toBe(false);
+    expect(screen.getByText(/托管模式 · 本机代理已停用/)).toBeDefined();
+  });
+});

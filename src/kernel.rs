@@ -17,7 +17,8 @@ pub const SINGBOX_VERSION: &str = PINNED_KERNEL_VERSION;
 
 /// Check if a version string satisfies any pattern in `SUPPORTED_KERNEL_VERSIONS`
 pub fn is_supported_kernel_version(v_str: &str) -> bool {
-    // If gatekeeper disabled via env var (e.g. for testing/development):
+    // Debug-only escape hatch. Production deployments should use the explicit
+    // `run_mode` setting (local/hosting/hybrid) instead.
     if std::env::var("SUBOUT_DISABLE_GATEKEEPER")
         .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
     {
