@@ -549,18 +549,25 @@ impl SingBoxServiceManager {
         detect_conflicting_singbox_processes(managed_pid)
     }
 
+    /// 诊断接管冲突。`config_override` 传数据库的当前配置时，资源占用检测基于它
+    /// 而不是磁盘上的运行配置文件——后者可能已过期（用户改了配置但未重启服务），
+    /// 据此检测会一直报告已不存在的端口冲突。传 None 时回退读文件。
     pub async fn diagnose_takeover_conflict(
         &self,
+        config_override: Option<&Value>,
     ) -> Result<crate::platform::TakeoverDiagnoseResult> {
         let managed_pid = self.get_managed_pid().await;
         let platform = crate::platform::current_platform();
-        let mut result = platform.diagnose_takeover_conflict(managed_pid).await?;
+        // 进程归属过滤与资源占用检测共用同一个配置路径来源。
+        let config_path = Self::get_running_config_path();
+        let mut result = platform
+            .diagnose_takeover_conflict(managed_pid, &config_path)
+            .await?;
 
         // 合并通用资源占用诊断（端口/TUN/DNS/路由）。
         // 按实际占用判定、不硬编码工具名；这些冲突一律不可一键接管，防止误杀组网工具。
-        let config_path = Self::get_running_config_path();
         let resource_conflicts = platform
-            .detect_resource_conflicts(&config_path, managed_pid)
+            .detect_resource_conflicts(&config_path, managed_pid, config_override)
             .await;
         if !resource_conflicts.is_empty() {
             let summary = format_resource_conflicts_summary(&resource_conflicts);
@@ -2449,7 +2456,7 @@ mod tests {
     async fn test_diagnose_takeover_conflict_with_managed_pid() {
         let mgr = SingBoxServiceManager::new();
         let diag = mgr
-            .diagnose_takeover_conflict()
+            .diagnose_takeover_conflict(None)
             .await
             .expect("diagnose should succeed");
         println!("Diagnose result without managed PID: {diag:?}");
@@ -2462,7 +2469,10 @@ mod tests {
                 !filtered.iter().any(|c| c.pid == first_pid),
                 "managed pid must be excluded"
             );
-            let diag_managed = p.diagnose_takeover_conflict(Some(first_pid)).await.unwrap();
+            let diag_managed = p
+                .diagnose_takeover_conflict(Some(first_pid), &running_config_path)
+                .await
+                .unwrap();
             assert!(!diag_managed.pids.contains(&first_pid));
         }
     }

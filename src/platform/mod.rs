@@ -250,10 +250,13 @@ pub trait PlatformStrategy: Send + Sync {
     ) -> Vec<ConflictingProcessInfo>;
     /// 通用资源占用诊断：sing-box 需要的端口/TUN 网卡/DNS/路由是否被外部程序占用。
     /// 按实际占用判定，不硬编码具体工具名；exclude_pid 用于排除 Subout 自己管理的进程。
+    /// `config_override` 为 Some 时优先使用它（来自数据库的当前配置），
+    /// 否则回退读取 `running_config_path` 文件。诊断接口传 Some 以避免读取过期文件。
     fn detect_resource_conflicts<'a>(
         &'a self,
         running_config_path: &'a Path,
         exclude_pid: Option<u32>,
+        config_override: Option<&'a Value>,
     ) -> BoxFuture<'a, Vec<ResourceHolderInfo>>;
     /// 同步反查占用指定 TCP 端口的进程，返回用于错误提示的中文描述（含真实进程名/PID/命令）。
     /// 各平台用各自最可靠的方式实现：Linux 读 /proc，macOS 用 lsof，Windows 用 netstat。
@@ -279,10 +282,13 @@ pub trait PlatformStrategy: Send + Sync {
         sudo_pass: Option<&'a str>,
     ) -> BoxFuture<'a, Result<()>>;
     fn external_process_stop_failed_message(&self, pid: u32, has_sudo_pass: bool) -> String;
-    fn diagnose_takeover_conflict(
-        &self,
+    /// 诊断接管冲突。`running_config_path` 由调用方（service.rs）统一决定并传入，
+    /// 进程归属过滤与资源占用检测共用这一个路径来源，避免各平台各自取路径导致不一致。
+    fn diagnose_takeover_conflict<'a>(
+        &'a self,
         managed_pid: Option<u32>,
-    ) -> BoxFuture<'_, Result<TakeoverDiagnoseResult>>;
+        running_config_path: &'a Path,
+    ) -> BoxFuture<'a, Result<TakeoverDiagnoseResult>>;
     /// Collect CPU utilization percentage (0.0 - 100.0+) and resident memory in bytes for the given PID and any of its child processes.
     fn get_process_resource_usage(&self, pid: u32) -> (f64, u64);
 
@@ -525,5 +531,83 @@ mod tests {
         let (cpu_comma, mem_comma) = parse_ps_resource_output(sample_comma, 300);
         assert!((cpu_comma - 2.8).abs() < 0.001);
         assert_eq!(mem_comma, 5120 * 1024);
+    }
+
+    /// 端口冲突诊断只应检查"当前配置"里声明的入站端口。
+    /// 用户把 2080 改成 2081 后，2080 不得再出现在待检测集合中，
+    /// 否则会一直误报"2080 被占用"。
+    #[test]
+    fn test_collect_inbound_listeners_follows_edited_config() {
+        let old = json!({
+            "inbounds": [
+                { "type": "socks", "listen": "127.0.0.1", "listen_port": 2080 },
+                { "type": "tun", "listen_port": 2080 }
+            ]
+        });
+        assert_eq!(
+            collect_inbound_listeners(&old),
+            vec![("127.0.0.1".to_string(), 2080u16)]
+        );
+
+        let edited = json!({
+            "inbounds": [
+                { "type": "socks", "listen": "127.0.0.1", "listen_port": 2081 },
+                { "type": "tun", "listen_port": 2080 }
+            ]
+        });
+        let listeners = collect_inbound_listeners(&edited);
+        assert_eq!(listeners, vec![("127.0.0.1".to_string(), 2081u16)]);
+        assert!(!listeners.iter().any(|(_, p)| *p == 2080));
+    }
+
+    /// 回归：各平台的 diagnose_takeover_conflict 不得自行取配置路径，
+    /// 必须使用调用方（service.rs）传入的 running_config_path，
+    /// 保证进程归属过滤与资源占用检测共用同一个来源。
+    #[test]
+    fn test_platform_diagnose_does_not_self_fetch_config_path() {
+        for (name, src) in [
+            ("linux", include_str!("linux.rs")),
+            ("macos", include_str!("macos.rs")),
+            ("windows", include_str!("windows.rs")),
+            ("fallback", include_str!("fallback.rs")),
+        ] {
+            let start = src
+                .find("fn diagnose_takeover_conflict")
+                .unwrap_or_else(|| panic!("{name}: missing diagnose_takeover_conflict"));
+            // 截止到下一个方法定义或文档注释，避免把后续方法误计入函数体。
+            let end = src[start..]
+                .find("\n    fn ")
+                .or_else(|| src[start..].find("\n    /// "))
+                .map(|i| start + i)
+                .unwrap_or(src.len());
+            let body = &src[start..end];
+            assert!(
+                !body.contains("get_running_config_path()"),
+                "{name}: diagnose_takeover_conflict must not call get_running_config_path() \
+                 itself; use the caller-supplied running_config_path"
+            );
+            // fallback 直接返回 no_conflict，不经过进程过滤；其余平台必须把传入的路径
+            // 交给 detect_conflicting_processes，否则进程归属过滤用的不是同一个路径。
+            if name != "fallback" {
+                assert!(
+                    body.contains("detect_conflicting_processes(managed_pid, running_config_path)"),
+                    "{name}: diagnose_takeover_conflict must pass the supplied path to \
+                     detect_conflicting_processes"
+                );
+            }
+        }
+    }
+
+    /// 回归：进程过滤使用的配置路径变体必须包含调用方传入的路径，
+    /// 否则即便调用方传了自定义路径，过滤逻辑也不会生效。
+    #[test]
+    fn test_get_config_path_variants_include_supplied_path() {
+        let supplied = Path::new("subout-diagnose-marker/config.json");
+        let variants = get_config_path_variants(supplied);
+        let supplied_str = supplied.to_string_lossy();
+        assert!(
+            variants.first().is_some_and(|v| v == &supplied_str),
+            "first config path variant must be the caller-supplied path, got {variants:?}"
+        );
     }
 }

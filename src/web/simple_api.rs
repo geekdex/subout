@@ -136,7 +136,9 @@ pub async fn save_simple_config(
                 format!("配置已保存，但重启服务失败: {e}"),
             ));
         }
-    } else if !state.service_manager.is_running().await {
+    } else {
+        // 未重启时也要刷新运行配置文件，否则端口冲突诊断仍按旧配置解读，
+        // 出现"已改端口却仍提示旧端口被占用"。
         let config_path = crate::service::SingBoxServiceManager::get_running_config_path();
         if let Some(parent) = config_path.parent() {
             let _ = std::fs::create_dir_all(parent);

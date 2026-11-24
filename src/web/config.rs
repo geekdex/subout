@@ -987,6 +987,16 @@ pub async fn update_history_config(
                 let _ = db::save_base_config_section(&conn, sec, &sec_str);
             }
         }
+        // 运行配置落盘：诊断/自动更新等消费者读的是该文件，不同步会让
+        // 用户改过的端口仍被当作旧端口检测。直接写用户刚保存的内容，
+        // 不重新生成，保证所见即所得。
+        if let Ok(content) = serde_json::to_string_pretty(&payload.content) {
+            let path = crate::service::SingBoxServiceManager::get_running_config_path();
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, content);
+        }
     }
 
     Ok(StatusCode::OK)

@@ -217,14 +217,18 @@ impl PlatformStrategy for MacOsPlatform {
         &'a self,
         running_config_path: &'a Path,
         exclude_pid: Option<u32>,
+        config_override: Option<&'a Value>,
     ) -> BoxFuture<'a, Vec<ResourceHolderInfo>> {
         Box::pin(async move {
-            let config: Value = match std::fs::read_to_string(running_config_path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-            {
-                Some(c) => c,
-                None => return Vec::new(),
+            let config: Value = match config_override {
+                Some(c) => c.clone(),
+                None => match std::fs::read_to_string(running_config_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                {
+                    Some(c) => c,
+                    None => return Vec::new(),
+                },
             };
             let mut results = Vec::new();
             for (listen, port) in collect_inbound_listeners(&config) {
@@ -610,14 +614,13 @@ impl PlatformStrategy for MacOsPlatform {
         }
     }
 
-    fn diagnose_takeover_conflict(
-        &self,
+    fn diagnose_takeover_conflict<'a>(
+        &'a self,
         managed_pid: Option<u32>,
-    ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
+        running_config_path: &'a Path,
+    ) -> BoxFuture<'a, Result<crate::platform::TakeoverDiagnoseResult>> {
         Box::pin(async move {
-            let running_config_path =
-                crate::service::SingBoxServiceManager::get_running_config_path();
-            let conflicts = self.detect_conflicting_processes(managed_pid, &running_config_path);
+            let conflicts = self.detect_conflicting_processes(managed_pid, running_config_path);
             if conflicts.is_empty() {
                 return Ok(crate::platform::TakeoverDiagnoseResult::no_conflict());
             }

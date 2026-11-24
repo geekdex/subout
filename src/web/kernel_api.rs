@@ -127,9 +127,17 @@ pub async fn takeover_diagnose(
         .await
         .map_err(|s| (s, "未授权".to_string()))?;
 
+    // 诊断必须基于用户"当前配置"，而不是磁盘上可能过期的运行副本
+    // （用户改了端口但未重启服务时，旧文件会让诊断一直误报旧端口被占用）。
+    // 这里只读数据库、不写运行配置文件：诊断是无副作用的查询，
+    // 不能改变"服务实际正在使用哪份配置"这一事实。
+    let current_config = crate::web::get_db_conn(&state.db_path)
+        .ok()
+        .and_then(|conn| crate::web::service_api::get_active_config_for_mode(&conn).ok());
+
     let res = state
         .service_manager
-        .diagnose_takeover_conflict()
+        .diagnose_takeover_conflict(current_config.as_ref())
         .await
         .map_err(|e| {
             (

@@ -302,6 +302,15 @@ pub async fn update_config(
                 let _ = db::save_base_config_section(&conn, section, &sec_str);
             }
         }
+        // 同步落盘运行配置：诊断/自动更新等消费者读的是该文件，
+        // 不同步会让用户改过的端口仍被当作旧端口检测（所见非所得）。
+        if let Ok(content) = serde_json::to_string_pretty(&sanitized_val) {
+            let path = crate::service::SingBoxServiceManager::get_running_config_path();
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, content);
+        }
     }
 
     Ok(Json(serde_json::json!({

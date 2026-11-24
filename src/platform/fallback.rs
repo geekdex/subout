@@ -47,6 +47,7 @@ impl PlatformStrategy for FallbackPlatform {
         &'a self,
         _running_config_path: &'a Path,
         _exclude_pid: Option<u32>,
+        _config_override: Option<&'a Value>,
     ) -> BoxFuture<'a, Vec<ResourceHolderInfo>> {
         Box::pin(async move { Vec::new() })
     }
@@ -89,10 +90,11 @@ impl PlatformStrategy for FallbackPlatform {
         format!("终止外部进程 (PID: {pid}) 失败：进程仍在运行")
     }
 
-    fn diagnose_takeover_conflict(
-        &self,
+    fn diagnose_takeover_conflict<'a>(
+        &'a self,
         _managed_pid: Option<u32>,
-    ) -> BoxFuture<'_, Result<crate::platform::TakeoverDiagnoseResult>> {
+        _running_config_path: &'a Path,
+    ) -> BoxFuture<'a, Result<crate::platform::TakeoverDiagnoseResult>> {
         Box::pin(async move { Ok(crate::platform::TakeoverDiagnoseResult::no_conflict()) })
     }
 
