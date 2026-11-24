@@ -119,7 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: "logs",
-      label: "内核日志",
+      label: "运行日志",
       icon: <FileText className="w-4 h-4" />,
       requiresKernel: false,
       showInMode: "all",

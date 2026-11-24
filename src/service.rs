@@ -2,17 +2,19 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::VecDeque;
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::RwLock;
 
 use crate::kernel;
 
 const MAX_LOG_LINES: usize = 1000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SingboxLogLevel {
     Trace = 10,
     Debug = 20,
@@ -56,6 +58,23 @@ impl SingboxLogLevel {
             Self::Panic => "panic",
         }
     }
+}
+
+/// A log entry's origin: the sing-box kernel itself, or subout's own runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogSource {
+    Singbox,
+    Subout,
+}
+
+/// Structured log line shared by the in-memory buffer and the web API.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LogEntry {
+    pub timestamp: String,
+    pub source: LogSource,
+    pub level: SingboxLogLevel,
+    pub message: String,
 }
 
 pub fn parse_singbox_log_level(line: &str) -> Option<SingboxLogLevel> {
@@ -118,6 +137,11 @@ pub fn parse_singbox_log_level(line: &str) -> Option<SingboxLogLevel> {
     None
 }
 
+/// Level stored on a log entry. Lines without a recognizable level are info.
+fn log_level_for(line: &str) -> SingboxLogLevel {
+    parse_singbox_log_level(line).unwrap_or(SingboxLogLevel::Info)
+}
+
 pub fn should_record_singbox_line(
     line: &str,
     configured_level: SingboxLogLevel,
@@ -153,6 +177,100 @@ pub async fn append_to_file(path: &Path, line: &str) {
     {
         use tokio::io::AsyncWriteExt;
         let _ = file.write_all(format!("{line}\n").as_bytes()).await;
+    }
+}
+
+/// Wait for sing-box to create its configured log file, then seek to EOF.
+/// Anything already in the file belongs to a previous run and is not replayed.
+async fn open_log_file_for_tailing(path: &Path) -> Option<tokio::fs::File> {
+    for _ in 0..100 {
+        if let Ok(mut file) = tokio::fs::File::open(path).await {
+            let _ = file.seek(SeekFrom::End(0)).await;
+            return Some(file);
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+    None
+}
+
+/// Shared state and configuration for the sing-box log-file tailer.
+struct LogTailerContext {
+    logs: Arc<RwLock<VecDeque<LogEntry>>>,
+    last_error: Arc<RwLock<Option<String>>>,
+    ready: Arc<RwLock<bool>>,
+    is_running_child: Arc<RwLock<Option<tokio::process::Child>>>,
+    subout_log_file: PathBuf,
+    min_level: SingboxLogLevel,
+    is_disabled: bool,
+}
+
+/// Read newly appended lines from an already-positioned file into the shared
+/// log buffer. Shared with tests so they can drive a deterministic file fixture.
+async fn tail_log_file(file: tokio::fs::File, ctx: LogTailerContext) {
+    let mut reader = BufReader::new(file);
+    let mut line_buf = String::new();
+    loop {
+        let still_running = {
+            let mut c = ctx.is_running_child.write().await;
+            if let Some(ref mut child) = *c {
+                matches!(child.try_wait(), Ok(None))
+            } else {
+                false
+            }
+        };
+
+        let mut read_any = false;
+        loop {
+            line_buf.clear();
+            match reader.read_line(&mut line_buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    read_any = true;
+                    let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
+                    if !trimmed.is_empty() {
+                        let clean = strip_ansi_codes(trimmed);
+                        if is_actual_singbox_error(&clean) {
+                            *ctx.last_error.write().await = Some(clean.clone());
+                        } else {
+                            let lower = clean.to_lowercase();
+                            if lower.contains("sing-box started")
+                                || lower.contains("server started at")
+                                || lower.contains("started inbound")
+                                || lower.contains(": started")
+                                || lower.contains("router: started")
+                                || lower.contains("dns: started")
+                            {
+                                *ctx.ready.write().await = true;
+                            }
+                        }
+
+                        if should_record_singbox_line(&clean, ctx.min_level, ctx.is_disabled) {
+                            let timestamp =
+                                chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                            let formatted = format!("[{timestamp}] [sing-box] {clean}");
+                            {
+                                let mut l = ctx.logs.write().await;
+                                if l.len() >= MAX_LOG_LINES {
+                                    l.pop_front();
+                                }
+                                l.push_back(LogEntry {
+                                    timestamp,
+                                    source: LogSource::Singbox,
+                                    level: log_level_for(&clean),
+                                    message: clean.clone(),
+                                });
+                            }
+                            append_to_file(&ctx.subout_log_file, &formatted).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !still_running && !read_any {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 }
 
@@ -215,7 +333,7 @@ pub struct SingBoxServiceManager {
     started_at: Arc<RwLock<Option<u64>>>,
     ready: Arc<RwLock<bool>>,
     last_error: Arc<RwLock<Option<String>>>,
-    logs: Arc<RwLock<VecDeque<String>>>,
+    logs: Arc<RwLock<VecDeque<LogEntry>>>,
     saved_sudo_pass: Arc<RwLock<Option<String>>>,
     temp_sudo_pass: Arc<RwLock<Option<String>>>,
     cached_sudo_pass: Arc<RwLock<Option<String>>>,
@@ -240,7 +358,9 @@ impl SingBoxServiceManager {
             started_at: Arc::new(RwLock::new(None)),
             ready: Arc::new(RwLock::new(false)),
             last_error: Arc::new(RwLock::new(None)),
-            logs: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOG_LINES))),
+            logs: Arc::new(RwLock::new(VecDeque::<LogEntry>::with_capacity(
+                MAX_LOG_LINES,
+            ))),
             saved_sudo_pass: Arc::new(RwLock::new(None)),
             temp_sudo_pass: Arc::new(RwLock::new(None)),
             cached_sudo_pass: Arc::new(RwLock::new(None)),
@@ -350,30 +470,50 @@ impl SingBoxServiceManager {
         crate::paths::AppPaths::get().running_config_path()
     }
 
-    pub async fn append_log(&self, line: &str) {
+    /// Append a subout runtime line to the bounded buffer and `subout.log`.
+    /// The on-disk text format is kept identical to the previous plain-string version.
+    async fn push_log(&self, level: SingboxLogLevel, message: &str) {
+        let message = message.trim_end();
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let formatted = format!("[{}] {}", timestamp, line.trim_end());
         {
             let mut logs = self.logs.write().await;
             if logs.len() >= MAX_LOG_LINES {
                 logs.pop_front();
             }
-            logs.push_back(formatted.clone());
+            logs.push_back(LogEntry {
+                timestamp: timestamp.clone(),
+                source: LogSource::Subout,
+                level,
+                message: message.to_string(),
+            });
         }
+        let formatted = format!("[{timestamp}] {message}");
         let log_file = crate::paths::AppPaths::get().log_dir.join("subout.log");
         append_to_file(&log_file, &formatted).await;
     }
 
-    pub async fn get_logs(&self) -> Vec<String> {
+    pub async fn append_log(&self, line: &str) {
+        self.push_log(log_level_for(line), line).await;
+    }
+
+    /// Return the most recent `limit` entries, oldest of those first.
+    pub async fn get_logs(&self, limit: usize) -> Vec<LogEntry> {
+        let limit = limit.clamp(1, MAX_LOG_LINES);
         let logs = self.logs.read().await;
-        logs.iter().cloned().collect()
+        logs.iter()
+            .skip(logs.len().saturating_sub(limit))
+            .cloned()
+            .collect()
     }
 
     pub async fn clear_logs(&self) {
-        let mut logs = self.logs.write().await;
-        logs.clear();
-        let log_file = crate::paths::AppPaths::get().log_dir.join("subout.log");
-        let _ = tokio::fs::remove_file(log_file).await;
+        {
+            let mut logs = self.logs.write().await;
+            logs.clear();
+        }
+        let log_dir = crate::paths::AppPaths::get().log_dir.clone();
+        let _ = tokio::fs::remove_file(log_dir.join("subout.log")).await;
+        let _ = tokio::fs::remove_file(log_dir.join("subout.log.1")).await;
     }
 
     pub async fn is_running(&self) -> bool {
@@ -1228,7 +1368,12 @@ impl SingBoxServiceManager {
                             if l.len() >= MAX_LOG_LINES {
                                 l.pop_front();
                             }
-                            l.push_back(formatted.clone());
+                            l.push_back(LogEntry {
+                                timestamp,
+                                source: LogSource::Singbox,
+                                level: log_level_for(&clean),
+                                message: clean.clone(),
+                            });
                         }
                         append_to_file(&subout_log_file, &formatted).await;
                     }
@@ -1270,7 +1415,12 @@ impl SingBoxServiceManager {
                             if l.len() >= MAX_LOG_LINES {
                                 l.pop_front();
                             }
-                            l.push_back(formatted.clone());
+                            l.push_back(LogEntry {
+                                timestamp,
+                                source: LogSource::Singbox,
+                                level: log_level_for(&clean),
+                                message: clean.clone(),
+                            });
                         }
                         append_to_file(&subout_log_file, &formatted).await;
                     }
@@ -1286,85 +1436,20 @@ impl SingBoxServiceManager {
             let is_running_child = self.child.clone();
             let subout_log_file = subout_log_path.clone();
             tokio::spawn(async move {
-                // Wait up to 5s for sing-box to create the log file
-                let mut file = None;
-                for _ in 0..100 {
-                    if let Ok(f) = tokio::fs::File::open(&output_path).await {
-                        file = Some(f);
-                        break;
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                }
-
-                if let Some(f) = file {
-                    let mut reader = BufReader::new(f);
-                    let mut line_buf = String::new();
-                    loop {
-                        let still_running = {
-                            let mut c = is_running_child.write().await;
-                            if let Some(ref mut child) = *c {
-                                matches!(child.try_wait(), Ok(None))
-                            } else {
-                                false
-                            }
-                        };
-
-                        let mut read_any = false;
-                        loop {
-                            line_buf.clear();
-                            match reader.read_line(&mut line_buf).await {
-                                Ok(0) | Err(_) => break,
-                                Ok(_) => {
-                                    read_any = true;
-                                    let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
-                                    if !trimmed.is_empty() {
-                                        let clean = strip_ansi_codes(trimmed);
-                                        if is_actual_singbox_error(&clean) {
-                                            *last_error_clone.write().await = Some(clean.clone());
-                                        } else {
-                                            let lower = clean.to_lowercase();
-                                            if lower.contains("sing-box started")
-                                                || lower.contains("server started at")
-                                                || lower.contains("started inbound")
-                                                || lower.contains(": started")
-                                                || lower.contains("router: started")
-                                                || lower.contains("dns: started")
-                                            {
-                                                *ready_clone.write().await = true;
-                                            }
-                                        }
-
-                                        if should_record_singbox_line(
-                                            &clean,
-                                            min_level,
-                                            is_disabled,
-                                        ) {
-                                            let timestamp = chrono::Local::now()
-                                                .format("%Y-%m-%d %H:%M:%S")
-                                                .to_string();
-                                            let formatted =
-                                                format!("[{timestamp}] [sing-box] {clean}");
-
-                                            {
-                                                let mut l = logs_clone.write().await;
-                                                if l.len() >= MAX_LOG_LINES {
-                                                    l.pop_front();
-                                                }
-                                                l.push_back(formatted.clone());
-                                            }
-                                            append_to_file(&subout_log_file, &formatted).await;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if !still_running && !read_any {
-                            break;
-                        }
-
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    }
+                if let Some(file) = open_log_file_for_tailing(&output_path).await {
+                    tail_log_file(
+                        file,
+                        LogTailerContext {
+                            logs: logs_clone,
+                            last_error: last_error_clone,
+                            ready: ready_clone,
+                            is_running_child,
+                            subout_log_file,
+                            min_level,
+                            is_disabled,
+                        },
+                    )
+                    .await;
                 }
             });
         }
@@ -2637,14 +2722,43 @@ mod tests {
 
         // Simulate log appending with connection refused error
         mgr.append_log("+0800 2026-08-31 18:15:48 ERROR [2133602452 1.14s] connection: open connection to 192.168.3.80:39459 using outbound/direct[direct]: dial tcp 192.168.3.80:39459: connect: connection refused").await;
-        let logs = mgr.get_logs().await;
+        let logs = mgr.get_logs(300).await;
         assert_eq!(logs.len(), 1);
-        assert!(logs[0].contains("connection refused"));
+        assert!(logs[0].message.contains("connection refused"));
+        assert_eq!(logs[0].source, LogSource::Subout);
+        assert_eq!(logs[0].level, SingboxLogLevel::Error);
 
         // Status is still stopped and last_error is None (since runtime log isn't a fatal service crash)
         let st2 = mgr.get_status().await;
         assert!(!st2.running);
         assert!(st2.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_log_entries_source_level_clear_and_limit() {
+        let mgr = SingBoxServiceManager::new();
+
+        mgr.append_log("Service started").await;
+        mgr.append_log("❌ failed to bind port").await;
+        mgr.append_log("⚠️ slow upstream").await;
+
+        let all = mgr.get_logs(300).await;
+        assert_eq!(all.len(), 3);
+        assert!(all.iter().all(|e| e.source == LogSource::Subout));
+        assert_eq!(all[0].level, SingboxLogLevel::Info);
+        assert_eq!(all[1].level, SingboxLogLevel::Error);
+        assert_eq!(all[2].level, SingboxLogLevel::Warn);
+
+        // A limit returns only the newest N entries, still oldest-of-those first.
+        let last_two = mgr.get_logs(2).await;
+        assert_eq!(last_two.len(), 2);
+        assert_eq!(last_two[0].message, all[1].message);
+        assert_eq!(last_two[1].message, all[2].message);
+        // The limit is clamped to at least one entry.
+        assert_eq!(mgr.get_logs(0).await.len(), 1);
+
+        mgr.clear_logs().await;
+        assert!(mgr.get_logs(300).await.is_empty());
     }
 
     #[tokio::test]
@@ -2655,102 +2769,52 @@ mod tests {
             .as_nanos();
         let log_file = std::env::temp_dir().join(format!("singbox_test_{unique_id}.log"));
 
-        let logs = Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOG_LINES)));
+        // A file left over from a previous run must not be replayed.
+        std::fs::write(&log_file, "INFO[9999] stale line from previous run\n").unwrap();
+
+        // Position the file exactly as production does, then append the fresh
+        // lines before tailing. No sleep/scheduling dependency in the test.
+        let file = open_log_file_for_tailing(&log_file).await.unwrap();
+        use std::io::Write as _;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&log_file)
+            .unwrap()
+            .write_all(b"INFO[0000] router: started\nINFO[0001] inbound/mixed: started\n")
+            .unwrap();
+
+        let logs = Arc::new(RwLock::new(VecDeque::<LogEntry>::with_capacity(
+            MAX_LOG_LINES,
+        )));
         let last_error = Arc::new(RwLock::new(None));
         let ready = Arc::new(RwLock::new(false));
         let child_lock: Arc<RwLock<Option<tokio::process::Child>>> = Arc::new(RwLock::new(None));
 
-        let logs_clone = logs.clone();
-        let last_error_clone = last_error.clone();
-        let ready_clone = ready.clone();
-        let is_running_child = child_lock.clone();
-        let output_path = log_file.clone();
-
-        let handle = tokio::spawn(async move {
-            let mut file = None;
-            for _ in 0..50 {
-                if let Ok(f) = tokio::fs::File::open(&output_path).await {
-                    file = Some(f);
-                    break;
-                }
-                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-            }
-
-            if let Some(f) = file {
-                let mut reader = BufReader::new(f);
-                let mut line_buf = String::new();
-                for _ in 0..20 {
-                    let still_running = {
-                        let mut c = is_running_child.write().await;
-                        if let Some(ref mut child) = *c {
-                            matches!(child.try_wait(), Ok(None))
-                        } else {
-                            false
-                        }
-                    };
-
-                    let mut read_any = false;
-                    loop {
-                        line_buf.clear();
-                        match reader.read_line(&mut line_buf).await {
-                            Ok(0) | Err(_) => break,
-                            Ok(_) => {
-                                read_any = true;
-                                let trimmed = line_buf.trim_end_matches(&['\r', '\n'][..]);
-                                if !trimmed.is_empty() {
-                                    let clean = strip_ansi_codes(trimmed);
-                                    let timestamp = chrono::Local::now()
-                                        .format("%Y-%m-%d %H:%M:%S")
-                                        .to_string();
-                                    let formatted = format!("[{timestamp}] [sing-box] {clean}");
-
-                                    if is_actual_singbox_error(&clean) {
-                                        *last_error_clone.write().await = Some(clean.clone());
-                                    } else {
-                                        let lower = clean.to_lowercase();
-                                        if lower.contains("sing-box started")
-                                            || lower.contains("server started at")
-                                            || lower.contains("started inbound")
-                                            || lower.contains(": started")
-                                            || lower.contains("router: started")
-                                            || lower.contains("dns: started")
-                                        {
-                                            *ready_clone.write().await = true;
-                                        }
-                                    }
-
-                                    let mut l = logs_clone.write().await;
-                                    if l.len() >= MAX_LOG_LINES {
-                                        l.pop_front();
-                                    }
-                                    l.push_back(formatted);
-                                }
-                            }
-                        }
-                    }
-
-                    if !still_running && !read_any && logs_clone.read().await.len() >= 2 {
-                        break;
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                }
-            }
-        });
-
-        // Write sample log lines to file
-        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
-        std::fs::write(
-            &log_file,
-            "INFO[0000] router: started\nINFO[0001] inbound/mixed: started\n",
+        tail_log_file(
+            file,
+            LogTailerContext {
+                logs: logs.clone(),
+                last_error: last_error.clone(),
+                ready: ready.clone(),
+                is_running_child: child_lock,
+                subout_log_file: crate::paths::AppPaths::get().log_dir.join("subout.log"),
+                min_level: SingboxLogLevel::Info,
+                is_disabled: false,
+            },
         )
-        .unwrap();
-
-        let _ = handle.await;
+        .await;
 
         let captured = logs.read().await;
-        assert_eq!(captured.len(), 2);
-        assert!(captured[0].contains("router: started"));
-        assert!(captured[1].contains("inbound/mixed: started"));
+        assert_eq!(
+            captured.len(),
+            2,
+            "pre-existing file content must be skipped"
+        );
+        assert!(captured.iter().all(|e| !e.message.contains("stale line")));
+        assert!(captured[0].message.contains("router: started"));
+        assert!(captured[1].message.contains("inbound/mixed: started"));
+        assert_eq!(captured[0].source, LogSource::Singbox);
+        assert_eq!(captured[0].level, SingboxLogLevel::Info);
         assert!(*ready.read().await);
     }
 

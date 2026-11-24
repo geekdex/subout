@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
 };
 use serde::Deserialize;
@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::db;
 use crate::generator;
-use crate::service::ServiceStatusInfo;
+use crate::service::{LogEntry, ServiceStatusInfo};
 use crate::simple_config;
 use crate::web::{AppState, check_auth, get_db_conn};
 
@@ -326,12 +326,21 @@ pub async fn set_system_proxy(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LogsQuery {
+    pub lines: Option<usize>,
+}
+
 pub async fn get_service_logs(
     State(state): State<AppState>,
+    Query(query): Query<LogsQuery>,
     headers: HeaderMap,
-) -> Result<Json<Vec<String>>, StatusCode> {
+) -> Result<Json<Vec<LogEntry>>, StatusCode> {
     check_auth(&state, &headers).await?;
-    let logs = state.service_manager.get_logs().await;
+    let logs = state
+        .service_manager
+        .get_logs(query.lines.unwrap_or(300))
+        .await;
     Ok(Json(logs))
 }
 

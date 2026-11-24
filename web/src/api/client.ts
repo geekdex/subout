@@ -19,6 +19,7 @@ import {
   SpeedTestEndpoint,
   NodePingProgressEvent,
   SiteProbeResponse,
+  ServiceLogEntry,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -905,8 +906,8 @@ export const api = {
   },
 
   // Logs
-  async getServiceLogs(lines = 200): Promise<{ logs: string[] }> {
-    const res = await request<Record<string, unknown> | string[]>(
+  async getServiceLogs(lines = 300): Promise<{ logs: ServiceLogEntry[] }> {
+    const res = await request<ServiceLogEntry[] | { logs: ServiceLogEntry[] }>(
       `/api/service/logs?lines=${lines}`,
     );
     if (Array.isArray(res)) return { logs: res };
@@ -916,7 +917,7 @@ export const api = {
       "logs" in res &&
       Array.isArray(res.logs)
     ) {
-      return { logs: res.logs as string[] };
+      return { logs: res.logs };
     }
     return { logs: [] };
   },

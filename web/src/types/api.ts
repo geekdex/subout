@@ -47,6 +47,18 @@ export interface ServiceStatus {
   system_proxy_unsupported_reason?: string | null;
 }
 
+/** Where a log line came from: the sing-box kernel or subout's own runtime. */
+export type LogSource = "singbox" | "subout";
+
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic";
+
+export interface ServiceLogEntry {
+  timestamp: string;
+  source: LogSource;
+  level: LogLevel;
+  message: string;
+}
+
 export interface KernelDownloadStatus {
   status: "idle" | "downloading" | "extracting" | "ready" | "error";
   progress: number;
