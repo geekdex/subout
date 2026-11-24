@@ -155,18 +155,18 @@ const MAX_CONCURRENCY = 3;
 const TraceRows: React.FC<{ result: SiteProbeResponse }> = ({ result }) => {
   if (!result.dns_rule && !result.route_rule) return null;
   return (
-    <div className="mt-3 space-y-1.5 border-t border-slate-700/60 pt-3 text-[11px]">
+    <div className="mt-1.5 space-y-1 border-t border-slate-800/80 pt-1.5 text-[10px]">
       {result.dns_rule && (
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Badge variant="info" size="sm">
+        <div className="flex min-w-0 items-center gap-1">
+          <Badge variant="info" size="sm" className="!px-1 !py-0">
             DNS
           </Badge>
-          <span className="min-w-0 truncate text-slate-300" title={result.dns_rule}>
+          <span className="min-w-0 truncate text-slate-400" title={result.dns_rule}>
             {result.dns_rule}
           </span>
           {result.dns_server && (
             <>
-              <ArrowRight className="h-3 w-3 shrink-0 text-slate-600" />
+              <ArrowRight className="h-2.5 w-2.5 shrink-0 text-slate-600" />
               <span
                 className="min-w-0 truncate text-sky-400"
                 title={result.dns_server}
@@ -178,16 +178,16 @@ const TraceRows: React.FC<{ result: SiteProbeResponse }> = ({ result }) => {
         </div>
       )}
       {result.route_rule && (
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Badge variant="success" size="sm">
+        <div className="flex min-w-0 items-center gap-1">
+          <Badge variant="success" size="sm" className="!px-1 !py-0">
             出口
           </Badge>
-          <span className="min-w-0 truncate text-slate-300" title={result.route_rule}>
+          <span className="min-w-0 truncate text-slate-400" title={result.route_rule}>
             {result.route_rule}
           </span>
           {result.outbound && (
             <>
-              <ArrowRight className="h-3 w-3 shrink-0 text-slate-600" />
+              <ArrowRight className="h-2.5 w-2.5 shrink-0 text-slate-600" />
               <span
                 className="min-w-0 truncate text-emerald-400"
                 title={result.outbound}
@@ -210,8 +210,7 @@ const SiteCard: React.FC<{
 }> = ({ site, state, disabled, onTest }) => {
   const testing = state?.testing ?? false;
   const result = state?.result ?? null;
-  const latency = result?.latency_ms ?? null;
-  const latencyInfo = formatLatency(latency);
+  const latencyInfo = formatLatency(result?.latency_ms ?? null);
   const borderColor = testing
     ? "border-l-sky-400"
     : result?.success
@@ -233,81 +232,72 @@ const SiteCard: React.FC<{
         ? "可达"
         : "不可达"
       : "未测试";
+  const httpColor =
+    result?.status_code != null
+      ? result.status_code < 400
+        ? "text-emerald-400"
+        : "text-amber-400"
+      : "text-slate-600";
 
   return (
     <div
       data-testid={`site-card-${site.id}`}
-      className={`flex flex-col rounded-xl border border-slate-800 border-l-2 ${borderColor} bg-slate-900/60 p-4 transition-colors hover:bg-slate-900`}
+      className={`flex min-w-0 flex-col rounded-lg border border-slate-800 border-l-2 ${borderColor} bg-slate-900/60 px-2.5 py-2 transition-colors hover:bg-slate-900`}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex min-w-0 items-center gap-2">
         <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${site.iconClass}`}
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md [&>svg]:h-4 [&>svg]:w-4 ${site.iconClass}`}
         >
           {site.icon}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-slate-100">
+          <h3
+            className="truncate text-xs font-semibold text-slate-100"
+            title={site.name}
+          >
             {site.name}
           </h3>
-          <p className="truncate text-xs text-slate-500" title={site.domain}>
+          <p className="truncate text-[10px] text-slate-500" title={site.domain}>
             {site.domain}
           </p>
         </div>
-        <Badge variant="neutral" size="sm">
-          {site.categoryName}
-        </Badge>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
-        <div className="min-w-0">
-          <div className="text-[10px] text-slate-500">HTTP 状态</div>
-          <div className="mt-0.5 text-sm font-semibold">
-            {result?.status_code != null ? (
-              <span
-                className={
-                  result.status_code < 400 ? "text-emerald-400" : "text-amber-400"
-                }
-              >
-                {result.status_code}
-              </span>
-            ) : (
-              <span className="text-slate-600">--</span>
-            )}
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="text-[10px] text-slate-500">响应延迟</div>
-          <div
-            className={`mt-0.5 text-sm font-semibold ${result ? latencyInfo.color : "text-slate-600"}`}
-          >
-            {result ? latencyInfo.text : "--"}
-          </div>
-        </div>
+      <div className="mt-2 flex min-w-0 items-center gap-1.5 rounded-md border border-slate-800/70 bg-slate-950/50 px-2 py-1">
+        <span className="inline-flex min-w-0 flex-1 items-center gap-1 text-[10px] text-slate-400">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
+          <span className="truncate">{statusText}</span>
+        </span>
+        <span
+          className={`shrink-0 text-[10px] font-semibold tabular-nums ${httpColor}`}
+        >
+          {result?.status_code ?? "--"}
+        </span>
+        <span
+          className={`shrink-0 text-[10px] font-semibold tabular-nums ${result ? latencyInfo.color : "text-slate-600"}`}
+        >
+          {result ? latencyInfo.text : "--"}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="!px-1 !py-0.5"
+          loading={testing}
+          disabled={disabled || testing}
+          onClick={() => onTest(site)}
+          aria-label={`测试 ${site.name}`}
+          title={`测试 ${site.name}`}
+          icon={!testing ? <Play className="h-3.5 w-3.5" /> : undefined}
+        />
       </div>
 
       {result && <TraceRows result={result} />}
 
       {result?.error && (
-        <p className="mt-2 truncate text-[11px] text-rose-400" title={result.error}>
+        <p className="mt-1 truncate text-[10px] text-rose-400" title={result.error}>
           {result.error}
         </p>
       )}
-
-      <div className="mt-auto flex items-center justify-between border-t border-slate-800/80 pt-3">
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
-          <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`} />
-          {statusText}
-        </span>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={disabled || testing}
-          onClick={() => onTest(site)}
-          aria-label={`测试 ${site.name}`}
-        >
-          {testing ? "测试中" : "单项测试"}
-        </Button>
-      </div>
     </div>
   );
 };
@@ -462,7 +452,7 @@ export const SiteTestView: React.FC = () => {
       : PRESET_SITES.filter((site) => site.category === category);
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
+    <div className="mx-auto w-full max-w-7xl space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
@@ -492,7 +482,7 @@ export const SiteTestView: React.FC = () => {
       </div>
 
       {stats.total > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-3.5 py-2.5">
           <div className="flex items-center gap-2 text-sm font-medium text-slate-200">
             <Activity className="h-4 w-4 text-sky-400" />
             系统网络连通性概览
@@ -515,8 +505,8 @@ export const SiteTestView: React.FC = () => {
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-200">
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5">
+        <div className="mb-2.5 flex items-center gap-2 text-sm font-medium text-slate-200">
           <Globe2 className="h-4 w-4 text-sky-400" />
           手动检测自定义网址
         </div>
@@ -596,7 +586,7 @@ export const SiteTestView: React.FC = () => {
         className="w-full justify-start"
       />
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
         {filteredSites.map((site) => (
           <SiteCard
             key={site.id}
