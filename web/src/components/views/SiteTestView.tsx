@@ -202,6 +202,68 @@ const TraceRows: React.FC<{ result: SiteProbeResponse }> = ({ result }) => {
   );
 };
 
+const ResultRow: React.FC<{
+  label: string;
+  value: string | null;
+  color?: string;
+  title?: string;
+}> = ({ label, value, color, title }) => (
+  <div className="flex min-w-0 items-center gap-1.5 leading-4">
+    <span className="w-8 shrink-0 text-[10px] text-slate-500">{label}</span>
+    <span
+      className={`min-w-0 flex-1 truncate text-[10px] ${value ? (color ?? "text-slate-300") : "text-slate-600"}`}
+      title={title ?? value ?? undefined}
+    >
+      {value ?? "--"}
+    </span>
+  </div>
+);
+
+/** Four fixed rows, always rendered so the card keeps the same height before and after testing. */
+const ResultRows: React.FC<{ result: SiteProbeResponse | null }> = ({ result }) => {
+  const latencyInfo = formatLatency(result?.latency_ms ?? null);
+  return (
+    <div className="mt-2 space-y-0.5 border-t border-slate-800/80 pt-1.5">
+      <ResultRow
+        label="HTTP"
+        value={result?.status_code != null ? String(result.status_code) : null}
+        color={
+          result?.status_code != null
+            ? result.status_code < 400
+              ? "text-emerald-400"
+              : "text-amber-400"
+            : undefined
+        }
+      />
+      <ResultRow
+        label="延迟"
+        value={result?.latency_ms != null ? latencyInfo.text : null}
+        color={result ? latencyInfo.color : undefined}
+      />
+      <ResultRow
+        label="DNS"
+        value={result?.dns_server ?? null}
+        color="text-sky-400"
+        title={
+          result?.dns_server
+            ? [result.dns_rule, result.dns_server].filter(Boolean).join(" ➔ ")
+            : undefined
+        }
+      />
+      <ResultRow
+        label="出口"
+        value={result?.outbound ?? null}
+        color="text-emerald-400"
+        title={
+          result?.outbound
+            ? [result.route_rule, result.outbound].filter(Boolean).join(" ➔ ")
+            : undefined
+        }
+      />
+    </div>
+  );
+};
+
 const SiteCard: React.FC<{
   site: PresetSite;
   state: SiteState | undefined;
@@ -210,7 +272,6 @@ const SiteCard: React.FC<{
 }> = ({ site, state, disabled, onTest }) => {
   const testing = state?.testing ?? false;
   const result = state?.result ?? null;
-  const latencyInfo = formatLatency(result?.latency_ms ?? null);
   const borderColor = testing
     ? "border-l-sky-400"
     : result?.success
@@ -232,12 +293,6 @@ const SiteCard: React.FC<{
         ? "可达"
         : "不可达"
       : "未测试";
-  const httpColor =
-    result?.status_code != null
-      ? result.status_code < 400
-        ? "text-emerald-400"
-        : "text-amber-400"
-      : "text-slate-600";
 
   return (
     <div
@@ -268,16 +323,6 @@ const SiteCard: React.FC<{
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
           <span className="truncate">{statusText}</span>
         </span>
-        <span
-          className={`shrink-0 text-[10px] font-semibold tabular-nums ${httpColor}`}
-        >
-          {result?.status_code ?? "--"}
-        </span>
-        <span
-          className={`shrink-0 text-[10px] font-semibold tabular-nums ${result ? latencyInfo.color : "text-slate-600"}`}
-        >
-          {result ? latencyInfo.text : "--"}
-        </span>
         <Button
           size="sm"
           variant="ghost"
@@ -291,13 +336,20 @@ const SiteCard: React.FC<{
         />
       </div>
 
-      {result && <TraceRows result={result} />}
+      <ResultRows result={result} />
 
-      {result?.error && (
-        <p className="mt-1 truncate text-[10px] text-rose-400" title={result.error}>
-          {result.error}
-        </p>
-      )}
+      <div
+        className={`mt-1 h-4 truncate text-[10px] ${
+          result?.error
+            ? "text-rose-400"
+            : testing
+              ? "text-sky-400"
+              : "text-slate-600"
+        }`}
+        title={result?.error ?? undefined}
+      >
+        {result?.error ?? (testing ? "正在检测…" : result ? "" : "点击 ▶ 开始检测")}
+      </div>
     </div>
   );
 };
