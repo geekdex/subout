@@ -66,6 +66,22 @@ describe("SettingsView Component", () => {
     expect(screen.getByText("管理员 (永久有效)")).toBeDefined();
   });
 
+  it("explains the active run mode with a clear status summary", () => {
+    renderWithToast(
+      <SettingsView
+        systemInfo={{ ...baseInfo, run_mode: "hosting" }}
+        onRefreshSystemInfo={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("纯托管").length).toBeGreaterThan(0);
+    expect(screen.getByText(/配置托管：生效中/)).toBeDefined();
+    expect(screen.getByText(/本机代理：已停用/)).toBeDefined();
+    expect(screen.getByText("决定本机是否运行代理")).toBeDefined();
+    // 选中卡片用文字角标再次确认，而非仅靠边框颜色
+    expect(screen.getByText("当前")).toBeDefined();
+  });
+
   it("requires the confirmation field before changing the admin password", async () => {
     const setWebPassword = vi
       .spyOn(api, "setWebPassword")

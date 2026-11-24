@@ -262,6 +262,7 @@ const AppContent: React.FC = () => {
           serviceStatus={serviceStatus}
           runningProfile={runningProfile}
           actionLoading={actionLoading}
+          runMode={runMode}
           onStartService={startService}
           onStopService={stopService}
           onRestartService={restartService}
@@ -326,6 +327,7 @@ const AppContent: React.FC = () => {
             <DashboardView
               systemInfo={systemInfo}
               serviceStatus={serviceStatus}
+              runMode={runMode}
               takeoverDiagnose={takeoverDiagnose}
               configs={configs}
               runningProfile={runningProfile}
@@ -386,6 +388,7 @@ const AppContent: React.FC = () => {
           {currentTab === "settings" && (
             <SettingsView
               systemInfo={systemInfo}
+              serviceStatus={serviceStatus}
               onRefreshSystemInfo={loadAllData}
             />
           )}

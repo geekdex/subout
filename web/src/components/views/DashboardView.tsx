@@ -33,6 +33,7 @@ import { NavTab } from "../layout/Sidebar";
 interface DashboardViewProps {
   systemInfo: SystemInfo | null;
   serviceStatus: ServiceStatus | null;
+  runMode?: "local" | "hosting" | "hybrid";
   takeoverDiagnose?: TakeoverDiagnoseResult | null;
   configs: ConfigProfile[];
   runningProfile: ConfigProfile | null;
@@ -43,6 +44,7 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   systemInfo,
   serviceStatus,
+  runMode = "local",
   takeoverDiagnose,
   configs,
   runningProfile,
@@ -85,6 +87,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const isRunning = serviceStatus?.running ?? false;
+  const isHosting = runMode === "hosting";
+  const isHybrid = runMode === "hybrid";
+
+  // 状态文案与圆点按模式区分：hosting 没有本机服务，不能显示孤立的「已停止」。
+  const serviceLabel = isHosting
+    ? "托管中"
+    : isHybrid
+      ? isRunning
+        ? serviceStatus?.ready
+          ? "托管中 · 代理运行"
+          : "托管中 · 启动中"
+        : "托管中 · 代理未启动"
+      : isRunning
+        ? serviceStatus?.ready
+          ? "正常运行"
+          : "启动中"
+        : "已停止";
+  const serviceDot = isHosting
+    ? "bg-sky-400"
+    : isRunning
+      ? serviceStatus?.ready
+        ? "bg-emerald-400"
+        : "bg-amber-400"
+      : "bg-slate-500";
+
   const hostOs = systemInfo?.host_os ?? "unknown";
   const isSimpleMode = (systemInfo?.app_mode ?? "simple") === "simple";
   const resourceConflicts: ResourceConflict[] =
@@ -243,28 +270,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Card 1: Service Status */}
         <div className="glass-panel p-5">
           <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-            <span>服务运行状态</span>
+            <span>运行状态</span>
             <Activity className="w-4 h-4 text-sky-400" />
           </div>
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${serviceDot}`} />
             <span className="text-xl font-bold text-slate-100">
-              {isRunning
-                ? serviceStatus?.ready
-                  ? "正常运行"
-                  : "启动中"
-                : "已停止"}
+              {serviceLabel}
             </span>
-            {serviceStatus?.pid && (
-              <span className="text-xs text-slate-500 font-mono">
-                PID {serviceStatus.pid}
-              </span>
-            )}
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-            <Clock className="w-3.5 h-3.5" />
-            <span>
-              运行时间: {formatDuration(serviceStatus?.uptime_secs ?? 0)}
-            </span>
+            {isHosting ? (
+              <span>本机代理未启用（纯托管）</span>
+            ) : (
+              <>
+                <Clock className="w-3.5 h-3.5" />
+                <span>
+                  运行时间: {formatDuration(serviceStatus?.uptime_secs ?? 0)}
+                </span>
+                {serviceStatus?.pid && (
+                  <span className="ml-auto text-slate-500 font-mono text-[11px]">
+                    PID {serviceStatus.pid}
+                  </span>
+                )}
+              </>
+            )}
           </div>
         </div>
 

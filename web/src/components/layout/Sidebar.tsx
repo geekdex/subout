@@ -294,8 +294,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               sing-box 订阅与配置中台
             </p>
             {runMode !== "local" && (
-              <p className="text-[10px] text-amber-300 mt-0.5">
-                托管模式 · 本机代理已停用
+              <p
+                className={`text-[10px] mt-0.5 ${
+                  runMode === "hybrid"
+                    ? "text-sky-300"
+                    : "text-amber-300"
+                }`}
+              >
+                {runMode === "hybrid"
+                  ? "混合模式 · 本机代理 + 配置托管"
+                  : "纯托管 · 本机代理未启用"}
               </p>
             )}
           </div>
@@ -446,38 +454,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {appMode === "simple" ? "小白模式" : "专业模式"}
             </strong>
           </span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className={clsx(
-                "w-2 h-2 rounded-full",
-                isKernelReady
-                  ? "bg-emerald-400 shadow-sm shadow-emerald-400/50"
-                  : downloadStatus?.status === "downloading" ||
-                      downloadStatus?.status === "extracting"
-                    ? "bg-amber-400 animate-spin"
-                    : "bg-amber-400 animate-pulse",
-              )}
-            />
-            <span
-              className={
-                isKernelReady
-                  ? "text-emerald-400 font-medium"
-                  : downloadStatus?.status === "downloading"
-                    ? "text-amber-300 font-medium"
-                    : downloadStatus?.status === "extracting"
-                      ? "text-cyan-300 font-medium"
-                      : "text-amber-400"
-              }
-            >
-              {isKernelReady
-                ? "内核就绪"
-                : downloadStatus?.status === "downloading"
-                  ? `下载中 ${downloadStatus.progress.toFixed(0)}%`
-                  : downloadStatus?.status === "extracting"
-                    ? "正在安装..."
-                    : "内核未就绪"}
+          {runMode === "hosting" ? (
+            // 纯托管按设计无需本机内核，不再显示橙色「内核未就绪」告警。
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-sky-400/80" />
+              <span className="text-sky-300/80 font-medium">
+                无需本机内核（纯托管）
+              </span>
             </span>
-          </span>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <span
+                className={clsx(
+                  "w-2 h-2 rounded-full",
+                  isKernelReady
+                    ? "bg-emerald-400 shadow-sm shadow-emerald-400/50"
+                    : downloadStatus?.status === "downloading" ||
+                        downloadStatus?.status === "extracting"
+                      ? "bg-amber-400 animate-spin"
+                      : runMode === "hybrid"
+                        ? "bg-amber-400"
+                        : "bg-amber-400 animate-pulse",
+                )}
+              />
+              <span
+                className={
+                  isKernelReady
+                    ? "text-emerald-400 font-medium"
+                    : downloadStatus?.status === "downloading"
+                      ? "text-amber-300 font-medium"
+                      : downloadStatus?.status === "extracting"
+                        ? "text-cyan-300 font-medium"
+                        : "text-amber-400"
+                }
+              >
+                {isKernelReady
+                  ? "内核就绪"
+                  : downloadStatus?.status === "downloading"
+                    ? `下载中 ${downloadStatus.progress.toFixed(0)}%`
+                    : downloadStatus?.status === "extracting"
+                      ? "正在安装..."
+                      : runMode === "hybrid"
+                        ? "内核未就绪（影响本机代理）"
+                        : "内核未就绪"}
+              </span>
+            </span>
+          )}
         </div>
 
         {isMobileView && onLogout && (

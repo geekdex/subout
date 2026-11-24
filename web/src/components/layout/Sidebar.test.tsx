@@ -442,6 +442,25 @@ describe("Sidebar run mode gating", () => {
     );
     const unlocked = screen.getByText("配置中心").closest("button");
     expect(unlocked?.disabled).toBe(false);
-    expect(screen.getByText(/托管模式 · 本机代理已停用/)).toBeDefined();
+    expect(screen.getByText(/纯托管 · 本机代理未启用/)).toBeDefined();
+    expect(screen.getByText(/无需本机内核（纯托管）/)).toBeDefined();
+  });
+
+  it("describes hybrid mode as local proxy plus hosting without claiming the proxy is disabled", () => {
+    render(
+      <Sidebar
+        currentTab="dashboard"
+        onSelectTab={vi.fn()}
+        isKernelReady={false}
+        runMode="hybrid"
+        appMode="expert"
+      />,
+    );
+
+    expect(screen.getByText(/混合模式 · 本机代理 \+ 配置托管/)).toBeDefined();
+    expect(screen.queryByText(/本机代理已停用/)).toBeNull();
+    // 混合模式仍需内核才能跑代理，应如实提示影响范围而不是「无需内核」。
+    expect(screen.getByText(/内核未就绪（影响本机代理）/)).toBeDefined();
+    expect(screen.queryByText(/无需本机内核/)).toBeNull();
   });
 });

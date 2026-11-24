@@ -13,22 +13,25 @@ import {
   RefreshCw,
   Lock,
   Download,
+  Check,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Badge } from "../ui/Badge";
-import { SystemInfo } from "../../types/api";
+import { ServiceStatus, SystemInfo } from "../../types/api";
 import { api } from "../../api/client";
 import { useToast } from "../../hooks/useToast";
 import { getErrorMessage } from "../../utils/format";
 
 interface SettingsViewProps {
   systemInfo: SystemInfo | null;
+  serviceStatus?: ServiceStatus | null;
   onRefreshSystemInfo: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   systemInfo,
+  serviceStatus,
   onRefreshSystemInfo,
 }) => {
   const [oldWebPassword, setOldWebPassword] = useState("");
@@ -39,6 +42,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const runMode: "local" | "hosting" | "hybrid" =
     systemInfo?.run_mode ?? "local";
+
+  // 运行模式的两个维度：对外托管（hosting/hybrid 始终生效）与本机代理（依服务状态）。
+  const hostingActive = runMode === "hosting" || runMode === "hybrid";
+  const proxyRunning = serviceStatus?.running ?? false;
+  const proxyReady = serviceStatus?.ready ?? false;
+  const modeLabels = {
+    local: "本机代理",
+    hybrid: "混合模式",
+    hosting: "纯托管",
+  } as const;
+  const hostingDot = hostingActive ? "bg-sky-400" : "bg-slate-600";
+  const hostingState = hostingActive ? "生效中" : "未启用";
+  const proxyDot =
+    runMode === "hosting"
+      ? "bg-slate-600"
+      : proxyRunning
+        ? proxyReady
+          ? "bg-emerald-400"
+          : "bg-amber-400"
+        : "bg-slate-600";
+  const proxyState =
+    runMode === "hosting"
+      ? "已停用"
+      : proxyRunning
+        ? proxyReady
+          ? "运行就绪"
+          : "启动中"
+        : "未启动";
 
   // Preference states persisted in localStorage
   const [logInterval, setLogInterval] = useState(() => {
@@ -279,19 +310,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </h3>
               </div>
               <Badge variant="neutral" size="sm">
-                内核无关业务放行
+                决定本机是否运行代理
               </Badge>
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              本机代理需要 1.14.* 内核；纯托管模式只做订阅更新与配置下发，不启动 sing-box，
-              因此节点、配置、自动更新等管理接口不再被内核门禁拦截。
+              本机代理需要 1.14.* 内核；托管类模式下，订阅、节点、配置等管理接口不再被内核门禁拦截，
+              可在无内核的服务器上正常工作。
             </p>
+
+            {/* 当前模式 + 两个维度的状态：不靠边框色猜，圆点即时反馈 */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 p-3 rounded-lg bg-slate-950/60 border border-slate-800 text-[11px]">
+              <span className="flex items-center gap-1.5 text-slate-400">
+                当前模式
+                <strong className="text-slate-100 font-semibold">
+                  {modeLabels[runMode]}
+                </strong>
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className={`w-1.5 h-1.5 rounded-full ${hostingDot}`} />
+                配置托管：{hostingState}
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className={`w-1.5 h-1.5 rounded-full ${proxyDot}`} />
+                本机代理：{proxyState}
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {(
                 [
-                  { id: "local", label: "本机代理", desc: "默认，受完整内核门禁保护" },
-                  { id: "hybrid", label: "混合模式", desc: "本机代理 + 对外托管" },
-                  { id: "hosting", label: "纯托管", desc: "不跑本机代理，仅下发配置" },
+                  {
+                    id: "local",
+                    label: "本机代理",
+                    desc: "在本机运行 sing-box，接管本机流量（需 1.14 内核）",
+                  },
+                  {
+                    id: "hybrid",
+                    label: "混合模式",
+                    desc: "本机运行代理 + 对外提供配置托管",
+                  },
+                  {
+                    id: "hosting",
+                    label: "纯托管",
+                    desc: "仅对外下发订阅/配置，不运行本机代理",
+                  },
                 ] as const
               ).map((item) => (
                 <button
@@ -299,21 +361,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   type="button"
                   disabled={savingRunMode}
                   onClick={() => void handleSaveRunMode(item.id)}
-                  className={`text-left rounded-lg border px-3 py-2.5 transition-colors disabled:opacity-50 ${
+                  className={`text-left rounded-lg border px-3 py-2.5 transition-colors disabled:opacity-50 relative ${
                     runMode === item.id
                       ? "border-sky-500 bg-sky-500/10"
                       : "border-slate-700 hover:border-slate-500"
                   }`}
                 >
-                  <span className="block text-xs font-semibold text-slate-100">
+                  {runMode === item.id && (
+                    <span className="absolute top-2 right-2 flex items-center gap-0.5 text-[10px] font-medium text-sky-400">
+                      <Check className="w-3 h-3" />
+                      当前
+                    </span>
+                  )}
+                  <span className="block text-xs font-semibold text-slate-100 pr-10">
                     {item.label}
                   </span>
-                  <span className="block text-[10px] text-slate-400 mt-1">
+                  <span className="block text-[10px] text-slate-400 mt-1 leading-relaxed">
                     {item.desc}
                   </span>
                 </button>
               ))}
             </div>
+
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              切换到纯托管会自动停止本机代理服务；切回本机代理或混合模式后，可在顶部手动启动服务。
+            </p>
           </div>
 
           {/* Web Console Preferences */}
