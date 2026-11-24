@@ -2,6 +2,7 @@ use anyhow::Result;
 #[cfg(unix)]
 use anyhow::anyhow;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::platform::{
@@ -205,6 +206,13 @@ impl PlatformStrategy for LinuxPlatform {
                 let mut results = Vec::new();
                 let self_pid = std::process::id();
 
+                // Subout 自己、以及它管理的 sing-box 整个进程树（sudo 启动时 sing-box
+                // 是 sudo 的子进程）占用的端口都是"预期占用"，不能报成外部冲突。
+                let mut excluded_pids = collect_descendant_pids(&[self_pid]);
+                if let Some(managed) = exclude_pid {
+                    excluded_pids.extend(collect_descendant_pids(&[managed]));
+                }
+
                 // 1) 端口占用：/proc/net/tcp(6) 找 LISTEN socket inode，再反查 PID
                 let fd_entries = collect_socket_fd_entries();
                 for (listen, port) in collect_inbound_listeners(&config) {
@@ -214,9 +222,8 @@ impl PlatformStrategy for LinuxPlatform {
                             inodes.extend(parse_listen_inodes(&text, port));
                         }
                     }
-                    let holder = find_pid_by_socket_inode(&fd_entries, &inodes, exclude_pid, self_pid);
-                    match holder {
-                        Some((pid, inode)) => {
+                    match find_pid_by_socket_inode(&fd_entries, &inodes, &excluded_pids) {
+                        Some(SocketHolder::External { pid, inode }) => {
                             let (name, cmdline) = read_proc_identity(pid);
                             results.push(ResourceHolderInfo {
                                 kind: ResourceConflictKind::Port,
@@ -227,8 +234,10 @@ impl PlatformStrategy for LinuxPlatform {
                                 evidence: format!("/proc/net/tcp inode:{inode}"),
                             });
                         }
-                        None if !inodes.is_empty() => {
-                            // 有 LISTEN socket 但反查不到持有者（权限/竞态）——给出自查命令
+                        // 端口由 Subout 自己/受管进程持有——预期行为，不是冲突，跳过。
+                        Some(SocketHolder::Managed { .. }) => {}
+                        // 确有监听 socket，但无法反查持有者（权限/竞态）——给出自查命令。
+                        Some(SocketHolder::Unknown { .. }) => {
                             results.push(ResourceHolderInfo {
                                 kind: ResourceConflictKind::Port,
                                 resource: format!("{listen}:{port}"),
@@ -238,7 +247,7 @@ impl PlatformStrategy for LinuxPlatform {
                                 evidence: format!("ss -tlnp | grep ':{port}'"),
                             });
                         }
-                        _ => {}
+                        None => {}
                     }
                 }
 
@@ -289,21 +298,26 @@ impl PlatformStrategy for LinuxPlatform {
                 return None;
             }
             let fd_entries = collect_socket_fd_entries();
-            let self_pid = std::process::id();
-            if let Some((pid, _)) =
-                find_pid_by_socket_inode(&fd_entries, &inodes, None, self_pid)
-            {
-                let (name, cmdline) = read_proc_identity(pid);
-                let who = name.unwrap_or_else(|| "未知进程".to_string());
-                return Some(match cmdline {
-                    Some(c) => format!("占用者：{who} (PID {pid})，命令：{c}。"),
-                    None => format!("占用者：{who} (PID {pid})。"),
-                });
+            let excluded_pids = collect_descendant_pids(&[std::process::id()]);
+            match find_pid_by_socket_inode(&fd_entries, &inodes, &excluded_pids) {
+                Some(SocketHolder::External { pid, .. }) => {
+                    let (name, cmdline) = read_proc_identity(pid);
+                    let who = name.unwrap_or_else(|| "未知进程".to_string());
+                    return Some(match cmdline {
+                        Some(c) => format!("占用者：{who} (PID {pid})，命令：{c}。"),
+                        None => format!("占用者：{who} (PID {pid})。"),
+                    });
+                }
+                // 自己占用的端口无需描述为"占用者"
+                Some(SocketHolder::Managed { .. }) => return None,
+                // 有 LISTEN socket 但反查不到持有者
+                Some(SocketHolder::Unknown { .. }) => {
+                    return Some(format!(
+                        "端口存在监听进程但无法读取其身份，可用 `sudo ss -tlnp | grep ':{port}'` 查看；"
+                    ));
+                }
+                None => return None,
             }
-            // 有 LISTEN socket 但反查不到持有者
-            return Some(format!(
-                "端口存在监听进程但无法读取其身份，可用 `sudo ss -tlnp | grep ':{port}'` 查看；"
-            ));
         }
         #[cfg(not(unix))]
         {
@@ -1320,31 +1334,81 @@ pub fn parse_listen_inodes(proc_net_tcp: &str, target_port: u16) -> Vec<u64> {
     inodes
 }
 
-/// 从一组 "socket:[inode]" 形式的 fd 链接文本中找出持有指定 inode 的 PID。
+/// 端口监听 socket 的持有者分类。
+///
+/// 关键：必须把"由 Subout 自己/受管进程持有"与"反查不到持有者"区分开。
+/// 旧实现把两者都返回 None，导致受管 sing-box 自己的监听端口被误报成
+/// "占用者未知"的外部冲突。
+pub enum SocketHolder {
+    /// 由外部进程持有（应报冲突）
+    External { pid: u32, inode: u64 },
+    /// 由 Subout 自身或其管理的进程持有（预期占用，不是冲突）
+    Managed { inode: u64 },
+    /// 内核中存在 LISTEN socket，但 /proc 反查不到持有者（权限/竞态）
+    Unknown { inode: u64 },
+}
+
+/// 从一组 "socket:[inode]" 形式的 fd 链接文本中判定端口监听 socket 的持有者。
 /// 传入的 fd_entries 为 (pid, readlink 结果) 列表；本函数只做纯解析，便于单测。
+///
+/// 判定优先级：外部持有者 > 受管进程持有者 > 无法反查。
+/// 即使同一端口有多个 LISTEN socket，只要有一个属于外部进程就应报冲突。
 pub fn find_pid_by_socket_inode(
     fd_entries: &[(u32, String)],
     inodes: &[u64],
-    exclude_pid: Option<u32>,
-    self_pid: u32,
-) -> Option<(u32, u64)> {
+    excluded_pids: &HashSet<u32>,
+) -> Option<SocketHolder> {
+    let mut managed_inode = None;
     for (pid, link) in fd_entries {
-        if *pid == self_pid || Some(*pid) == exclude_pid {
-            continue;
-        }
         let Some(inner) = link
             .strip_prefix("socket:[")
             .and_then(|s| s.strip_suffix(']'))
         else {
             continue;
         };
-        if let Ok(inode) = inner.parse::<u64>()
-            && inodes.contains(&inode)
-        {
-            return Some((*pid, inode));
+        let Ok(inode) = inner.parse::<u64>() else {
+            continue;
+        };
+        if !inodes.contains(&inode) {
+            continue;
+        }
+        if excluded_pids.contains(pid) {
+            managed_inode.get_or_insert(inode);
+        } else {
+            return Some(SocketHolder::External { pid: *pid, inode });
         }
     }
-    None
+    match managed_inode {
+        Some(inode) => Some(SocketHolder::Managed { inode }),
+        None => inodes.first().map(|&inode| SocketHolder::Unknown { inode }),
+    }
+}
+
+/// 递归收集给定根 PID 及其所有后代 PID（含根节点自身）。
+///
+/// 用于排除 Subout 自己管理的整棵进程树：以 sudo 启动 sing-box 时，
+/// `child.id()` 拿到的是 sudo 的 PID，真正的 sing-box 是其子进程；
+/// 同时 Subout 自身也可能派生帮助进程。这些进程占用的端口都是预期占用。
+/// 依赖 Linux 的 /proc/<pid>/task/<pid>/children；不可用时退化为仅根节点。
+pub fn collect_descendant_pids(roots: &[u32]) -> HashSet<u32> {
+    let mut result = HashSet::new();
+    let mut queue: Vec<u32> = roots.to_vec();
+    while let Some(pid) = queue.pop() {
+        if !result.insert(pid) {
+            continue;
+        }
+        let children_path = format!("/proc/{pid}/task/{pid}/children");
+        if let Ok(text) = std::fs::read_to_string(children_path) {
+            for token in text.split_whitespace() {
+                if let Ok(child) = token.parse::<u32>()
+                    && !result.contains(&child)
+                {
+                    queue.push(child);
+                }
+            }
+        }
+    }
+    result
 }
 
 /// 扫描 /proc/<pid>/fd/*，返回 (pid, socket:[inode]) 列表（仅 socket 类型）。
@@ -1460,6 +1524,8 @@ fn resolved_tun_interface_name() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     #[test]
     fn test_linux_tun_network_cleanup_parser() {
         let sample_rules = r"0:	from all lookup local
@@ -1494,18 +1560,59 @@ mod tests {
 
     #[test]
     fn test_find_pid_by_socket_inode() {
+        use super::SocketHolder;
         let inodes = vec![11111u64];
         let entries = vec![
             (100u32, "socket:[99999]".to_string()),
             (200u32, "socket:[11111]".to_string()),
             (300u32, "socket:[11111]".to_string()),
         ];
-        // 排除自身 PID 100，命中 200
-        let found = super::find_pid_by_socket_inode(&entries, &inodes, None, 100);
-        assert_eq!(found, Some((200, 11111)));
+        // 未排除任何进程时，命中外部持有者 200
+        let found = super::find_pid_by_socket_inode(&entries, &inodes, &HashSet::new());
+        assert!(matches!(
+            found,
+            Some(SocketHolder::External {
+                pid: 200,
+                inode: 11111
+            })
+        ));
+
         // 排除 200 后命中 300
-        let found2 = super::find_pid_by_socket_inode(&entries, &inodes, Some(200), 100);
-        assert_eq!(found2, Some((300, 11111)));
+        let excluded = HashSet::from([200u32]);
+        let found2 = super::find_pid_by_socket_inode(&entries, &inodes, &excluded);
+        assert!(matches!(
+            found2,
+            Some(SocketHolder::External {
+                pid: 300,
+                inode: 11111
+            })
+        ));
+
+        // 端口只由受管进程持有：应判定为 Managed，而不再是"未知占用者"
+        let managed_only = vec![(200u32, "socket:[11111]".to_string())];
+        let found3 = super::find_pid_by_socket_inode(&managed_only, &inodes, &excluded);
+        assert!(matches!(
+            found3,
+            Some(SocketHolder::Managed { inode: 11111 })
+        ));
+
+        // 外部 + 受管并存时，外部持有者优先（保守报冲突）
+        let mixed = vec![
+            (200u32, "socket:[11111]".to_string()),
+            (400u32, "socket:[11111]".to_string()),
+        ];
+        let found4 = super::find_pid_by_socket_inode(&mixed, &inodes, &excluded);
+        assert!(matches!(
+            found4,
+            Some(SocketHolder::External { pid: 400, .. })
+        ));
+
+        // 有 inode 但没有任何进程持有：Unknown
+        let found5 = super::find_pid_by_socket_inode(&[], &inodes, &HashSet::new());
+        assert!(matches!(
+            found5,
+            Some(SocketHolder::Unknown { inode: 11111 })
+        ));
     }
 
     #[test]
