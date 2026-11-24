@@ -7,6 +7,7 @@ import {
   Network,
   ArrowUp,
   ArrowDown,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "../../ui/Button";
 import { Badge } from "../../ui/Badge";
@@ -23,6 +24,53 @@ import { TagListInput } from "./TagListInput";
 import { CollapsibleToolbar } from "./CollapsibleToolbar";
 
 import { moveArrayItem } from "./shared";
+
+/**
+ * Private/LAN IPv4 ranges that normally host the system resolver.
+ * Excluding one of these from TUN also bypasses sing-box's DNS hijack: the
+ * query leaves via the physical interface, the domain never reaches the route
+ * rules, and traffic falls through to direct (TLS handshake reset).
+ */
+const LAN_DNS_V4_RANGES = [
+  { base: 0x7f000000, bits: 8 }, // 127.0.0.0/8 (e.g. 127.0.0.53)
+  { base: 0x0a000000, bits: 8 }, // 10.0.0.0/8
+  { base: 0xac100000, bits: 12 }, // 172.16.0.0/12
+  { base: 0xc0a80000, bits: 16 }, // 192.168.0.0/16
+] as const;
+
+function ipv4CidrOverlaps(
+  entry: string,
+  range: { base: number; bits: number },
+): boolean {
+  const [ip, prefixRaw] = entry.trim().split("/");
+  const octets = ip.split(".").map(Number);
+  if (
+    octets.length !== 4 ||
+    octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)
+  ) {
+    return false;
+  }
+  const bits = prefixRaw === undefined ? 32 : Number(prefixRaw);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  // A single host (/32) is typically a VPN peer that deliberately bypasses
+  // TUN; it cannot cover the LAN DNS subnet, so don't warn about it.
+  if (bits === 32) return false;
+  const addr =
+    ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>>
+    0;
+  const compareBits = Math.min(bits, range.bits);
+  const mask =
+    compareBits === 0 ? 0 : (0xffffffff << (32 - compareBits)) >>> 0;
+  return ((addr & mask) >>> 0) === ((range.base & mask) >>> 0);
+}
+
+/** Entries in route_exclude_address that would bypass TUN DNS hijacking. */
+function findLanDnsExclusionRisks(addresses: string[] | undefined): string[] {
+  if (!addresses?.length) return [];
+  return addresses.filter((entry) =>
+    LAN_DNS_V4_RANGES.some((range) => ipv4CidrOverlaps(entry, range)),
+  );
+}
 
 /* ============================================================================
  * 3. Inbounds Tab (Top Collapsible Toolbar + Bottom Reorderable List)
@@ -247,6 +295,9 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
           <div className="space-y-3">
             {inbounds.map((inb, idx) => {
               const isTun = inb.type === "tun";
+              const dnsHijackRisk = isTun
+                ? findLanDnsExclusionRisks(inb.route_exclude_address)
+                : [];
               return (
                 <div
                   key={`inbound-${idx}`}
@@ -543,6 +594,30 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
                               : "需开启 auto_route 才生效"
                           }
                         />
+
+                        {inb.auto_route && dnsHijackRisk.length > 0 && (
+                          <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/40 space-y-1">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-300 mt-0.5 shrink-0" />
+                              <div className="space-y-1">
+                                <p className="text-[11px] font-semibold text-amber-200">
+                                  排除网段可能让 DNS 劫持失效
+                                </p>
+                                <p className="text-[10px] text-amber-100/80 leading-relaxed">
+                                  {dnsHijackRisk.join("、")} 属于私网/局域网段，通常包含系统 DNS
+                                  服务器。命中这些网段的查询不会进入 TUN，sing-box 无法劫持，域名无法传给路由规则，相关流量可能落到直连。
+                                </p>
+                                <p className="text-[10px] text-amber-100/70 leading-relaxed">
+                                  建议移除这些网段：LAN 直连由 route 规则中的
+                                  <code className="font-mono text-amber-100">
+                                    {" "}ip_is_private → direct{" "}
+                                  </code>
+                                  保证，无需在此排除。此处仅提示，不会自动修改配置。
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         <div
                           className={

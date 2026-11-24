@@ -211,6 +211,155 @@ describe("split editor panels keep their onChange contracts", () => {
     });
   });
 
+  it("TUN expert panel warns when route_exclude_address covers LAN DNS ranges", () => {
+    const onChangeMock = vi.fn();
+    const config = {
+      inbounds: [
+        {
+          type: "tun",
+          tag: "tun-in",
+          address: ["172.19.0.1/30"],
+          auto_route: true,
+          route_exclude_address: ["100.64.0.0/10", "10.0.0.0/16", "192.168.0.0/16"],
+        },
+      ],
+    } as unknown as SingBoxVisualConfig;
+
+    render(
+      <InboundsTabPanel
+        platform="linux"
+        config={config}
+        onChange={onChangeMock}
+      />,
+    );
+
+    expect(screen.getByText(/排除网段可能让 DNS 劫持失效/)).toBeDefined();
+    const warning = screen.getByText(/排除网段可能让 DNS 劫持失效/).parentElement!
+      .parentElement!;
+    expect(warning.textContent).toContain("10.0.0.0/16");
+    expect(warning.textContent).toContain("192.168.0.0/16");
+    expect(warning.textContent).not.toContain("100.64.0.0/10");
+    // Warning must never rewrite the user's config (WYSIWYG).
+    expect(onChangeMock).not.toHaveBeenCalled();
+  });
+
+  it("TUN DNS warning skips /32 host routes but still flags a broader CIDR in the same private range", () => {
+    // Regression: the retained VPN peer 10.222.222.1/32 lives in 10.0.0.0/8.
+    // It must not trigger the warning, while 10.0.0.0/16 in the same range must.
+    const withHostRoutes = {
+      inbounds: [
+        {
+          type: "tun",
+          address: ["172.19.0.1/30"],
+          auto_route: true,
+          route_exclude_address: ["10.222.222.1/32", "192.168.9.253"],
+        },
+      ],
+    } as unknown as SingBoxVisualConfig;
+
+    const { rerender } = render(
+      <InboundsTabPanel
+        platform="linux"
+        config={withHostRoutes}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/排除网段可能让 DNS 劫持失效/)).toBeNull();
+
+    const withSubnet = {
+      inbounds: [
+        {
+          type: "tun",
+          address: ["172.19.0.1/30"],
+          auto_route: true,
+          route_exclude_address: ["10.222.222.1/32", "10.0.0.0/16"],
+        },
+      ],
+    } as unknown as SingBoxVisualConfig;
+    rerender(
+      <InboundsTabPanel
+        platform="linux"
+        config={withSubnet}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const warning = screen.getByText(/排除网段可能让 DNS 劫持失效/).parentElement!
+      .parentElement!;
+    expect(warning.textContent).toContain("10.0.0.0/16");
+    expect(warning.textContent).not.toContain("10.222.222.1/32");
+  });
+
+  it("TUN expert panel stays silent for non-LAN exclusions or auto_route off", () => {
+    const config = {
+      inbounds: [
+        {
+          type: "tun",
+          address: ["172.19.0.1/30"],
+          auto_route: true,
+          route_exclude_address: ["100.64.0.0/10", "10.222.222.1/32"],
+        },
+      ],
+    } as unknown as SingBoxVisualConfig;
+
+    const { rerender } = render(
+      <InboundsTabPanel
+        platform="linux"
+        config={config}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/排除网段可能让 DNS 劫持失效/)).toBeNull();
+
+    rerender(
+      <InboundsTabPanel
+        platform="linux"
+        config={{
+          inbounds: [
+            {
+              type: "tun",
+              address: ["172.19.0.1/30"],
+              auto_route: false,
+              route_exclude_address: ["192.168.0.0/16"],
+            },
+          ],
+        } as unknown as SingBoxVisualConfig}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/排除网段可能让 DNS 劫持失效/)).toBeNull();
+  });
+
+  it("TUN expert panel surfaces the DNS warning as the user types a LAN CIDR", () => {
+    const onChangeMock = vi.fn();
+    const { rerender } = render(
+      <InboundsTabPanel
+        platform="linux"
+        config={tunConfig}
+        onChange={onChangeMock}
+      />,
+    );
+
+    expect(screen.queryByText(/排除网段可能让 DNS 劫持失效/)).toBeNull();
+    const input = screen.getByLabelText(
+      "排除目标 IP / IP 段 (route_exclude_address)",
+    );
+    fireEvent.change(input, { target: { value: "192.168.9.0/24" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const next = onChangeMock.mock.calls.at(-1)![0] as SingBoxVisualConfig;
+    expect(next.inbounds![0].route_exclude_address).toEqual(["192.168.9.0/24"]);
+
+    rerender(
+      <InboundsTabPanel
+        platform="linux"
+        config={next}
+        onChange={onChangeMock}
+      />,
+    );
+    expect(screen.getByText(/排除网段可能让 DNS 劫持失效/)).toBeDefined();
+  });
+
   it("TUN expert panel edits exclude_interface and warns on non-Linux", () => {
     const onChangeMock = vi.fn();
     const { rerender } = render(
