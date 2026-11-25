@@ -1,5 +1,9 @@
 /** Move an item inside an array without mutating the source (used by all reorderable lists). */
-export function moveArrayItem<T>(arr: T[], fromIdx: number, toIdx: number): T[] {
+export function moveArrayItem<T>(
+  arr: T[],
+  fromIdx: number,
+  toIdx: number,
+): T[] {
   if (toIdx < 0 || toIdx >= arr.length || fromIdx === toIdx) return arr;
   const next = [...arr];
   const [removed] = next.splice(fromIdx, 1);
@@ -36,7 +40,10 @@ function serverHost(server: string): string {
 }
 
 /** True when switching an address to an encrypted type would be incompatible. */
-export function isPlaintextIpForEncryptedDns(type: string, server: string): boolean {
+export function isPlaintextIpForEncryptedDns(
+  type: string,
+  server: string,
+): boolean {
   return (
     (ENCRYPTED_DNS_TYPES as readonly string[]).includes(type) &&
     PLAINTEXT_ONLY_DNS_IPS.includes(serverHost(server))

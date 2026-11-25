@@ -16,10 +16,7 @@ import { Select } from "../../ui/Select";
 import { Switch } from "../../ui/Switch";
 import { PlatformType } from "../../../types/api";
 
-import {
-  SingBoxVisualConfig,
-  InboundItem,
-} from "./types";
+import { SingBoxVisualConfig, InboundItem } from "./types";
 import { TagListInput } from "./TagListInput";
 import { CollapsibleToolbar } from "./CollapsibleToolbar";
 
@@ -59,9 +56,8 @@ function ipv4CidrOverlaps(
     ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>>
     0;
   const compareBits = Math.min(bits, range.bits);
-  const mask =
-    compareBits === 0 ? 0 : (0xffffffff << (32 - compareBits)) >>> 0;
-  return ((addr & mask) >>> 0) === ((range.base & mask) >>> 0);
+  const mask = compareBits === 0 ? 0 : (0xffffffff << (32 - compareBits)) >>> 0;
+  return (addr & mask) >>> 0 === (range.base & mask) >>> 0;
 }
 
 /** Entries in route_exclude_address that would bypass TUN DNS hijacking. */
@@ -263,501 +259,521 @@ export const InboundsTabPanel: React.FC<InboundsTabPanelProps> = ({
 
       {!quick && (
         <>
-      {/* BOTTOM PANE: Inbounds Reorderable List */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Network className="w-3.5 h-3.5 text-sky-400" />
-            <span className="text-xs font-bold text-slate-200">
-              入站配置列表 (inbounds)
-            </span>
-            <Badge variant="info" size="sm">
-              {inbounds.length} 个
-            </Badge>
-          </div>
-          {inbounds.length > 0 && (
-            <button
-              type="button"
-              onClick={() => updateInbounds([])}
-              className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
-            >
-              清空入站列表
-            </button>
-          )}
-        </div>
-
-        {inbounds.length === 0 ? (
-          <div className="p-8 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
-            当前入站列表为空 (<code className="text-sky-300">[]</code>
-            )。请从上方快捷工具栏添加 TUN 或 Mixed 入站。
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {inbounds.map((inb, idx) => {
-              const isTun = inb.type === "tun";
-              const dnsHijackRisk = isTun
-                ? findLanDnsExclusionRisks(inb.route_exclude_address)
-                : [];
-              return (
-                <div
-                  key={`inbound-${idx}`}
-                  className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-3"
+          {/* BOTTOM PANE: Inbounds Reorderable List */}
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Network className="w-3.5 h-3.5 text-sky-400" />
+                <span className="text-xs font-bold text-slate-200">
+                  入站配置列表 (inbounds)
+                </span>
+                <Badge variant="info" size="sm">
+                  {inbounds.length} 个
+                </Badge>
+              </div>
+              {inbounds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => updateInbounds([])}
+                  className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
                 >
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] font-mono text-sky-300">
-                        #{idx + 1}
-                      </span>
-                      <Badge variant="info" size="sm">
-                        {(inb.type || "mixed").toUpperCase()}
-                      </Badge>
-                      <span className="text-xs font-mono text-slate-200">
-                        {inb.tag || `inbound-${idx + 1}`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        disabled={idx === 0}
-                        onClick={() => moveInboundTo(idx, idx - 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                        title="上移"
-                      >
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={idx === inbounds.length - 1}
-                        onClick={() => moveInboundTo(idx, idx + 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                        title="下移"
-                      >
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeInboundAt(idx)}
-                        className="p-1.5 rounded text-rose-400 hover:text-rose-300"
-                        title="删除入站"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+                  清空入站列表
+                </button>
+              )}
+            </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <Select
-                      label="入站类型 (type)"
-                      value={inb.type || "mixed"}
-                      onChange={(val) => {
-                        if (val === "tun") {
-                          updateInboundAt(idx, {
-                            type: "tun",
-                            tag: inb.tag || "tun-in",
-                            address: ["172.19.0.1/30"],
-                            auto_route: true,
-                            strict_route: true,
-                          });
-                        } else {
-                          updateInboundAt(idx, {
-                            type: val,
-                            tag: inb.tag || `${val}-in`,
-                            listen: "127.0.0.1",
-                            listen_port: 2080,
-                          });
-                        }
-                      }}
-                      options={[
-                        { value: "tun", label: "TUN 虚拟网卡 (tun)" },
-                        {
-                          value: "mixed",
-                          label: "HTTP+SOCKS 混合代理 (mixed)",
-                        },
-                        { value: "http", label: "HTTP 代理 (http)" },
-                        { value: "socks", label: "SOCKS5 代理 (socks)" },
-                        { value: "redirect", label: "透明重定向 (redirect)" },
-                        { value: "tproxy", label: "透明代理 (tproxy)" },
-                        { value: "direct", label: "直连转发 (direct)" },
-                      ]}
-                    />
-
-                    <Input
-                      label="入站标签 (tag)"
-                      value={inb.tag || ""}
-                      onChange={(e) =>
-                        updateInboundAt(idx, { ...inb, tag: e.target.value })
-                      }
-                      placeholder="如: tun-in, mixed-in"
-                    />
-
-                    {isTun ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          label="网卡名称 (interface_name)"
-                          value={inb.interface_name || ""}
-                          onChange={(e) =>
-                            updateInboundAt(idx, {
-                              ...inb,
-                              interface_name: e.target.value || undefined,
-                            })
-                          }
-                          placeholder={
-                            platform === "macos"
-                              ? "留空或 utun9"
-                              : "留空自动分配"
-                          }
-                        />
-                        <Input
-                          label="MTU 大小 (mtu)"
-                          type="number"
-                          value={inb.mtu ? String(inb.mtu) : ""}
-                          onChange={(e) =>
-                            updateInboundAt(idx, {
-                              ...inb,
-                              mtu: e.target.value
-                                ? Number(e.target.value)
-                                : undefined,
-                            })
-                          }
-                          placeholder="默认 (如 9000)"
-                        />
+            {inbounds.length === 0 ? (
+              <div className="p-8 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
+                当前入站列表为空 (<code className="text-sky-300">[]</code>
+                )。请从上方快捷工具栏添加 TUN 或 Mixed 入站。
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {inbounds.map((inb, idx) => {
+                  const isTun = inb.type === "tun";
+                  const dnsHijackRisk = isTun
+                    ? findLanDnsExclusionRisks(inb.route_exclude_address)
+                    : [];
+                  return (
+                    <div
+                      key={`inbound-${idx}`}
+                      className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-3"
+                    >
+                      <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] font-mono text-sky-300">
+                            #{idx + 1}
+                          </span>
+                          <Badge variant="info" size="sm">
+                            {(inb.type || "mixed").toUpperCase()}
+                          </Badge>
+                          <span className="text-xs font-mono text-slate-200">
+                            {inb.tag || `inbound-${idx + 1}`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => moveInboundTo(idx, idx - 1)}
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                            title="上移"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === inbounds.length - 1}
+                            onClick={() => moveInboundTo(idx, idx + 1)}
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                            title="下移"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeInboundAt(idx)}
+                            className="p-1.5 rounded text-rose-400 hover:text-rose-300"
+                            title="删除入站"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          label="监听地址 (listen)"
-                          value={inb.listen || ""}
-                          onChange={(e) =>
-                            updateInboundAt(idx, {
-                              ...inb,
-                              listen: e.target.value,
-                            })
-                          }
-                          placeholder="127.0.0.1"
-                        />
-                        <Input
-                          label="端口 (listen_port)"
-                          type="number"
-                          value={
-                            inb.listen_port !== undefined
-                              ? String(inb.listen_port)
-                              : ""
-                          }
-                          onChange={(e) =>
-                            updateInboundAt(idx, {
-                              ...inb,
-                              listen_port: e.target.value
-                                ? Number(e.target.value)
-                                : undefined,
-                            })
-                          }
-                          placeholder="2080"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {isTun && (
-                    <div className="space-y-3">
-                      <TagListInput
-                        label="TUN 网卡地址段 (address)"
-                        values={inb.address || []}
-                        onChange={(v) =>
-                          updateInboundAt(idx, { ...inb, address: v })
-                        }
-                        placeholder="如: 172.19.0.1/30, fdfe:dcba:9876::1/126"
-                      />
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                          <span className="text-xs text-slate-300">
-                            自动配置路由 (auto_route)
-                          </span>
-                          <Switch
-                            checked={Boolean(inb.auto_route)}
-                            onChange={(val) =>
+                        <Select
+                          label="入站类型 (type)"
+                          value={inb.type || "mixed"}
+                          onChange={(val) => {
+                            if (val === "tun") {
                               updateInboundAt(idx, {
-                                ...inb,
-                                auto_route: val || undefined,
-                              })
-                            }
-                          />
-                        </div>
-
-                        <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                          <span className="text-xs text-slate-300">
-                            严格路由防泄漏 (strict_route)
-                          </span>
-                          <Switch
-                            checked={Boolean(inb.strict_route)}
-                            onChange={(val) =>
+                                type: "tun",
+                                tag: inb.tag || "tun-in",
+                                address: ["172.19.0.1/30"],
+                                auto_route: true,
+                                strict_route: true,
+                              });
+                            } else {
                               updateInboundAt(idx, {
-                                ...inb,
-                                strict_route: val || undefined,
-                              })
+                                type: val,
+                                tag: inb.tag || `${val}-in`,
+                                listen: "127.0.0.1",
+                                listen_port: 2080,
+                              });
                             }
-                          />
-                        </div>
+                          }}
+                          options={[
+                            { value: "tun", label: "TUN 虚拟网卡 (tun)" },
+                            {
+                              value: "mixed",
+                              label: "HTTP+SOCKS 混合代理 (mixed)",
+                            },
+                            { value: "http", label: "HTTP 代理 (http)" },
+                            { value: "socks", label: "SOCKS5 代理 (socks)" },
+                            {
+                              value: "redirect",
+                              label: "透明重定向 (redirect)",
+                            },
+                            { value: "tproxy", label: "透明代理 (tproxy)" },
+                            { value: "direct", label: "直连转发 (direct)" },
+                          ]}
+                        />
 
-                        {(platform === "linux" ||
-                          Boolean(inb.auto_redirect)) && (
-                          <div
-                            className={`p-2.5 rounded-lg border flex items-center justify-between ${
-                              platform !== "linux" && Boolean(inb.auto_redirect)
-                                ? "bg-rose-500/10 border-rose-500/40"
-                                : "bg-slate-900/80 border-slate-800"
-                            }`}
-                          >
-                            <div>
-                              <span
-                                className={`text-xs block ${
-                                  platform !== "linux" &&
-                                  Boolean(inb.auto_redirect)
-                                    ? "text-rose-200 font-semibold"
-                                    : "text-slate-300"
-                                }`}
-                              >
-                                NFTables 自动重定向 (auto_redirect)
-                              </span>
-                              {platform !== "linux" &&
-                                Boolean(inb.auto_redirect) && (
-                                  <span className="text-[10px] text-rose-300">
-                                    仅 Linux 支持，当前平台不支持，请关闭后保存
-                                  </span>
-                                )}
-                            </div>
-                            <Switch
-                              checked={Boolean(inb.auto_redirect)}
-                              onChange={(val) =>
+                        <Input
+                          label="入站标签 (tag)"
+                          value={inb.tag || ""}
+                          onChange={(e) =>
+                            updateInboundAt(idx, {
+                              ...inb,
+                              tag: e.target.value,
+                            })
+                          }
+                          placeholder="如: tun-in, mixed-in"
+                        />
+
+                        {isTun ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              label="网卡名称 (interface_name)"
+                              value={inb.interface_name || ""}
+                              onChange={(e) =>
                                 updateInboundAt(idx, {
                                   ...inb,
-                                  auto_redirect: val || undefined,
+                                  interface_name: e.target.value || undefined,
                                 })
                               }
+                              placeholder={
+                                platform === "macos"
+                                  ? "留空或 utun9"
+                                  : "留空自动分配"
+                              }
+                            />
+                            <Input
+                              label="MTU 大小 (mtu)"
+                              type="number"
+                              value={inb.mtu ? String(inb.mtu) : ""}
+                              onChange={(e) =>
+                                updateInboundAt(idx, {
+                                  ...inb,
+                                  mtu: e.target.value
+                                    ? Number(e.target.value)
+                                    : undefined,
+                                })
+                              }
+                              placeholder="默认 (如 9000)"
+                            />
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              label="监听地址 (listen)"
+                              value={inb.listen || ""}
+                              onChange={(e) =>
+                                updateInboundAt(idx, {
+                                  ...inb,
+                                  listen: e.target.value,
+                                })
+                              }
+                              placeholder="127.0.0.1"
+                            />
+                            <Input
+                              label="端口 (listen_port)"
+                              type="number"
+                              value={
+                                inb.listen_port !== undefined
+                                  ? String(inb.listen_port)
+                                  : ""
+                              }
+                              onChange={(e) =>
+                                updateInboundAt(idx, {
+                                  ...inb,
+                                  listen_port: e.target.value
+                                    ? Number(e.target.value)
+                                    : undefined,
+                                })
+                              }
+                              placeholder="2080"
                             />
                           </div>
                         )}
                       </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-slate-300 block">
-                          TUN 协议栈类型 (stack)
-                        </label>
-                        <select
-                          value={(inb.stack as string) || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            updateInboundAt(idx, {
-                              ...inb,
-                              stack: val || undefined,
-                            });
-                          }}
-                          className="w-full text-xs bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500"
-                        >
-                          <option value="">未指定 (系统默认)</option>
-                          <option value="system">
-                            system (系统网络协议栈 - 性能好开销低)
-                          </option>
-                          <option value="gvisor">
-                            gvisor (用户态沙盒协议栈 - 跨平台隔离)
-                          </option>
-                          <option value="mixed">
-                            mixed (混合协议栈 - TCP系统/UDP gVisor)
-                          </option>
-                        </select>
-                      </div>
-
-                      {/* TUN 入站层排除：命中条件的流量不进入 TUN，由系统按原路由直连 */}
-                      <div className="space-y-2.5 pt-1 border-t border-slate-800/80">
-                        <div className="flex flex-wrap items-center justify-between gap-1">
-                          <span className="text-xs font-semibold text-slate-200">
-                            排除路由 / 不劫持流量 (TUN 入站层)
-                          </span>
-                          <span className="text-[10px] text-slate-500">
-                            命中条件的流量不进入 TUN，由系统按原路由直连
-                          </span>
-                        </div>
-
-                        <TagListInput
-                          label="排除目标 IP / IP 段 (route_exclude_address)"
-                          values={inb.route_exclude_address || []}
-                          onChange={(v) =>
-                            updateInboundAt(idx, {
-                              ...inb,
-                              route_exclude_address: v.length ? v : undefined,
-                            })
-                          }
-                          placeholder="如: 10.0.0.0/8, 192.168.1.100, fd00::/8"
-                          hint={
-                            inb.auto_route
-                              ? undefined
-                              : "需开启 auto_route 才生效"
-                          }
-                        />
-
-                        {inb.auto_route && dnsHijackRisk.length > 0 && (
-                          <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/40 space-y-1">
-                            <div className="flex items-start gap-2">
-                              <AlertTriangle className="w-3.5 h-3.5 text-amber-300 mt-0.5 shrink-0" />
-                              <div className="space-y-1">
-                                <p className="text-[11px] font-semibold text-amber-200">
-                                  排除网段可能让 DNS 劫持失效
-                                </p>
-                                <p className="text-[10px] text-amber-100/80 leading-relaxed">
-                                  {dnsHijackRisk.join("、")} 属于私网/局域网段，通常包含系统 DNS
-                                  服务器。命中这些网段的查询不会进入 TUN，sing-box 无法劫持，域名无法传给路由规则，相关流量可能落到直连。
-                                </p>
-                                <p className="text-[10px] text-amber-100/70 leading-relaxed">
-                                  建议移除这些网段：LAN 直连由 route 规则中的
-                                  <code className="font-mono text-amber-100">
-                                    {" "}ip_is_private → direct{" "}
-                                  </code>
-                                  保证，无需在此排除。此处仅提示，不会自动修改配置。
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <div
-                          className={
-                            platform !== "linux" &&
-                            Boolean(inb.exclude_interface?.length)
-                              ? "p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 space-y-1.5"
-                              : "space-y-1.5"
-                          }
-                        >
+                      {isTun && (
+                        <div className="space-y-3">
                           <TagListInput
-                            label="排除网卡名称 (exclude_interface)"
-                            values={inb.exclude_interface || []}
+                            label="TUN 网卡地址段 (address)"
+                            values={inb.address || []}
                             onChange={(v) =>
-                              updateInboundAt(idx, {
-                                ...inb,
-                                exclude_interface: v.length ? v : undefined,
-                              })
+                              updateInboundAt(idx, { ...inb, address: v })
                             }
-                            placeholder="如: tailscale0, zt0, wg0"
-                            hint="按来源网卡排除，适合 P2P 组网虚拟网卡"
+                            placeholder="如: 172.19.0.1/30, fdfe:dcba:9876::1/126"
                           />
-                          {platform !== "linux" &&
-                            Boolean(inb.exclude_interface?.length) && (
-                              <div className="text-[10px] text-rose-300">
-                                仅 Linux 支持网卡名称分流，当前平台不支持，请清空后再保存
-                              </div>
-                            )}
-                        </div>
 
-                        <TagListInput
-                          label="排除 IP 规则集 (route_exclude_address_set)"
-                          values={inb.route_exclude_address_set || []}
-                          onChange={(v) =>
-                            updateInboundAt(idx, {
-                              ...inb,
-                              route_exclude_address_set: v.length
-                                ? v
-                                : undefined,
-                            })
-                          }
-                          placeholder="如: geoip-cn"
-                          hint="需先在 route.rule_set 中定义同名规则集"
-                        />
-
-                        <p className="text-[10px] text-slate-500 leading-relaxed">
-                          P2P 组网建议同时填写 exclude_interface（按来源网卡）与
-                          route_exclude_address（按对端网段）。若开启 strict_route，
-                          回程流量不会自动排除，需把相关接口（如 br-lan、
-                          pppoe-wan）一并加入 exclude_interface，或把对应网段加入
-                          route_exclude_address。
-                        </p>
-                      </div>
-
-                      {(isAndroid ||
-                        Boolean(
-                          inb.include_package?.length ||
-                          inb.exclude_package?.length,
-                        )) && (
-                        <div
-                          className={`grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 ${
-                            !isAndroid
-                              ? "p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40"
-                              : ""
-                          }`}
-                        >
-                          {!isAndroid && (
-                            <div className="md:col-span-2 flex items-center justify-between text-xs text-rose-200">
-                              <span>
-                                当前非 Android 平台配置包含 Android
-                                专属包名分流字段，请清空后再保存：
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                              <span className="text-xs text-slate-300">
+                                自动配置路由 (auto_route)
                               </span>
-                              <button
-                                type="button"
-                                onClick={() =>
+                              <Switch
+                                checked={Boolean(inb.auto_route)}
+                                onChange={(val) =>
                                   updateInboundAt(idx, {
                                     ...inb,
-                                    include_package: undefined,
-                                    exclude_package: undefined,
+                                    auto_route: val || undefined,
                                   })
                                 }
-                                className="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 border border-rose-500/30"
+                              />
+                            </div>
+
+                            <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                              <span className="text-xs text-slate-300">
+                                严格路由防泄漏 (strict_route)
+                              </span>
+                              <Switch
+                                checked={Boolean(inb.strict_route)}
+                                onChange={(val) =>
+                                  updateInboundAt(idx, {
+                                    ...inb,
+                                    strict_route: val || undefined,
+                                  })
+                                }
+                              />
+                            </div>
+
+                            {(platform === "linux" ||
+                              Boolean(inb.auto_redirect)) && (
+                              <div
+                                className={`p-2.5 rounded-lg border flex items-center justify-between ${
+                                  platform !== "linux" &&
+                                  Boolean(inb.auto_redirect)
+                                    ? "bg-rose-500/10 border-rose-500/40"
+                                    : "bg-slate-900/80 border-slate-800"
+                                }`}
                               >
-                                一键清空包名字段
-                              </button>
+                                <div>
+                                  <span
+                                    className={`text-xs block ${
+                                      platform !== "linux" &&
+                                      Boolean(inb.auto_redirect)
+                                        ? "text-rose-200 font-semibold"
+                                        : "text-slate-300"
+                                    }`}
+                                  >
+                                    NFTables 自动重定向 (auto_redirect)
+                                  </span>
+                                  {platform !== "linux" &&
+                                    Boolean(inb.auto_redirect) && (
+                                      <span className="text-[10px] text-rose-300">
+                                        仅 Linux
+                                        支持，当前平台不支持，请关闭后保存
+                                      </span>
+                                    )}
+                                </div>
+                                <Switch
+                                  checked={Boolean(inb.auto_redirect)}
+                                  onChange={(val) =>
+                                    updateInboundAt(idx, {
+                                      ...inb,
+                                      auto_redirect: val || undefined,
+                                    })
+                                  }
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-slate-300 block">
+                              TUN 协议栈类型 (stack)
+                            </label>
+                            <select
+                              value={(inb.stack as string) || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                updateInboundAt(idx, {
+                                  ...inb,
+                                  stack: val || undefined,
+                                });
+                              }}
+                              className="w-full text-xs bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                            >
+                              <option value="">未指定 (系统默认)</option>
+                              <option value="system">
+                                system (系统网络协议栈 - 性能好开销低)
+                              </option>
+                              <option value="gvisor">
+                                gvisor (用户态沙盒协议栈 - 跨平台隔离)
+                              </option>
+                              <option value="mixed">
+                                mixed (混合协议栈 - TCP系统/UDP gVisor)
+                              </option>
+                            </select>
+                          </div>
+
+                          {/* TUN 入站层排除：命中条件的流量不进入 TUN，由系统按原路由直连 */}
+                          <div className="space-y-2.5 pt-1 border-t border-slate-800/80">
+                            <div className="flex flex-wrap items-center justify-between gap-1">
+                              <span className="text-xs font-semibold text-slate-200">
+                                排除路由 / 不劫持流量 (TUN 入站层)
+                              </span>
+                              <span className="text-[10px] text-slate-500">
+                                命中条件的流量不进入 TUN，由系统按原路由直连
+                              </span>
+                            </div>
+
+                            <TagListInput
+                              label="排除目标 IP / IP 段 (route_exclude_address)"
+                              values={inb.route_exclude_address || []}
+                              onChange={(v) =>
+                                updateInboundAt(idx, {
+                                  ...inb,
+                                  route_exclude_address: v.length
+                                    ? v
+                                    : undefined,
+                                })
+                              }
+                              placeholder="如: 10.0.0.0/8, 192.168.1.100, fd00::/8"
+                              hint={
+                                inb.auto_route
+                                  ? undefined
+                                  : "需开启 auto_route 才生效"
+                              }
+                            />
+
+                            {inb.auto_route && dnsHijackRisk.length > 0 && (
+                              <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/40 space-y-1">
+                                <div className="flex items-start gap-2">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-300 mt-0.5 shrink-0" />
+                                  <div className="space-y-1">
+                                    <p className="text-[11px] font-semibold text-amber-200">
+                                      排除网段可能让 DNS 劫持失效
+                                    </p>
+                                    <p className="text-[10px] text-amber-100/80 leading-relaxed">
+                                      {dnsHijackRisk.join("、")}{" "}
+                                      属于私网/局域网段，通常包含系统 DNS
+                                      服务器。命中这些网段的查询不会进入
+                                      TUN，sing-box
+                                      无法劫持，域名无法传给路由规则，相关流量可能落到直连。
+                                    </p>
+                                    <p className="text-[10px] text-amber-100/70 leading-relaxed">
+                                      建议移除这些网段：LAN 直连由 route
+                                      规则中的
+                                      <code className="font-mono text-amber-100">
+                                        {" "}
+                                        ip_is_private → direct{" "}
+                                      </code>
+                                      保证，无需在此排除。此处仅提示，不会自动修改配置。
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            <div
+                              className={
+                                platform !== "linux" &&
+                                Boolean(inb.exclude_interface?.length)
+                                  ? "p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 space-y-1.5"
+                                  : "space-y-1.5"
+                              }
+                            >
+                              <TagListInput
+                                label="排除网卡名称 (exclude_interface)"
+                                values={inb.exclude_interface || []}
+                                onChange={(v) =>
+                                  updateInboundAt(idx, {
+                                    ...inb,
+                                    exclude_interface: v.length ? v : undefined,
+                                  })
+                                }
+                                placeholder="如: tailscale0, zt0, wg0"
+                                hint="按来源网卡排除，适合 P2P 组网虚拟网卡"
+                              />
+                              {platform !== "linux" &&
+                                Boolean(inb.exclude_interface?.length) && (
+                                  <div className="text-[10px] text-rose-300">
+                                    仅 Linux
+                                    支持网卡名称分流，当前平台不支持，请清空后再保存
+                                  </div>
+                                )}
+                            </div>
+
+                            <TagListInput
+                              label="排除 IP 规则集 (route_exclude_address_set)"
+                              values={inb.route_exclude_address_set || []}
+                              onChange={(v) =>
+                                updateInboundAt(idx, {
+                                  ...inb,
+                                  route_exclude_address_set: v.length
+                                    ? v
+                                    : undefined,
+                                })
+                              }
+                              placeholder="如: geoip-cn"
+                              hint="需先在 route.rule_set 中定义同名规则集"
+                            />
+
+                            <p className="text-[10px] text-slate-500 leading-relaxed">
+                              P2P 组网建议同时填写
+                              exclude_interface（按来源网卡）与
+                              route_exclude_address（按对端网段）。若开启
+                              strict_route，
+                              回程流量不会自动排除，需把相关接口（如 br-lan、
+                              pppoe-wan）一并加入
+                              exclude_interface，或把对应网段加入
+                              route_exclude_address。
+                            </p>
+                          </div>
+
+                          {(isAndroid ||
+                            Boolean(
+                              inb.include_package?.length ||
+                              inb.exclude_package?.length,
+                            )) && (
+                            <div
+                              className={`grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 ${
+                                !isAndroid
+                                  ? "p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40"
+                                  : ""
+                              }`}
+                            >
+                              {!isAndroid && (
+                                <div className="md:col-span-2 flex items-center justify-between text-xs text-rose-200">
+                                  <span>
+                                    当前非 Android 平台配置包含 Android
+                                    专属包名分流字段，请清空后再保存：
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateInboundAt(idx, {
+                                        ...inb,
+                                        include_package: undefined,
+                                        exclude_package: undefined,
+                                      })
+                                    }
+                                    className="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 border border-rose-500/30"
+                                  >
+                                    一键清空包名字段
+                                  </button>
+                                </div>
+                              )}
+                              <TagListInput
+                                label="仅代理指定 Android 应用包名 (include_package)"
+                                values={inb.include_package || []}
+                                onChange={(v) =>
+                                  updateInboundAt(idx, {
+                                    ...inb,
+                                    include_package: v.length ? v : undefined,
+                                  })
+                                }
+                                placeholder="留空则代理全部应用"
+                              />
+                              <TagListInput
+                                label="排除指定 Android 应用包名 (exclude_package)"
+                                values={inb.exclude_package || []}
+                                onChange={(v) =>
+                                  updateInboundAt(idx, {
+                                    ...inb,
+                                    exclude_package: v.length ? v : undefined,
+                                  })
+                                }
+                                placeholder="例如: com.tencent.mm"
+                              />
                             </div>
                           )}
-                          <TagListInput
-                            label="仅代理指定 Android 应用包名 (include_package)"
-                            values={inb.include_package || []}
-                            onChange={(v) =>
+                        </div>
+                      )}
+
+                      {(inb.type === "mixed" || inb.type === "http") && (
+                        <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                          <div>
+                            <span className="text-xs font-medium text-slate-300 block">
+                              自动配置系统代理 (set_system_proxy)
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              客户端启动时自动将该入站端口注册为操作系统 HTTP
+                              代理
+                            </span>
+                          </div>
+                          <Switch
+                            checked={Boolean(inb.set_system_proxy)}
+                            onChange={(val) =>
                               updateInboundAt(idx, {
                                 ...inb,
-                                include_package: v.length ? v : undefined,
+                                set_system_proxy: val || undefined,
                               })
                             }
-                            placeholder="留空则代理全部应用"
-                          />
-                          <TagListInput
-                            label="排除指定 Android 应用包名 (exclude_package)"
-                            values={inb.exclude_package || []}
-                            onChange={(v) =>
-                              updateInboundAt(idx, {
-                                ...inb,
-                                exclude_package: v.length ? v : undefined,
-                              })
-                            }
-                            placeholder="例如: com.tencent.mm"
                           />
                         </div>
                       )}
                     </div>
-                  )}
-
-                  {(inb.type === "mixed" || inb.type === "http") && (
-                    <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-medium text-slate-300 block">
-                          自动配置系统代理 (set_system_proxy)
-                        </span>
-                        <span className="text-[10px] text-slate-500">
-                          客户端启动时自动将该入站端口注册为操作系统 HTTP 代理
-                        </span>
-                      </div>
-                      <Switch
-                        checked={Boolean(inb.set_system_proxy)}
-                        onChange={(val) =>
-                          updateInboundAt(idx, {
-                            ...inb,
-                            set_system_proxy: val || undefined,
-                          })
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
         </>
       )}
     </div>

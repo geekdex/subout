@@ -15,7 +15,9 @@ describe("applyRoutingStrategy", () => {
     const next = applyRoutingStrategy(empty, "smart", "AUTO-Test");
     expect(next.route?.final).toBe("AUTO-Test");
     expect(next.route?.auto_detect_interface).toBe(true);
-    expect(next.route?.rule_set?.map((r) => r.tag)).toContain("geosite-geolocation-cn");
+    expect(next.route?.rule_set?.map((r) => r.tag)).toContain(
+      "geosite-geolocation-cn",
+    );
     expect(next.route?.rules).toContainEqual({
       rule_set: ["geosite-geolocation-cn"],
       outbound: "direct",
@@ -48,7 +50,9 @@ describe("applyRoutingStrategy", () => {
 
     const global = applyRoutingStrategy(config, "global", "AUTO-Test");
     expect(global.route?.rules).not.toContainEqual(custom);
-    expect(global.route?.rules).toEqual(applyRoutingStrategy(empty, "global").route?.rules);
+    expect(global.route?.rules).toEqual(
+      applyRoutingStrategy(empty, "global").route?.rules,
+    );
 
     const direct = applyRoutingStrategy(config, "direct_all", "AUTO-Test");
     expect(direct.route?.rules).not.toContainEqual(custom);
@@ -82,12 +86,7 @@ describe("QuickRoutingStrategies component", () => {
       />,
     );
 
-    for (const label of [
-      "智能分流",
-      "GFW 列表代理",
-      "全部代理",
-      "全部直连",
-    ]) {
+    for (const label of ["智能分流", "GFW 列表代理", "全部代理", "全部直连"]) {
       expect(screen.getByText(label)).toBeDefined();
     }
 
@@ -100,9 +99,7 @@ describe("QuickRoutingStrategies component", () => {
     const config = {
       route: { rules: [{ domain: ["example.com"], outbound: "direct" }] },
     } as SingBoxVisualConfig;
-    render(
-      <QuickRoutingStrategies config={config} onChange={vi.fn()} />,
-    );
+    render(<QuickRoutingStrategies config={config} onChange={vi.fn()} />);
 
     expect(screen.getByText(/当前已有 1 条分流规则/)).toBeDefined();
     // Two strategy buttons plus the warning banner mention clearing rules.

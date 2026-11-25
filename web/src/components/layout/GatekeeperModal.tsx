@@ -205,19 +205,19 @@ export const GatekeeperModal: React.FC<GatekeeperModalProps> = ({
               组网工具资源冲突 auto_takeover_allowed=false，禁止显示，避免误杀用户正常网络 */}
           {takeoverDiagnose.can_auto_takeover &&
             takeoverDiagnose.auto_takeover_allowed !== false && (
-            <div className="pt-1 flex flex-col sm:flex-row justify-end">
-              <Button
-                variant="danger"
-                size="md"
-                loading={takingOver}
-                onClick={() => onTakeover()}
-                icon={<Zap className="w-4 h-4" />}
-                className="w-full sm:w-auto shadow-lg shadow-rose-500/20 justify-center text-xs sm:text-sm font-semibold"
-              >
-                一键接管并终止冲突进程
-              </Button>
-            </div>
-          )}
+              <div className="pt-1 flex flex-col sm:flex-row justify-end">
+                <Button
+                  variant="danger"
+                  size="md"
+                  loading={takingOver}
+                  onClick={() => onTakeover()}
+                  icon={<Zap className="w-4 h-4" />}
+                  className="w-full sm:w-auto shadow-lg shadow-rose-500/20 justify-center text-xs sm:text-sm font-semibold"
+                >
+                  一键接管并终止冲突进程
+                </Button>
+              </div>
+            )}
         </div>
       </div>
     );

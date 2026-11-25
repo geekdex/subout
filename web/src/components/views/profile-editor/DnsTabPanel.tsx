@@ -733,372 +733,380 @@ export const DnsTabPanel: React.FC<DnsTabPanelProps> = ({
 
       {!quick && (
         <>
-      {/* BOTTOM PANE: DNS Global Options + DNS Servers List + DNS Rules List */}
-      <div className="space-y-4">
-        {/* Global DNS Options (Direct Rendering) */}
-        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-          <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-            <Globe className="w-3.5 h-3.5 text-sky-400" />
-            <span>DNS 全局参数 (dns)</span>
-          </h4>
+          {/* BOTTOM PANE: DNS Global Options + DNS Servers List + DNS Rules List */}
+          <div className="space-y-4">
+            {/* Global DNS Options (Direct Rendering) */}
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-sky-400" />
+                <span>DNS 全局参数 (dns)</span>
+              </h4>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Select
-              label="默认兜底 DNS 服务器 (dns.final)"
-              value={dns.final || ""}
-              onChange={(val) => updateDns({ final: val || undefined })}
-              options={[
-                { value: "", label: "未指定 (空)" },
-                ...serverTags.map((t) => ({ value: t, label: t })),
-                ...(dns.final && !serverTags.includes(dns.final)
-                  ? [{ value: dns.final, label: dns.final }]
-                  : []),
-              ]}
-            />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Select
+                  label="默认兜底 DNS 服务器 (dns.final)"
+                  value={dns.final || ""}
+                  onChange={(val) => updateDns({ final: val || undefined })}
+                  options={[
+                    { value: "", label: "未指定 (空)" },
+                    ...serverTags.map((t) => ({ value: t, label: t })),
+                    ...(dns.final && !serverTags.includes(dns.final)
+                      ? [{ value: dns.final, label: dns.final }]
+                      : []),
+                  ]}
+                />
 
-            <Select
-              label="解析策略 (dns.strategy)"
-              value={dns.strategy || ""}
-              onChange={(val) => updateDns({ strategy: val || undefined })}
-              options={[
-                { value: "", label: "未指定 (空)" },
-                { value: "prefer_ipv4", label: "优先 IPv4 (prefer_ipv4)" },
-                { value: "prefer_ipv6", label: "优先 IPv6 (prefer_ipv6)" },
-                { value: "ipv4_only", label: "仅 IPv4 (ipv4_only)" },
-                { value: "ipv6_only", label: "仅 IPv6 (ipv6_only)" },
-              ]}
-            />
+                <Select
+                  label="解析策略 (dns.strategy)"
+                  value={dns.strategy || ""}
+                  onChange={(val) => updateDns({ strategy: val || undefined })}
+                  options={[
+                    { value: "", label: "未指定 (空)" },
+                    { value: "prefer_ipv4", label: "优先 IPv4 (prefer_ipv4)" },
+                    { value: "prefer_ipv6", label: "优先 IPv6 (prefer_ipv6)" },
+                    { value: "ipv4_only", label: "仅 IPv4 (ipv4_only)" },
+                    { value: "ipv6_only", label: "仅 IPv6 (ipv6_only)" },
+                  ]}
+                />
 
-            <Input
-              label="EDNS 客户端子网 (client_subnet)"
-              value={dns.client_subnet || ""}
-              onChange={(e) =>
-                updateDns({ client_subnet: e.target.value || undefined })
-              }
-              placeholder="例如: 114.114.114.114/24"
-            />
-          </div>
+                <Input
+                  label="EDNS 客户端子网 (client_subnet)"
+                  value={dns.client_subnet || ""}
+                  onChange={(e) =>
+                    updateDns({ client_subnet: e.target.value || undefined })
+                  }
+                  placeholder="例如: 114.114.114.114/24"
+                />
+              </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-              <span className="text-xs text-slate-300">
-                禁用 DNS 缓存 (disable_cache)
-              </span>
-              <Switch
-                checked={Boolean(dns.disable_cache)}
-                onChange={(val) =>
-                  updateDns({ disable_cache: val || undefined })
-                }
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <span className="text-xs text-slate-300">
+                    禁用 DNS 缓存 (disable_cache)
+                  </span>
+                  <Switch
+                    checked={Boolean(dns.disable_cache)}
+                    onChange={(val) =>
+                      updateDns({ disable_cache: val || undefined })
+                    }
+                  />
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <span className="text-xs text-slate-300">
+                    禁用 TTL 过期 (disable_expire)
+                  </span>
+                  <Switch
+                    checked={Boolean(dns.disable_expire)}
+                    onChange={(val) =>
+                      updateDns({ disable_expire: val || undefined })
+                    }
+                  />
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <span className="text-xs text-slate-300">
+                    IP 反向映射 (reverse_mapping)
+                  </span>
+                  <Switch
+                    checked={Boolean(dns.reverse_mapping)}
+                    onChange={(val) =>
+                      updateDns({ reverse_mapping: val || undefined })
+                    }
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-              <span className="text-xs text-slate-300">
-                禁用 TTL 过期 (disable_expire)
-              </span>
-              <Switch
-                checked={Boolean(dns.disable_expire)}
-                onChange={(val) =>
-                  updateDns({ disable_expire: val || undefined })
-                }
-              />
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-              <span className="text-xs text-slate-300">
-                IP 反向映射 (reverse_mapping)
-              </span>
-              <Switch
-                checked={Boolean(dns.reverse_mapping)}
-                onChange={(val) =>
-                  updateDns({ reverse_mapping: val || undefined })
-                }
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* DNS Servers Reorderable List */}
-        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Server className="w-3.5 h-3.5 text-sky-400" />
-              <span className="text-xs font-bold text-slate-200">
-                DNS 服务器列表 (dns.servers)
-              </span>
-              <Badge variant="info" size="sm">
-                {servers.length} 个
-              </Badge>
-            </div>
-            {servers.length > 0 && (
-              <button
-                type="button"
-                onClick={() => updateDns({ servers: [] })}
-                className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
-              >
-                清空服务器列表
-              </button>
-            )}
-          </div>
-
-          {servers.length === 0 ? (
-            <div className="p-5 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
-              当前未配置任何 DNS
-              服务器。请使用上方「快捷工具栏」一键添加国内/海外 DNS 服务器。
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {servers.map((srv, idx) => {
-                const needsAddress = [
-                  "udp",
-                  "tcp",
-                  "tls",
-                  "https",
-                  "h3",
-                  "quic",
-                ].includes(srv.type || "udp");
-                const isFakeIp = srv.type === "fakeip";
-
-                const incompatibleType = isPlaintextIpForEncryptedDns(
-                  srv.type || "udp",
-                  srv.server || "",
-                );
-
-                return (
-                  <div
-                    key={`dns-server-${idx}`}
-                    className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
+            {/* DNS Servers Reorderable List */}
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Server className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="text-xs font-bold text-slate-200">
+                    DNS 服务器列表 (dns.servers)
+                  </span>
+                  <Badge variant="info" size="sm">
+                    {servers.length} 个
+                  </Badge>
+                </div>
+                {servers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => updateDns({ servers: [] })}
+                    className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
                   >
-                    {incompatibleType && (
-                      <div className="sm:col-span-12 flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-200">
-                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
-                        <span>
-                          地址 <code className="font-mono">{srv.server}</code> 是纯明文 DNS
-                          服务器，不提供加密 DNS（{srv.type.toUpperCase()}）。启动时会因连接超时失败。
-                          请改用 <code className="font-mono">udp</code> 类型，或更换为支持加密 DNS 的地址（如
-                          1.1.1.1 / 8.8.8.8 / 223.5.5.5 / 1.12.12.12）。
-                        </span>
-                      </div>
-                    )}
-                    <div className="sm:col-span-3">
-                      <Input
-                        label={`#${idx + 1} 标签 (tag)`}
-                        value={srv.tag || ""}
-                        onChange={(e) =>
-                          updateServerAt(idx, { ...srv, tag: e.target.value })
-                        }
-                        placeholder="如: remote-dns"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Select
-                        label="协议类型 (type)"
-                        value={srv.type || "udp"}
-                        onChange={(val) => {
-                          const nextType = val as DnsServerItem["type"];
-                          const copy: DnsServerItem = {
-                            type: nextType,
-                            tag: srv.tag,
-                          };
-                          if (
-                            [
-                              "udp",
-                              "tcp",
-                              "tls",
-                              "https",
-                              "h3",
-                              "quic",
-                            ].includes(nextType)
-                          ) {
-                            copy.server = srv.server || "1.1.1.1";
-                            if (srv.detour) copy.detour = srv.detour;
-                          } else if (nextType === "fakeip") {
-                            copy.inet4_range = "198.18.0.0/15";
-                            copy.inet6_range = "fc00::/18";
-                          }
-                          updateServerAt(idx, copy);
-                        }}
-                        options={[
-                          { value: "udp", label: "UDP" },
-                          { value: "https", label: "HTTPS (DoH)" },
-                          { value: "tls", label: "TLS (DoT)" },
-                          { value: "h3", label: "HTTP/3 (DoH3)" },
-                          { value: "quic", label: "QUIC (DoQ)" },
-                          { value: "tcp", label: "TCP" },
-                          { value: "local", label: "系统本地 (local)" },
-                          { value: "fakeip", label: "FakeIP" },
-                          { value: "dhcp", label: "DHCP" },
-                        ]}
-                      />
-                    </div>
+                    清空服务器列表
+                  </button>
+                )}
+              </div>
 
-                    {needsAddress && (
-                      <>
+              {servers.length === 0 ? (
+                <div className="p-5 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
+                  当前未配置任何 DNS
+                  服务器。请使用上方「快捷工具栏」一键添加国内/海外 DNS 服务器。
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {servers.map((srv, idx) => {
+                    const needsAddress = [
+                      "udp",
+                      "tcp",
+                      "tls",
+                      "https",
+                      "h3",
+                      "quic",
+                    ].includes(srv.type || "udp");
+                    const isFakeIp = srv.type === "fakeip";
+
+                    const incompatibleType = isPlaintextIpForEncryptedDns(
+                      srv.type || "udp",
+                      srv.server || "",
+                    );
+
+                    return (
+                      <div
+                        key={`dns-server-${idx}`}
+                        className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
+                      >
+                        {incompatibleType && (
+                          <div className="sm:col-span-12 flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] leading-relaxed text-red-200">
+                            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
+                            <span>
+                              地址{" "}
+                              <code className="font-mono">{srv.server}</code>{" "}
+                              是纯明文 DNS 服务器，不提供加密 DNS（
+                              {srv.type.toUpperCase()}
+                              ）。启动时会因连接超时失败。 请改用{" "}
+                              <code className="font-mono">udp</code>{" "}
+                              类型，或更换为支持加密 DNS 的地址（如 1.1.1.1 /
+                              8.8.8.8 / 223.5.5.5 / 1.12.12.12）。
+                            </span>
+                          </div>
+                        )}
                         <div className="sm:col-span-3">
                           <Input
-                            label="服务器地址 (server)"
-                            value={srv.server || ""}
+                            label={`#${idx + 1} 标签 (tag)`}
+                            value={srv.tag || ""}
                             onChange={(e) =>
                               updateServerAt(idx, {
                                 ...srv,
-                                server: e.target.value,
+                                tag: e.target.value,
                               })
                             }
-                            placeholder="如: 223.5.5.5 或 1.1.1.1"
+                            placeholder="如: remote-dns"
                           />
                         </div>
                         <div className="sm:col-span-2">
                           <Select
-                            label="出站绕行 (detour)"
-                            value={srv.detour || ""}
-                            onChange={(val) =>
-                              updateServerAt(idx, {
-                                ...srv,
-                                detour: val || undefined,
-                              })
-                            }
+                            label="协议类型 (type)"
+                            value={srv.type || "udp"}
+                            onChange={(val) => {
+                              const nextType = val as DnsServerItem["type"];
+                              const copy: DnsServerItem = {
+                                type: nextType,
+                                tag: srv.tag,
+                              };
+                              if (
+                                [
+                                  "udp",
+                                  "tcp",
+                                  "tls",
+                                  "https",
+                                  "h3",
+                                  "quic",
+                                ].includes(nextType)
+                              ) {
+                                copy.server = srv.server || "1.1.1.1";
+                                if (srv.detour) copy.detour = srv.detour;
+                              } else if (nextType === "fakeip") {
+                                copy.inet4_range = "198.18.0.0/15";
+                                copy.inet6_range = "fc00::/18";
+                              }
+                              updateServerAt(idx, copy);
+                            }}
                             options={[
-                              { value: "", label: "直连 (无 detour)" },
-                              ...outboundTags
-                                .filter((t) => t !== "direct")
-                                .map((t) => ({ value: t, label: t })),
+                              { value: "udp", label: "UDP" },
+                              { value: "https", label: "HTTPS (DoH)" },
+                              { value: "tls", label: "TLS (DoT)" },
+                              { value: "h3", label: "HTTP/3 (DoH3)" },
+                              { value: "quic", label: "QUIC (DoQ)" },
+                              { value: "tcp", label: "TCP" },
+                              { value: "local", label: "系统本地 (local)" },
+                              { value: "fakeip", label: "FakeIP" },
+                              { value: "dhcp", label: "DHCP" },
                             ]}
                           />
                         </div>
-                      </>
-                    )}
 
-                    {isFakeIp && (
-                      <>
-                        <div className="sm:col-span-3">
-                          <Input
-                            label="IPv4 地址池 (inet4_range)"
-                            value={srv.inet4_range || ""}
-                            onChange={(e) =>
-                              updateServerAt(idx, {
-                                ...srv,
-                                inet4_range: e.target.value || undefined,
-                              })
-                            }
-                            placeholder="198.18.0.0/15"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <Input
-                            label="IPv6 地址池 (inet6_range)"
-                            value={srv.inet6_range || ""}
-                            onChange={(e) =>
-                              updateServerAt(idx, {
-                                ...srv,
-                                inet6_range: e.target.value || undefined,
-                              })
-                            }
-                            placeholder="fc00::/18"
-                          />
-                        </div>
-                      </>
-                    )}
+                        {needsAddress && (
+                          <>
+                            <div className="sm:col-span-3">
+                              <Input
+                                label="服务器地址 (server)"
+                                value={srv.server || ""}
+                                onChange={(e) =>
+                                  updateServerAt(idx, {
+                                    ...srv,
+                                    server: e.target.value,
+                                  })
+                                }
+                                placeholder="如: 223.5.5.5 或 1.1.1.1"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <Select
+                                label="出站绕行 (detour)"
+                                value={srv.detour || ""}
+                                onChange={(val) =>
+                                  updateServerAt(idx, {
+                                    ...srv,
+                                    detour: val || undefined,
+                                  })
+                                }
+                                options={[
+                                  { value: "", label: "直连 (无 detour)" },
+                                  ...outboundTags
+                                    .filter((t) => t !== "direct")
+                                    .map((t) => ({ value: t, label: t })),
+                                ]}
+                              />
+                            </div>
+                          </>
+                        )}
 
-                    {!needsAddress && !isFakeIp && (
-                      <div className="sm:col-span-5 text-xs text-slate-500 pb-2">
-                        该服务器类型无需额外地址参数
+                        {isFakeIp && (
+                          <>
+                            <div className="sm:col-span-3">
+                              <Input
+                                label="IPv4 地址池 (inet4_range)"
+                                value={srv.inet4_range || ""}
+                                onChange={(e) =>
+                                  updateServerAt(idx, {
+                                    ...srv,
+                                    inet4_range: e.target.value || undefined,
+                                  })
+                                }
+                                placeholder="198.18.0.0/15"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <Input
+                                label="IPv6 地址池 (inet6_range)"
+                                value={srv.inet6_range || ""}
+                                onChange={(e) =>
+                                  updateServerAt(idx, {
+                                    ...srv,
+                                    inet6_range: e.target.value || undefined,
+                                  })
+                                }
+                                placeholder="fc00::/18"
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {!needsAddress && !isFakeIp && (
+                          <div className="sm:col-span-5 text-xs text-slate-500 pb-2">
+                            该服务器类型无需额外地址参数
+                          </div>
+                        )}
+
+                        <div className="sm:col-span-2 flex items-center justify-end gap-1 pb-1">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => moveServerTo(idx, idx - 1)}
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                            title="上移"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === servers.length - 1}
+                            onClick={() => moveServerTo(idx, idx + 1)}
+                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                            title="下移"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeServerAt(idx)}
+                            className="p-1.5 rounded text-rose-400 hover:text-rose-300"
+                            title="删除 DNS 服务器"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    )}
-
-                    <div className="sm:col-span-2 flex items-center justify-end gap-1 pb-1">
-                      <button
-                        type="button"
-                        disabled={idx === 0}
-                        onClick={() => moveServerTo(idx, idx - 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                        title="上移"
-                      >
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={idx === servers.length - 1}
-                        onClick={() => moveServerTo(idx, idx + 1)}
-                        className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                        title="下移"
-                      >
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeServerAt(idx)}
-                        className="p-1.5 rounded text-rose-400 hover:text-rose-300"
-                        title="删除 DNS 服务器"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        {/* DNS Rules Reorderable List (with 2-level nesting) */}
-        <RuleTreeEditor
-          kind="dns"
-          platform={platform}
-          rules={rules}
-          onChange={(nextRules) => {
-            const referencedServers = new Set<string>();
-            const walk = (rList: (RouteRuleItem | DnsRuleItem)[]) => {
-              for (const r of rList) {
-                const s = (r as DnsRuleItem).server;
-                if (s && typeof s === "string" && s.trim()) {
-                  referencedServers.add(s.trim());
+            {/* DNS Rules Reorderable List (with 2-level nesting) */}
+            <RuleTreeEditor
+              kind="dns"
+              platform={platform}
+              rules={rules}
+              onChange={(nextRules) => {
+                const referencedServers = new Set<string>();
+                const walk = (rList: (RouteRuleItem | DnsRuleItem)[]) => {
+                  for (const r of rList) {
+                    const s = (r as DnsRuleItem).server;
+                    if (s && typeof s === "string" && s.trim()) {
+                      referencedServers.add(s.trim());
+                    }
+                    if (r.rules) walk(r.rules);
+                  }
+                };
+                walk(nextRules);
+                const missingServers = Array.from(referencedServers).filter(
+                  (tag) => !servers.some((s) => s.tag === tag),
+                );
+                if (missingServers.length > 0) {
+                  const nextServers = ensureDnsServers(
+                    servers,
+                    missingServers,
+                    defaultProxyDetour,
+                  );
+                  const fallbackTag =
+                    nextServers.find(
+                      (s) => s.tag === "local-dns" || s.tag?.includes("local"),
+                    )?.tag || nextServers[0]?.tag;
+                  const nextRoute = {
+                    ...(config.route || {}),
+                    ...(!config.route?.default_domain_resolver && fallbackTag
+                      ? { default_domain_resolver: fallbackTag }
+                      : {}),
+                  };
+                  onChange({
+                    ...config,
+                    dns: {
+                      ...dns,
+                      servers: nextServers,
+                      rules: nextRules as DnsRuleItem[],
+                      ...(!dns.final && fallbackTag
+                        ? { final: fallbackTag }
+                        : {}),
+                    },
+                    route: nextRoute,
+                  });
+                } else {
+                  updateDns({ rules: nextRules as DnsRuleItem[] });
                 }
-                if (r.rules) walk(r.rules);
-              }
-            };
-            walk(nextRules);
-            const missingServers = Array.from(referencedServers).filter(
-              (tag) => !servers.some((s) => s.tag === tag),
-            );
-            if (missingServers.length > 0) {
-              const nextServers = ensureDnsServers(
-                servers,
-                missingServers,
-                defaultProxyDetour,
-              );
-              const fallbackTag =
-                nextServers.find(
-                  (s) => s.tag === "local-dns" || s.tag?.includes("local"),
-                )?.tag || nextServers[0]?.tag;
-              const nextRoute = {
-                ...(config.route || {}),
-                ...(!config.route?.default_domain_resolver && fallbackTag
-                  ? { default_domain_resolver: fallbackTag }
-                  : {}),
-              };
-              onChange({
-                ...config,
-                dns: {
-                  ...dns,
-                  servers: nextServers,
-                  rules: nextRules as DnsRuleItem[],
-                  ...(!dns.final && fallbackTag ? { final: fallbackTag } : {}),
-                },
-                route: nextRoute,
-              });
-            } else {
-              updateDns({ rules: nextRules as DnsRuleItem[] });
-            }
-          }}
-          outboundTags={outboundTags}
-          dnsServerTags={effectiveServerTags}
-          inboundTags={inboundTags}
-          ruleSetTags={ruleSetTags}
-        />
-      </div>
+              }}
+              outboundTags={outboundTags}
+              dnsServerTags={effectiveServerTags}
+              inboundTags={inboundTags}
+              ruleSetTags={ruleSetTags}
+            />
+          </div>
         </>
       )}
     </div>
   );
 };
-

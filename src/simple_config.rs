@@ -325,8 +325,7 @@ pub fn generate_simple_singbox_config(conn: &Connection, cfg: &SimpleConfig) -> 
         || proxy_node_tags.iter().any(|t| t == chosen);
     if !is_known {
         anyhow::bail!(
-            "route.default_outbound: 出站 '{}' 不存在（可选: direct / proxy / AUTO-Test / 已启用节点），请重新选择",
-            chosen
+            "route.default_outbound: 出站 '{chosen}' 不存在（可选: direct / proxy / AUTO-Test / 已启用节点），请重新选择"
         );
     }
 

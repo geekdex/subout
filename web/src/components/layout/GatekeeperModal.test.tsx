@@ -146,7 +146,9 @@ describe("GatekeeperModal", () => {
     expect(screen.queryByText(/内核门禁警告/)).toBeNull();
 
     // Should show conflict header & details
-    expect(screen.getByText(/检测到影响 sing-box 运行的系统冲突/)).toBeDefined();
+    expect(
+      screen.getByText(/检测到影响 sing-box 运行的系统冲突/),
+    ).toBeDefined();
     expect(screen.getByText(/外部独立 sing-box 进程/)).toBeDefined();
     expect(screen.getAllByText(/PID: 12345/).length).toBeGreaterThan(0);
     expect(screen.getByText(/sudo kill -9 12345/)).toBeDefined();
@@ -362,9 +364,13 @@ describe("GatekeeperModal", () => {
     );
 
     // 泛化标题
-    expect(screen.getByText("检测到影响 sing-box 运行的系统冲突")).toBeDefined();
+    expect(
+      screen.getByText("检测到影响 sing-box 运行的系统冲突"),
+    ).toBeDefined();
     // 点名真实占用进程（不硬编码工具名，显示系统读到的名字）
-    expect(screen.getAllByText(/NodeBabyLinkService/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/NodeBabyLinkService/).length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getByText(/127\.0\.0\.1:2080/)).toBeDefined();
     // 核心防误杀断言：组网工具冲突不能出现"一键接管"按钮
     expect(screen.queryByText("一键接管并终止冲突进程")).toBeNull();

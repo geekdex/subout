@@ -430,9 +430,7 @@ pub fn setup_database(conn: &Connection) -> Result<()> {
         update_setting(
             conn,
             "node_group_updated_at",
-            &chrono::Local::now()
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string(),
+            &chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         )?;
     }
     if get_setting(conn, "app_mode")?.is_none() {
@@ -1274,9 +1272,7 @@ pub fn refresh_node_group_version_code(conn: &Connection) -> Result<i64> {
     update_setting(
         conn,
         "node_group_updated_at",
-        &chrono::Local::now()
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string(),
+        &chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     )?;
     get_node_group_version_code(conn)
 }
@@ -1909,7 +1905,9 @@ mod tests {
         setup_database(&conn).unwrap();
 
         refresh_node_group_version_code(&conn).unwrap();
-        let stamp = get_setting(&conn, "node_group_updated_at").unwrap().unwrap();
+        let stamp = get_setting(&conn, "node_group_updated_at")
+            .unwrap()
+            .unwrap();
         assert_eq!(stamp.len(), 19, "expected YYYY-MM-DD HH:MM:SS, got {stamp}");
         assert!(stamp.contains('-'));
     }

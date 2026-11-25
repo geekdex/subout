@@ -161,7 +161,10 @@ const TraceRows: React.FC<{ result: SiteProbeResponse }> = ({ result }) => {
           <Badge variant="info" size="sm" className="!px-1 !py-0">
             DNS
           </Badge>
-          <span className="min-w-0 truncate text-slate-400" title={result.dns_rule}>
+          <span
+            className="min-w-0 truncate text-slate-400"
+            title={result.dns_rule}
+          >
             {result.dns_rule}
           </span>
           {result.dns_server && (
@@ -182,7 +185,10 @@ const TraceRows: React.FC<{ result: SiteProbeResponse }> = ({ result }) => {
           <Badge variant="success" size="sm" className="!px-1 !py-0">
             出口
           </Badge>
-          <span className="min-w-0 truncate text-slate-400" title={result.route_rule}>
+          <span
+            className="min-w-0 truncate text-slate-400"
+            title={result.route_rule}
+          >
             {result.route_rule}
           </span>
           {result.outbound && (
@@ -220,7 +226,9 @@ const ResultRow: React.FC<{
 );
 
 /** Four fixed rows, always rendered so the card keeps the same height before and after testing. */
-const ResultRows: React.FC<{ result: SiteProbeResponse | null }> = ({ result }) => {
+const ResultRows: React.FC<{ result: SiteProbeResponse | null }> = ({
+  result,
+}) => {
   const latencyInfo = formatLatency(result?.latency_ms ?? null);
   return (
     <div className="mt-2 space-y-0.5 border-t border-slate-800/80 pt-1.5">
@@ -312,7 +320,10 @@ const SiteCard: React.FC<{
           >
             {site.name}
           </h3>
-          <p className="truncate text-[10px] text-slate-500" title={site.domain}>
+          <p
+            className="truncate text-[10px] text-slate-500"
+            title={site.domain}
+          >
             {site.domain}
           </p>
         </div>
@@ -348,7 +359,8 @@ const SiteCard: React.FC<{
         }`}
         title={result?.error ?? undefined}
       >
-        {result?.error ?? (testing ? "正在检测…" : result ? "" : "点击 ▶ 开始检测")}
+        {result?.error ??
+          (testing ? "正在检测…" : result ? "" : "点击 ▶ 开始检测")}
       </div>
     </div>
   );
@@ -440,7 +452,10 @@ export const SiteTestView: React.FC = () => {
     };
 
     await Promise.all(
-      Array.from({ length: Math.min(MAX_CONCURRENCY, PRESET_SITES.length) }, worker),
+      Array.from(
+        { length: Math.min(MAX_CONCURRENCY, PRESET_SITES.length) },
+        worker,
+      ),
     );
     if (mountedRef.current && runId === runIdRef.current) {
       setTestingAll(false);
@@ -474,7 +489,9 @@ export const SiteTestView: React.FC = () => {
       )
       .map((result) => result.latency_ms as number);
     const avgLatency = latencies.length
-      ? Math.round(latencies.reduce((sum, ms) => sum + ms, 0) / latencies.length)
+      ? Math.round(
+          latencies.reduce((sum, ms) => sum + ms, 0) / latencies.length,
+        )
       : 0;
     return {
       total: results.length,
@@ -493,7 +510,8 @@ export const SiteTestView: React.FC = () => {
     id: item.id,
     label: (
       <>
-        {item.name} <span className="text-slate-500">({countFor(item.id)})</span>
+        {item.name}{" "}
+        <span className="text-slate-500">({countFor(item.id)})</span>
       </>
     ),
   }));
@@ -514,7 +532,8 @@ export const SiteTestView: React.FC = () => {
             <h1 className="text-xl font-semibold text-slate-100">网络检测</h1>
           </div>
           <p className="text-xs text-slate-400">
-            检测当前主机网络对常见站点的连通性与响应延迟，并展示当前配置下的 DNS / 出口命中情况（支持直连、系统代理与 TUN）。
+            检测当前主机网络对常见站点的连通性与响应延迟，并展示当前配置下的 DNS
+            / 出口命中情况（支持直连、系统代理与 TUN）。
           </p>
         </div>
         <Button
@@ -597,9 +616,7 @@ export const SiteTestView: React.FC = () => {
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
-                <Badge
-                  variant={customResult.success ? "success" : "danger"}
-                >
+                <Badge variant={customResult.success ? "success" : "danger"}>
                   {customResult.success ? "访问成功" : "访问失败"}
                 </Badge>
                 <span
@@ -616,7 +633,9 @@ export const SiteTestView: React.FC = () => {
                   </span>
                 )}
                 {customResult.latency_ms != null && (
-                  <span className={formatLatency(customResult.latency_ms).color}>
+                  <span
+                    className={formatLatency(customResult.latency_ms).color}
+                  >
                     {formatLatency(customResult.latency_ms).text}
                   </span>
                 )}

@@ -73,14 +73,20 @@ export function useKernelGuard(enabled = true) {
       // 指纹按"资源+占用者"生成，只有变化才提示，避免每 10 秒轮询重复打扰。
       const rc = diag?.resource_conflicts ?? [];
       const fingerprint = rc
-        .map((c) => `${c.kind}:${c.resource}:${c.holder_pid ?? ""}:${c.holder_name ?? ""}`)
+        .map(
+          (c) =>
+            `${c.kind}:${c.resource}:${c.holder_pid ?? ""}:${c.holder_name ?? ""}`,
+        )
         .join("|");
       if (fingerprint && fingerprint !== lastConflictFingerprintRef.current) {
         const first = rc[0];
         const who = first.holder_name
           ? `${first.holder_name}${first.holder_pid ? ` (PID ${first.holder_pid})` : ""}`
           : "未知程序";
-        error("检测到网络环境冲突", `${first.resource} 被 ${who} 占用，详见页面顶部提示`);
+        error(
+          "检测到网络环境冲突",
+          `${first.resource} 被 ${who} 占用，详见页面顶部提示`,
+        );
       }
       lastConflictFingerprintRef.current = fingerprint;
 

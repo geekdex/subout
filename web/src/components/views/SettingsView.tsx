@@ -314,7 +314,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </Badge>
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              本机代理需要 1.14.* 内核；托管类模式下，订阅、节点、配置等管理接口不再被内核门禁拦截，
+              本机代理需要 1.14.*
+              内核；托管类模式下，订阅、节点、配置等管理接口不再被内核门禁拦截，
               可在无内核的服务器上正常工作。
             </p>
 

@@ -59,7 +59,8 @@ const AppContent: React.FC = () => {
 
   const isAuthed = isAuthenticated === true;
   // Hosting/hybrid servers have no local kernel and must not be locked out.
-  const runMode: "local" | "hosting" | "hybrid" = systemInfo?.run_mode ?? "local";
+  const runMode: "local" | "hosting" | "hybrid" =
+    systemInfo?.run_mode ?? "local";
   const {
     kernelInfo,
     loading: kernelLoading,

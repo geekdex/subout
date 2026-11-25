@@ -753,11 +753,7 @@ describe("ProfileEditor quick-mode persistence and collapsed preview", () => {
     onSaved,
     ...render(
       <ToastProvider>
-        <ProfileEditor
-          profile={profile}
-          onClose={vi.fn()}
-          onSaved={onSaved}
-        />
+        <ProfileEditor profile={profile} onClose={vi.fn()} onSaved={onSaved} />
       </ToastProvider>,
     ),
   });
@@ -767,9 +763,7 @@ describe("ProfileEditor quick-mode persistence and collapsed preview", () => {
 
     fireEvent.click(screen.getByText("新增 SOCKS5 入站"));
     fireEvent.click(screen.getByText("校验官方 Schema"));
-    await waitFor(() =>
-      expect(api.validateConfigSchema).toHaveBeenCalled(),
-    );
+    await waitFor(() => expect(api.validateConfigSchema).toHaveBeenCalled());
 
     fireEvent.click(screen.getByText("保存配置"));
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalled());
@@ -778,7 +772,9 @@ describe("ProfileEditor quick-mode persistence and collapsed preview", () => {
     const savedConfig = JSON.parse(
       (api.updateConfig as ReturnType<typeof vi.fn>).mock.calls[0][1].content,
     );
-    expect(savedConfig.inbounds.some((i: { tag: string }) => i.tag === "socks-in")).toBe(true);
+    expect(
+      savedConfig.inbounds.some((i: { tag: string }) => i.tag === "socks-in"),
+    ).toBe(true);
   });
 
   it("blocks saving in quick view when schema validation fails", async () => {
@@ -801,7 +797,8 @@ describe("ProfileEditor quick-mode persistence and collapsed preview", () => {
     renderEditor();
 
     fireEvent.click(screen.getByText("新增 SOCKS5 入站"));
-    const preview = () => screen.getByTestId("json-preview-content").textContent || "";
+    const preview = () =>
+      screen.getByTestId("json-preview-content").textContent || "";
     expect(preview()).toContain("socks-in");
 
     fireEvent.click(screen.getByText("专家模式"));

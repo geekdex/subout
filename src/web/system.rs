@@ -25,7 +25,7 @@ pub struct SystemInfoResponse {
     pub permission_level: String,
     pub default_tun_stack: String,
     pub app_mode: String,
-    /// local (default) | hosting | hybrid — see gatekeeper_middleware.
+    /// local (default) | hosting | hybrid — see `gatekeeper_middleware`.
     pub run_mode: String,
     pub running_config_id: Option<i64>,
     pub primary_lan_ip: Option<String>,

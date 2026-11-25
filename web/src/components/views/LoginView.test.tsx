@@ -126,5 +126,4 @@ describe("LoginView password hints", () => {
     renderView();
     expect(await screen.findByText(/当前仍在使用默认密码/)).toBeDefined();
   });
-
 });

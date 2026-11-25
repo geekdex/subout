@@ -99,7 +99,9 @@ describe("SettingsView Component", () => {
     });
     fireEvent.click(screen.getByText("确认修改密码"));
 
-    expect(await screen.findByText("请再次输入新密码，且两次输入必须一致")).toBeDefined();
+    expect(
+      await screen.findByText("请再次输入新密码，且两次输入必须一致"),
+    ).toBeDefined();
     expect(setWebPassword).not.toHaveBeenCalled();
     setWebPassword.mockRestore();
   });

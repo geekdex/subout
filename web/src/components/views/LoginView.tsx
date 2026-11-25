@@ -130,7 +130,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           {passwordState.is_env_set ? (
             <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
               <p>
-                当前密码由环境变量 <code className="text-sky-300">ADMIN_PASSWORD</code>{" "}
+                当前密码由环境变量{" "}
+                <code className="text-sky-300">ADMIN_PASSWORD</code>{" "}
                 管理，命令行重置无效。
               </p>
               <p>请修改该环境变量后重启 Subout 服务，再用新密码登录。</p>

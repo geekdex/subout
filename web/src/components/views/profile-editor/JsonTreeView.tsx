@@ -1,4 +1,9 @@
-import React, { useEffect, useImperativeHandle, useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 export interface JsonTreeViewHandle {
@@ -77,7 +82,10 @@ const JsonNode: React.FC<JsonNodeProps> = ({
 
   if (!isContainer) {
     return (
-      <div className="json-line flex items-baseline gap-1 leading-5" style={indent}>
+      <div
+        className="json-line flex items-baseline gap-1 leading-5"
+        style={indent}
+      >
         {/* Spacer keeps leaves aligned with container rows that have a toggle. */}
         <span className="w-4 shrink-0" aria-hidden="true" />
         {showKey && (
@@ -108,7 +116,10 @@ const JsonNode: React.FC<JsonNodeProps> = ({
 
   return (
     <div className="json-node">
-      <div className="json-line flex items-baseline gap-1 leading-5" style={indent}>
+      <div
+        className="json-line flex items-baseline gap-1 leading-5"
+        style={indent}
+      >
         <button
           type="button"
           onClick={() => onToggle(key)}
@@ -182,58 +193,62 @@ const JsonNode: React.FC<JsonNodeProps> = ({
  * valid JSON of `value`, so it can still be selected/copied or asserted on in
  * tests. Folding a node replaces its children with an ellipsis placeholder.
  */
-export const JsonTreeView = React.forwardRef<JsonTreeViewHandle, JsonTreeViewProps>(
-  ({ value, className = "" }, ref) => {
-    const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(
-      () => new Set(),
-    );
-    const [allCollapsed, setAllCollapsed] = useState(false);
-    const allContainerPaths = useMemo(() => collectContainerPaths(value), [value]);
+export const JsonTreeView = React.forwardRef<
+  JsonTreeViewHandle,
+  JsonTreeViewProps
+>(({ value, className = "" }, ref) => {
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [allCollapsed, setAllCollapsed] = useState(false);
+  const allContainerPaths = useMemo(
+    () => collectContainerPaths(value),
+    [value],
+  );
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        expandAll: () => {
-          setAllCollapsed(false);
-          setCollapsedPaths(new Set());
-        },
-        collapseAll: () => {
-          setAllCollapsed(true);
-          setCollapsedPaths(new Set(allContainerPaths));
-        },
-      }),
-      [allContainerPaths],
-    );
+  useImperativeHandle(
+    ref,
+    () => ({
+      expandAll: () => {
+        setAllCollapsed(false);
+        setCollapsedPaths(new Set());
+      },
+      collapseAll: () => {
+        setAllCollapsed(true);
+        setCollapsedPaths(new Set(allContainerPaths));
+      },
+    }),
+    [allContainerPaths],
+  );
 
-    // Re-apply "collapse all" after the live JSON changes, so new nodes do not
-    // unexpectedly pop open while the user has chosen a fully folded view.
-    useEffect(() => {
-      if (allCollapsed) setCollapsedPaths(new Set(allContainerPaths));
-    }, [allContainerPaths, allCollapsed]);
+  // Re-apply "collapse all" after the live JSON changes, so new nodes do not
+  // unexpectedly pop open while the user has chosen a fully folded view.
+  useEffect(() => {
+    if (allCollapsed) setCollapsedPaths(new Set(allContainerPaths));
+  }, [allContainerPaths, allCollapsed]);
 
-    const togglePath = (key: string) => {
-      setAllCollapsed(false);
-      setCollapsedPaths((prev) => {
-        const next = new Set(prev);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        return next;
-      });
-    };
+  const togglePath = (key: string) => {
+    setAllCollapsed(false);
+    setCollapsedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
-    return (
-      <div className={`font-mono text-xs text-slate-200 ${className}`}>
-        <JsonNode
-          value={value}
-          parts={[]}
-          depth={0}
-          isLast
-          showKey={false}
-          collapsedPaths={collapsedPaths}
-          onToggle={togglePath}
-        />
-      </div>
-    );
-  },
-);
+  return (
+    <div className={`font-mono text-xs text-slate-200 ${className}`}>
+      <JsonNode
+        value={value}
+        parts={[]}
+        depth={0}
+        isLast
+        showKey={false}
+        collapsedPaths={collapsedPaths}
+        onToggle={togglePath}
+      />
+    </div>
+  );
+});
 JsonTreeView.displayName = "JsonTreeView";

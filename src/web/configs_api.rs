@@ -573,8 +573,12 @@ mod tests {
     fn default_template_valid_for_all_platforms() {
         let tpl = default_new_config_template();
         for p in ["linux", "macos", "windows", "android"] {
-            let result = crate::schema_validator::validate_singbox_config_for_platform(&tpl, Some(p));
-            assert!(result.is_ok(), "default template invalid on {p}: {result:?}");
+            let result =
+                crate::schema_validator::validate_singbox_config_for_platform(&tpl, Some(p));
+            assert!(
+                result.is_ok(),
+                "default template invalid on {p}: {result:?}"
+            );
         }
     }
 }

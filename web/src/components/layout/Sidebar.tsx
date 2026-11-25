@@ -305,9 +305,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {runMode !== "local" && (
               <p
                 className={`text-[10px] mt-0.5 ${
-                  runMode === "hybrid"
-                    ? "text-sky-300"
-                    : "text-amber-300"
+                  runMode === "hybrid" ? "text-sky-300" : "text-amber-300"
                 }`}
               >
                 {runMode === "hybrid"

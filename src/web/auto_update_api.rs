@@ -578,10 +578,14 @@ mod tests {
         AppState {
             db_path: db_path.to_string(),
             session_token: Arc::new(RwLock::new(Some("test-token".to_string()))),
-            kernel_download_status: Arc::new(RwLock::new(Default::default())),
+            kernel_download_status: Arc::new(RwLock::new(
+                crate::kernel::KernelDownloadStatus::default(),
+            )),
             kernel_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             service_manager: Arc::new(crate::service::SingBoxServiceManager::new()),
-            auto_update_status: Arc::new(RwLock::new(Default::default())),
+            auto_update_status: Arc::new(RwLock::new(
+                crate::auto_update::AutoUpdateLiveState::default(),
+            )),
             auto_update_tx: tx,
         }
     }
@@ -648,7 +652,7 @@ mod tests {
         );
 
         // The lazy-sync predicate in /sub/:token must now be false.
-        assert_eq!(version_code != current_vcode, false);
+        assert_eq!(version_code, current_vcode);
 
         drop(conn);
         let _ = std::fs::remove_file(&db_path);

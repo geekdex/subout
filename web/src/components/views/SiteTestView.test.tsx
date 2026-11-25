@@ -37,7 +37,9 @@ const successResult = (url: string): SiteProbeResponse => ({
 describe("SiteTestView Component", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.probeSite).mockResolvedValue(successResult("https://example.com"));
+    vi.mocked(api.probeSite).mockResolvedValue(
+      successResult("https://example.com"),
+    );
   });
 
   it("renders preset sites and category tabs", () => {
@@ -59,7 +61,10 @@ describe("SiteTestView Component", () => {
     fireEvent.click(screen.getByLabelText("测试 Google"));
 
     await waitFor(() =>
-      expect(api.probeSite).toHaveBeenCalledWith("https://www.google.com", 4500),
+      expect(api.probeSite).toHaveBeenCalledWith(
+        "https://www.google.com",
+        4500,
+      ),
     );
     const card = screen.getByTestId("site-card-google");
     await waitFor(() => expect(within(card).getByText("88 ms")).toBeDefined());
@@ -74,12 +79,16 @@ describe("SiteTestView Component", () => {
     fireEvent.click(screen.getByLabelText("测试 GitHub"));
 
     const card = screen.getByTestId("site-card-github");
-    await waitFor(() => expect(within(card).getByText("网络不可达")).toBeDefined());
+    await waitFor(() =>
+      expect(within(card).getByText("网络不可达")).toBeDefined(),
+    );
     expect(within(card).getByText("不可达")).toBeDefined();
   });
 
   it("tests a custom URL and renders the result banner", async () => {
-    vi.mocked(api.probeSite).mockResolvedValue(successResult("https://example.com"));
+    vi.mocked(api.probeSite).mockResolvedValue(
+      successResult("https://example.com"),
+    );
     renderWithToast(<SiteTestView />);
 
     fireEvent.change(screen.getByLabelText("自定义检测网址"), {

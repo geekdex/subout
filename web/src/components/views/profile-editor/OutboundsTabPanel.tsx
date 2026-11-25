@@ -7,7 +7,6 @@ import {
   RefreshCw,
   Server,
   Shield,
-  Network,
   Layers,
   ArrowUp,
   ArrowDown,
@@ -24,10 +23,7 @@ import { Select } from "../../ui/Select";
 import { Switch } from "../../ui/Switch";
 import { NodeGroup, NodeItem } from "../../../types/api";
 
-import {
-  SingBoxVisualConfig,
-  OutboundItem,
-} from "./types";
+import { SingBoxVisualConfig, OutboundItem } from "./types";
 import { TagListInput } from "./TagListInput";
 import { CollapsibleToolbar } from "./CollapsibleToolbar";
 
@@ -638,390 +634,136 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
 
       {!quick && (
         <>
-      {/* BOTTOM PANE: Full Visual Display of Imported Strategy Groups & Concrete Proxy Nodes */}
-      {outbounds.length === 0 ? (
-        <div className="p-8 rounded-xl bg-slate-900/60 border border-dashed border-slate-800 text-center space-y-2">
-          <div className="text-xs font-medium text-slate-300">
-            当前出站列表为空 (<code className="text-sky-300">[]</code>)
-          </div>
-          <p className="text-[11px] text-slate-500 max-w-xl mx-auto">
-            请打开上方「
-            <span className="text-sky-300">开启导入节点与节点组合</span>
-            」开关，系统将直接把节点组合与节点导入到此处并完整展示出来供查看与调整。
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {/* SECTION A: Strategy Groups & Basic Outbounds (selector / urltest / direct) */}
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Shield className="w-3.5 h-3.5 text-sky-400" />
-                <span className="text-xs font-bold text-slate-200">
-                  已导入节点组合 / 策略组与基础出站 (selector / urltest /
-                  direct)
-                </span>
-                <Badge variant="info" size="sm">
-                  {strategyAndBasicOutbounds.length} 项
-                </Badge>
+          {/* BOTTOM PANE: Full Visual Display of Imported Strategy Groups & Concrete Proxy Nodes */}
+          {outbounds.length === 0 ? (
+            <div className="p-8 rounded-xl bg-slate-900/60 border border-dashed border-slate-800 text-center space-y-2">
+              <div className="text-xs font-medium text-slate-300">
+                当前出站列表为空 (<code className="text-sky-300">[]</code>)
               </div>
-              <button
-                type="button"
-                onClick={() => updateOutbounds([])}
-                className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
-              >
-                清空全部出站 ({outbounds.length})
-              </button>
+              <p className="text-[11px] text-slate-500 max-w-xl mx-auto">
+                请打开上方「
+                <span className="text-sky-300">开启导入节点与节点组合</span>
+                」开关，系统将直接把节点组合与节点导入到此处并完整展示出来供查看与调整。
+              </p>
             </div>
-
-            {strategyAndBasicOutbounds.length === 0 ? (
-              <div className="p-4 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
-                暂无策略组或直连出站，可在上方打开「导入全部节点组合」开关或手动添加。
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {strategyAndBasicOutbounds.map(({ item, idx }) => {
-                  const isSelector = item.type === "selector";
-                  const isUrltest = item.type === "urltest";
-                  const memberCount = Array.isArray(item.outbounds)
-                    ? item.outbounds.length
-                    : 0;
-
-                  return (
-                    <div
-                      key={`outbound-custom-${idx}`}
-                      className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-3"
-                    >
-                      <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] font-mono text-sky-300">
-                            #{idx + 1}
-                          </span>
-                          <Badge
-                            variant={
-                              item.type === "direct" ? "success" : "info"
-                            }
-                            size="sm"
-                          >
-                            {item.type.toUpperCase()}
-                          </Badge>
-                          <span className="text-xs font-mono font-bold text-slate-100">
-                            {item.tag || `outbound-${idx + 1}`}
-                          </span>
-                          {(isSelector || isUrltest) && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] bg-sky-500/10 text-sky-300 border border-sky-500/20">
-                              包含 {memberCount} 个成员节点
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            disabled={idx === 0}
-                            onClick={() => moveOutboundTo(idx, 0)}
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="置顶"
-                          >
-                            <ChevronsUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === 0}
-                            onClick={() => moveOutboundTo(idx, idx - 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="上移"
-                          >
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === outbounds.length - 1}
-                            onClick={() => moveOutboundTo(idx, idx + 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="下移"
-                          >
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === outbounds.length - 1}
-                            onClick={() =>
-                              moveOutboundTo(idx, outbounds.length - 1)
-                            }
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="置底"
-                          >
-                            <ChevronsDown className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeOutboundAt(idx)}
-                            className="p-1.5 rounded text-rose-400 hover:text-rose-300"
-                            title="移除此出站"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <Input
-                          label="出站标签 (tag)"
-                          value={item.tag || ""}
-                          onChange={(e) =>
-                            updateOutboundAt(idx, {
-                              ...item,
-                              tag: e.target.value,
-                            })
-                          }
-                          placeholder="如: proxy, AUTO-Test, direct"
-                        />
-
-                        <Select
-                          label="出站类型 (type)"
-                          value={item.type}
-                          onChange={(val) =>
-                            updateOutboundAt(idx, { ...item, type: val })
-                          }
-                          options={[
-                            {
-                              value: "selector",
-                              label: "手动选择策略组 (selector)",
-                            },
-                            {
-                              value: "urltest",
-                              label: "自动测速策略组 (urltest)",
-                            },
-                            { value: "direct", label: "直连出站 (direct)" },
-                          ]}
-                        />
-
-                        {isSelector && (
-                          <Select
-                            label="默认选中出站 (default)"
-                            value={item.default || ""}
-                            onChange={(val) =>
-                              updateOutboundAt(idx, {
-                                ...item,
-                                default: val || undefined,
-                              })
-                            }
-                            options={[
-                              { value: "", label: "默认列表首项" },
-                              ...(item.outbounds || []).map((t) => ({
-                                value: t,
-                                label: t,
-                              })),
-                            ]}
-                          />
-                        )}
-
-                        {isUrltest && (
-                          <div className="grid grid-cols-2 gap-2">
-                            <Input
-                              label="测速周期 (interval)"
-                              value={item.interval || ""}
-                              onChange={(e) =>
-                                updateOutboundAt(idx, {
-                                  ...item,
-                                  interval: e.target.value || undefined,
-                                })
-                              }
-                              placeholder="3m"
-                            />
-                            <Input
-                              label="容差 ms (tolerance)"
-                              type="number"
-                              value={
-                                item.tolerance !== undefined
-                                  ? String(item.tolerance)
-                                  : ""
-                              }
-                              onChange={(e) =>
-                                updateOutboundAt(idx, {
-                                  ...item,
-                                  tolerance: e.target.value
-                                    ? Number(e.target.value)
-                                    : undefined,
-                                })
-                              }
-                              placeholder="50"
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      {(isSelector || isUrltest) && (
-                        <TagListInput
-                          label="包含的子出站/节点标签列表 (outbounds)"
-                          values={item.outbounds || []}
-                          onChange={(v) =>
-                            updateOutboundAt(idx, { ...item, outbounds: v })
-                          }
-                          placeholder="输入或点选下方节点标签..."
-                          suggestions={allCandidateTags
-                            .filter((t) => t !== item.tag)
-                            .slice(0, 24)
-                            .map((t) => ({ value: t, label: t }))}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* SECTION B: Concrete Proxy Nodes Display List ("直接导入节点和节点组合，但是要显示出来看") */}
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Server className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-xs font-bold text-slate-200">
-                  已导入代理节点明细列表 (Nodes in outbounds)
-                </span>
-                <Badge variant="success" size="sm">
-                  {concreteNodeOutbounds.length} 个节点
-                </Badge>
-              </div>
-
-              {concreteNodeOutbounds.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={nodeFilterQuery}
-                      onChange={(e) => setNodeFilterQuery(e.target.value)}
-                      placeholder="筛选已导入节点名称/协议/地址..."
-                      className="pl-8 pr-3 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
-                    />
+          ) : (
+            <div className="space-y-4">
+              {/* SECTION A: Strategy Groups & Basic Outbounds (selector / urltest / direct) */}
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-3.5 h-3.5 text-sky-400" />
+                    <span className="text-xs font-bold text-slate-200">
+                      已导入节点组合 / 策略组与基础出站 (selector / urltest /
+                      direct)
+                    </span>
+                    <Badge variant="info" size="sm">
+                      {strategyAndBasicOutbounds.length} 项
+                    </Badge>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => updateOutbounds([])}
+                    className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
+                  >
+                    清空全部出站 ({outbounds.length})
+                  </button>
                 </div>
-              )}
-            </div>
 
-            {concreteNodeOutbounds.length === 0 ? (
-              <div className="p-5 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
-                当前未导入任何具体代理节点。打开上方「导入全部可用节点」或「开启导入节点与节点组合」开关后，所有节点将在此处完整展示。
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
-                {filteredConcreteNodeOutbounds.map(({ item, idx }) => {
-                  const key = `${item.tag || idx}-${idx}`;
-                  const isExpanded = Boolean(expandedNodeMap[key]);
-                  const extraBadges = summarizeNodeSecurityAndTransport(item);
+                {strategyAndBasicOutbounds.length === 0 ? (
+                  <div className="p-4 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
+                    暂无策略组或直连出站，可在上方打开「导入全部节点组合」开关或手动添加。
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {strategyAndBasicOutbounds.map(({ item, idx }) => {
+                      const isSelector = item.type === "selector";
+                      const isUrltest = item.type === "urltest";
+                      const memberCount = Array.isArray(item.outbounds)
+                        ? item.outbounds.length
+                        : 0;
 
-                  return (
-                    <div
-                      key={key}
-                      className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/90 hover:border-slate-700 transition-colors space-y-2.5"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-2 min-w-0">
-                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] font-mono text-sky-300">
-                            #{idx + 1}
-                          </span>
-                          <Badge variant="success" size="sm">
-                            {(item.type || "proxy").toUpperCase()}
-                          </Badge>
-                          <span className="text-xs font-mono font-bold text-slate-100 truncate">
-                            {item.tag || `node-${idx + 1}`}
-                          </span>
-                          {item.server && (
-                            <span className="px-2 py-0.5 rounded bg-slate-900 text-[11px] font-mono text-slate-300 border border-slate-800">
-                              {item.server}
-                              {item.server_port ? `:${item.server_port}` : ""}
-                            </span>
-                          )}
-                          {extraBadges.map((b, bIdx) => (
-                            <span
-                              key={bIdx}
-                              className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
-                            >
-                              {b}
-                            </span>
-                          ))}
-                        </div>
+                      return (
+                        <div
+                          key={`outbound-custom-${idx}`}
+                          className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-3"
+                        >
+                          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] font-mono text-sky-300">
+                                #{idx + 1}
+                              </span>
+                              <Badge
+                                variant={
+                                  item.type === "direct" ? "success" : "info"
+                                }
+                                size="sm"
+                              >
+                                {item.type.toUpperCase()}
+                              </Badge>
+                              <span className="text-xs font-mono font-bold text-slate-100">
+                                {item.tag || `outbound-${idx + 1}`}
+                              </span>
+                              {(isSelector || isUrltest) && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                                  包含 {memberCount} 个成员节点
+                                </span>
+                              )}
+                            </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedNodeMap((prev) => ({
-                                ...prev,
-                                [key]: !prev[key],
-                              }))
-                            }
-                            className="px-2 py-1 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1"
-                          >
-                            {isExpanded ? (
-                              <>
-                                <ChevronDown className="w-3 h-3" />
-                                <span>收起详情</span>
-                              </>
-                            ) : (
-                              <>
-                                <ChevronRight className="w-3 h-3" />
-                                <span>查看/编辑节点</span>
-                              </>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === 0}
-                            onClick={() => moveOutboundTo(idx, 0)}
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="置顶"
-                          >
-                            <ChevronsUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === 0}
-                            onClick={() => moveOutboundTo(idx, idx - 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="上移"
-                          >
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === outbounds.length - 1}
-                            onClick={() => moveOutboundTo(idx, idx + 1)}
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="下移"
-                          >
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={idx === outbounds.length - 1}
-                            onClick={() =>
-                              moveOutboundTo(idx, outbounds.length - 1)
-                            }
-                            className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                            title="置底"
-                          >
-                            <ChevronsDown className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeOutboundAt(idx)}
-                            className="p-1.5 rounded text-rose-400 hover:text-rose-300"
-                            title="移除此节点"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => moveOutboundTo(idx, 0)}
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="置顶"
+                              >
+                                <ChevronsUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => moveOutboundTo(idx, idx - 1)}
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="上移"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === outbounds.length - 1}
+                                onClick={() => moveOutboundTo(idx, idx + 1)}
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="下移"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === outbounds.length - 1}
+                                onClick={() =>
+                                  moveOutboundTo(idx, outbounds.length - 1)
+                                }
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="置底"
+                              >
+                                <ChevronsDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeOutboundAt(idx)}
+                                className="p-1.5 rounded text-rose-400 hover:text-rose-300"
+                                title="移除此出站"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
 
-                      {isExpanded && (
-                        <div className="pt-2 border-t border-slate-800/80 space-y-3">
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <Input
-                              label="节点标签 (tag)"
+                              label="出站标签 (tag)"
                               value={item.tag || ""}
                               onChange={(e) =>
                                 updateOutboundAt(idx, {
@@ -1029,54 +771,311 @@ export const OutboundsTabPanel: React.FC<OutboundsTabPanelProps> = ({
                                   tag: e.target.value,
                                 })
                               }
+                              placeholder="如: proxy, AUTO-Test, direct"
                             />
-                            <Input
-                              label="服务器地址 (server)"
-                              value={item.server || ""}
-                              onChange={(e) =>
-                                updateOutboundAt(idx, {
-                                  ...item,
-                                  server: e.target.value,
-                                })
+
+                            <Select
+                              label="出站类型 (type)"
+                              value={item.type}
+                              onChange={(val) =>
+                                updateOutboundAt(idx, { ...item, type: val })
                               }
+                              options={[
+                                {
+                                  value: "selector",
+                                  label: "手动选择策略组 (selector)",
+                                },
+                                {
+                                  value: "urltest",
+                                  label: "自动测速策略组 (urltest)",
+                                },
+                                { value: "direct", label: "直连出站 (direct)" },
+                              ]}
                             />
-                            <Input
-                              label="服务器端口 (server_port)"
-                              type="number"
-                              value={
-                                item.server_port !== undefined
-                                  ? String(item.server_port)
-                                  : ""
-                              }
-                              onChange={(e) =>
-                                updateOutboundAt(idx, {
-                                  ...item,
-                                  server_port: e.target.value
-                                    ? Number(e.target.value)
-                                    : undefined,
-                                })
-                              }
-                            />
+
+                            {isSelector && (
+                              <Select
+                                label="默认选中出站 (default)"
+                                value={item.default || ""}
+                                onChange={(val) =>
+                                  updateOutboundAt(idx, {
+                                    ...item,
+                                    default: val || undefined,
+                                  })
+                                }
+                                options={[
+                                  { value: "", label: "默认列表首项" },
+                                  ...(item.outbounds || []).map((t) => ({
+                                    value: t,
+                                    label: t,
+                                  })),
+                                ]}
+                              />
+                            )}
+
+                            {isUrltest && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <Input
+                                  label="测速周期 (interval)"
+                                  value={item.interval || ""}
+                                  onChange={(e) =>
+                                    updateOutboundAt(idx, {
+                                      ...item,
+                                      interval: e.target.value || undefined,
+                                    })
+                                  }
+                                  placeholder="3m"
+                                />
+                                <Input
+                                  label="容差 ms (tolerance)"
+                                  type="number"
+                                  value={
+                                    item.tolerance !== undefined
+                                      ? String(item.tolerance)
+                                      : ""
+                                  }
+                                  onChange={(e) =>
+                                    updateOutboundAt(idx, {
+                                      ...item,
+                                      tolerance: e.target.value
+                                        ? Number(e.target.value)
+                                        : undefined,
+                                    })
+                                  }
+                                  placeholder="50"
+                                />
+                              </div>
+                            )}
                           </div>
 
-                          <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-                            <div className="text-[10px] font-semibold text-slate-400 mb-1">
-                              节点完整配置结构 (只读预览):
-                            </div>
-                            <pre className="text-[11px] font-mono text-slate-300 whitespace-pre-wrap break-all select-text">
-                              {JSON.stringify(item, null, 2)}
-                            </pre>
-                          </div>
+                          {(isSelector || isUrltest) && (
+                            <TagListInput
+                              label="包含的子出站/节点标签列表 (outbounds)"
+                              values={item.outbounds || []}
+                              onChange={(v) =>
+                                updateOutboundAt(idx, { ...item, outbounds: v })
+                              }
+                              placeholder="输入或点选下方节点标签..."
+                              suggestions={allCandidateTags
+                                .filter((t) => t !== item.tag)
+                                .slice(0, 24)
+                                .map((t) => ({ value: t, label: t }))}
+                            />
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      )}
+
+              {/* SECTION B: Concrete Proxy Nodes Display List ("直接导入节点和节点组合，但是要显示出来看") */}
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Server className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-xs font-bold text-slate-200">
+                      已导入代理节点明细列表 (Nodes in outbounds)
+                    </span>
+                    <Badge variant="success" size="sm">
+                      {concreteNodeOutbounds.length} 个节点
+                    </Badge>
+                  </div>
+
+                  {concreteNodeOutbounds.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={nodeFilterQuery}
+                          onChange={(e) => setNodeFilterQuery(e.target.value)}
+                          placeholder="筛选已导入节点名称/协议/地址..."
+                          className="pl-8 pr-3 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {concreteNodeOutbounds.length === 0 ? (
+                  <div className="p-5 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
+                    当前未导入任何具体代理节点。打开上方「导入全部可用节点」或「开启导入节点与节点组合」开关后，所有节点将在此处完整展示。
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+                    {filteredConcreteNodeOutbounds.map(({ item, idx }) => {
+                      const key = `${item.tag || idx}-${idx}`;
+                      const isExpanded = Boolean(expandedNodeMap[key]);
+                      const extraBadges =
+                        summarizeNodeSecurityAndTransport(item);
+
+                      return (
+                        <div
+                          key={key}
+                          className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/90 hover:border-slate-700 transition-colors space-y-2.5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] font-mono text-sky-300">
+                                #{idx + 1}
+                              </span>
+                              <Badge variant="success" size="sm">
+                                {(item.type || "proxy").toUpperCase()}
+                              </Badge>
+                              <span className="text-xs font-mono font-bold text-slate-100 truncate">
+                                {item.tag || `node-${idx + 1}`}
+                              </span>
+                              {item.server && (
+                                <span className="px-2 py-0.5 rounded bg-slate-900 text-[11px] font-mono text-slate-300 border border-slate-800">
+                                  {item.server}
+                                  {item.server_port
+                                    ? `:${item.server_port}`
+                                    : ""}
+                                </span>
+                              )}
+                              {extraBadges.map((b, bIdx) => (
+                                <span
+                                  key={bIdx}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
+                                >
+                                  {b}
+                                </span>
+                              ))}
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedNodeMap((prev) => ({
+                                    ...prev,
+                                    [key]: !prev[key],
+                                  }))
+                                }
+                                className="px-2 py-1 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1"
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    <ChevronDown className="w-3 h-3" />
+                                    <span>收起详情</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronRight className="w-3 h-3" />
+                                    <span>查看/编辑节点</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => moveOutboundTo(idx, 0)}
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="置顶"
+                              >
+                                <ChevronsUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => moveOutboundTo(idx, idx - 1)}
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="上移"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === outbounds.length - 1}
+                                onClick={() => moveOutboundTo(idx, idx + 1)}
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="下移"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === outbounds.length - 1}
+                                onClick={() =>
+                                  moveOutboundTo(idx, outbounds.length - 1)
+                                }
+                                className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                                title="置底"
+                              >
+                                <ChevronsDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeOutboundAt(idx)}
+                                className="p-1.5 rounded text-rose-400 hover:text-rose-300"
+                                title="移除此节点"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="pt-2 border-t border-slate-800/80 space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <Input
+                                  label="节点标签 (tag)"
+                                  value={item.tag || ""}
+                                  onChange={(e) =>
+                                    updateOutboundAt(idx, {
+                                      ...item,
+                                      tag: e.target.value,
+                                    })
+                                  }
+                                />
+                                <Input
+                                  label="服务器地址 (server)"
+                                  value={item.server || ""}
+                                  onChange={(e) =>
+                                    updateOutboundAt(idx, {
+                                      ...item,
+                                      server: e.target.value,
+                                    })
+                                  }
+                                />
+                                <Input
+                                  label="服务器端口 (server_port)"
+                                  type="number"
+                                  value={
+                                    item.server_port !== undefined
+                                      ? String(item.server_port)
+                                      : ""
+                                  }
+                                  onChange={(e) =>
+                                    updateOutboundAt(idx, {
+                                      ...item,
+                                      server_port: e.target.value
+                                        ? Number(e.target.value)
+                                        : undefined,
+                                    })
+                                  }
+                                />
+                              </div>
+
+                              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                                <div className="text-[10px] font-semibold text-slate-400 mb-1">
+                                  节点完整配置结构 (只读预览):
+                                </div>
+                                <pre className="text-[11px] font-mono text-slate-300 whitespace-pre-wrap break-all select-text">
+                                  {JSON.stringify(item, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

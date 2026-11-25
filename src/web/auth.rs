@@ -17,7 +17,7 @@ pub fn is_default_admin_hash(stored_hash: Option<&str>) -> bool {
 }
 
 /// Reset the panel password from the host machine (CLI `reset-password`).
-/// Refuses to run when the password is pinned by ADMIN_PASSWORD, since that
+/// Refuses to run when the password is pinned by `ADMIN_PASSWORD`, since that
 /// environment variable always wins over the database value at login time.
 pub fn reset_admin_password(db_path: &str, new_password: &str) -> anyhow::Result<()> {
     let new_password = new_password.trim();
@@ -25,7 +25,9 @@ pub fn reset_admin_password(db_path: &str, new_password: &str) -> anyhow::Result
         anyhow::bail!("新密码不能为空");
     }
     if std::env::var("ADMIN_PASSWORD").is_ok() {
-        anyhow::bail!("管理员密码由环境变量 ADMIN_PASSWORD 设置，CLI 重置无效；请修改环境变量后重启服务");
+        anyhow::bail!(
+            "管理员密码由环境变量 ADMIN_PASSWORD 设置，CLI 重置无效；请修改环境变量后重启服务"
+        );
     }
     let conn = db::init_db(db_path)?;
     db::update_setting(&conn, "password_hash", &db::hash_password(new_password))?;
@@ -145,10 +147,14 @@ pub async fn change_password(
         ));
     }
 
-    let conn = get_db_conn(&state.db_path)
-        .map_err(|s| (s, "数据库连接失败".to_string()))?;
+    let conn = get_db_conn(&state.db_path).map_err(|s| (s, "数据库连接失败".to_string()))?;
     let stored_hash = db::get_setting(&conn, "password_hash")
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "读取密码哈希失败".to_string()))?
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "读取密码哈希失败".to_string(),
+            )
+        })?
         .ok_or((
             StatusCode::INTERNAL_SERVER_ERROR,
             "未找到密码哈希，请重新初始化系统".to_string(),
@@ -165,8 +171,12 @@ pub async fn change_password(
     }
 
     let new_hash = db::hash_password(&new_pw);
-    db::update_setting(&conn, "password_hash", &new_hash)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "保存新密码失败".to_string()))?;
+    db::update_setting(&conn, "password_hash", &new_hash).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "保存新密码失败".to_string(),
+        )
+    })?;
 
     Ok(Json(serde_json::json!({
         "status": "success",
@@ -213,10 +223,14 @@ mod tests {
         AppState {
             db_path: db_path.to_string(),
             session_token: Arc::new(RwLock::new(None)),
-            kernel_download_status: Arc::new(RwLock::new(Default::default())),
+            kernel_download_status: Arc::new(RwLock::new(
+                crate::kernel::KernelDownloadStatus::default(),
+            )),
             kernel_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             service_manager: Arc::new(crate::service::SingBoxServiceManager::new()),
-            auto_update_status: Arc::new(RwLock::new(Default::default())),
+            auto_update_status: Arc::new(RwLock::new(
+                crate::auto_update::AutoUpdateLiveState::default(),
+            )),
             auto_update_tx: tx,
         }
     }
@@ -332,5 +346,4 @@ mod tests {
 
         let _ = std::fs::remove_file(&db_path);
     }
-
 }

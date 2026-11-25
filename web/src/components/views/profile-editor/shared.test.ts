@@ -26,7 +26,9 @@ describe("isPlaintextIpForEncryptedDns", () => {
   });
 
   it("handles an optional :port suffix", () => {
-    expect(isPlaintextIpForEncryptedDns("https", "119.29.29.29:443")).toBe(true);
+    expect(isPlaintextIpForEncryptedDns("https", "119.29.29.29:443")).toBe(
+      true,
+    );
   });
 
   it("does not flag valid DoH IPs with encrypted types", () => {

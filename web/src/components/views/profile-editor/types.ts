@@ -1191,7 +1191,10 @@ export function validateExplicitPlatformConstraints(
       const hasIncludeInterface =
         Array.isArray(inb.include_interface) &&
         inb.include_interface.length > 0;
-      if (platform !== "linux" && (hasExcludeInterface || hasIncludeInterface)) {
+      if (
+        platform !== "linux" &&
+        (hasExcludeInterface || hasIncludeInterface)
+      ) {
         const fieldNames = [
           hasExcludeInterface ? "exclude_interface" : null,
           hasIncludeInterface ? "include_interface" : null,

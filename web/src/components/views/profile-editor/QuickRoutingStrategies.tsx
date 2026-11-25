@@ -166,13 +166,15 @@ export const QuickRoutingStrategies: React.FC<QuickRoutingStrategiesProps> = ({
           路由策略预设（快速视图）
         </h4>
         <p className="text-[11px] text-slate-400 mt-1">
-          点击即写入显式的 route 规则与规则集，不会添加任何隐藏字段。详细规则可在专家视图中继续调整。
+          点击即写入显式的 route
+          规则与规则集，不会添加任何隐藏字段。详细规则可在专家视图中继续调整。
         </p>
       </div>
 
       {existingRuleCount > 0 && (
         <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-200 leading-relaxed">
-          当前已有 {existingRuleCount} 条分流规则：「智能分流」「GFW 列表代理」会保留并追加；
+          当前已有 {existingRuleCount} 条分流规则：「智能分流」「GFW
+          列表代理」会保留并追加；
           「全部代理」「全部直连」会清空现有规则。需要保留原规则请先切换到专家模式手动调整。
         </div>
       )}
@@ -182,7 +184,9 @@ export const QuickRoutingStrategies: React.FC<QuickRoutingStrategiesProps> = ({
           <button
             key={s.id}
             type="button"
-            onClick={() => onChange(applyRoutingStrategy(config, s.id, proxyTag))}
+            onClick={() =>
+              onChange(applyRoutingStrategy(config, s.id, proxyTag))
+            }
             className="text-left p-3 rounded-lg bg-slate-950/60 border border-slate-800 hover:border-sky-500/60 hover:bg-sky-500/5 transition-colors"
           >
             <span className="flex items-center gap-2 text-xs font-semibold text-slate-100">
@@ -190,7 +194,8 @@ export const QuickRoutingStrategies: React.FC<QuickRoutingStrategiesProps> = ({
               {s.title}
             </span>
             <span className="block text-[11px] text-slate-400 mt-1">
-              {s.desc}（{REPLACES_RULES[s.id] ? "清空现有规则" : "保留现有规则"}）
+              {s.desc}（{REPLACES_RULES[s.id] ? "清空现有规则" : "保留现有规则"}
+              ）
             </span>
           </button>
         ))}

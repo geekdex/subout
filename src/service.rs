@@ -581,7 +581,8 @@ impl SingBoxServiceManager {
                 result.has_conflict = true;
                 result.conflict_type = Some(first_type.to_string());
                 result.conflict_name = Some("外部程序占用 sing-box 所需资源".to_string());
-                result.message = "检测到系统中的其他程序占用了 sing-box 运行所需的网络资源。".to_string();
+                result.message =
+                    "检测到系统中的其他程序占用了 sing-box 运行所需的网络资源。".to_string();
                 result.details = summary;
                 result.pids = resource_conflicts
                     .iter()
@@ -592,7 +593,8 @@ impl SingBoxServiceManager {
                 result.suggestion = Some(
                     "Subout 不会自动修改配置或关闭这些程序。请按占用者信息自行关闭相关程序，或在配置中改用其他端口/网卡。".to_string(),
                 );
-                result.suggestion_command = Some(resource_conflict_hint_command(&resource_conflicts));
+                result.suggestion_command =
+                    Some(resource_conflict_hint_command(&resource_conflicts));
                 result.resource_conflicts = resource_conflicts;
             }
         }
@@ -1680,7 +1682,8 @@ impl SingBoxServiceManager {
         platform.disable_system_proxy(cached_pass.as_deref());
         platform.cleanup_tun_network(cached_pass.as_deref());
         *self.system_proxy_active.write().await = false;
-        self.append_log("🌐 已恢复系统原始网络代理与 TUN 路由设置").await;
+        self.append_log("🌐 已恢复系统原始网络代理与 TUN 路由设置")
+            .await;
 
         if had_child {
             self.append_log("⏹️ sing-box 服务已停止").await;
@@ -2080,16 +2083,11 @@ pub fn format_resource_conflicts_summary(
             c.evidence
         ));
     }
-    format!(
-        "检测到以下网络资源被其他程序占用：\n{}",
-        lines.join("\n")
-    )
+    format!("检测到以下网络资源被其他程序占用：\n{}", lines.join("\n"))
 }
 
 /// 生成一键复制的排障命令（汇总去重）。命令按当前平台给出，避免把 Linux 命令显示给 Windows/macOS 用户。
-pub fn resource_conflict_hint_command(
-    conflicts: &[crate::platform::ResourceHolderInfo],
-) -> String {
+pub fn resource_conflict_hint_command(conflicts: &[crate::platform::ResourceHolderInfo]) -> String {
     use std::collections::BTreeSet;
     // 排障命令随平台而异：统一通过平台策略生成，避免硬编码 ss/ip 命令
     let mut cmds = BTreeSet::new();
@@ -2323,8 +2321,14 @@ mod tests {
             },
         ];
         let summary = format_resource_conflicts_summary(&conflicts);
-        assert!(summary.contains("NodeBabyLinkService"), "应点名真实占用进程: {summary}");
-        assert!(summary.contains("127.0.0.1:2080"), "应含资源标识: {summary}");
+        assert!(
+            summary.contains("NodeBabyLinkService"),
+            "应点名真实占用进程: {summary}"
+        );
+        assert!(
+            summary.contains("127.0.0.1:2080"),
+            "应含资源标识: {summary}"
+        );
         assert!(summary.contains("PID 1234"), "应含 PID: {summary}");
         assert_eq!(
             resource_conflict_type_label(&ResourceConflictKind::Port),
@@ -2784,6 +2788,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_tailer_captures_logs_and_ready_signal() {
+        use std::io::Write as _;
+
         let unique_id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2796,7 +2802,6 @@ mod tests {
         // Position the file exactly as production does, then append the fresh
         // lines before tailing. No sleep/scheduling dependency in the test.
         let file = open_log_file_for_tailing(&log_file).await.unwrap();
-        use std::io::Write as _;
         std::fs::OpenOptions::new()
             .append(true)
             .open(&log_file)

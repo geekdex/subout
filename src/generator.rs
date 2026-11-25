@@ -272,7 +272,6 @@ fn normalize_dns_rule(rule: &mut Value) {
                 normalize_dns_rule(child);
             }
         }
-        return;
     }
 }
 
@@ -474,7 +473,6 @@ pub fn sanitize_runtime_config(config: &mut Value) {
     {
         cache_file.insert("store_dns".to_string(), json!(true));
     }
-
 }
 
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]

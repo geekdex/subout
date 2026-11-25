@@ -238,8 +238,8 @@ impl PlatformStrategy for LinuxPlatform {
                                 evidence: format!("/proc/net/tcp inode:{inode}"),
                             });
                         }
-                        // 端口由 Subout 自己/受管进程持有——预期行为，不是冲突，跳过。
-                        Some(SocketHolder::Managed { .. }) => {}
+                        // 端口由 Subout 自己/受管进程持有，或已无监听者——预期行为，不是冲突，跳过。
+                        Some(SocketHolder::Managed { .. }) | None => {}
                         // 确有监听 socket，但无法反查持有者（权限/竞态）——给出自查命令。
                         Some(SocketHolder::Unknown { .. }) => {
                             results.push(ResourceHolderInfo {
@@ -251,7 +251,6 @@ impl PlatformStrategy for LinuxPlatform {
                                 evidence: format!("ss -tlnp | grep ':{port}'"),
                             });
                         }
-                        None => {}
                     }
                 }
 
@@ -307,20 +306,17 @@ impl PlatformStrategy for LinuxPlatform {
                 Some(SocketHolder::External { pid, .. }) => {
                     let (name, cmdline) = read_proc_identity(pid);
                     let who = name.unwrap_or_else(|| "未知进程".to_string());
-                    return Some(match cmdline {
+                    Some(match cmdline {
                         Some(c) => format!("占用者：{who} (PID {pid})，命令：{c}。"),
                         None => format!("占用者：{who} (PID {pid})。"),
-                    });
+                    })
                 }
-                // 自己占用的端口无需描述为"占用者"
-                Some(SocketHolder::Managed { .. }) => return None,
+                // 自己占用的端口或无监听者无需描述为"占用者"
+                Some(SocketHolder::Managed { .. }) | None => None,
                 // 有 LISTEN socket 但反查不到持有者
-                Some(SocketHolder::Unknown { .. }) => {
-                    return Some(format!(
-                        "端口存在监听进程但无法读取其身份，可用 `sudo ss -tlnp | grep ':{port}'` 查看；"
-                    ));
-                }
-                None => return None,
+                Some(SocketHolder::Unknown { .. }) => Some(format!(
+                    "端口存在监听进程但无法读取其身份，可用 `sudo ss -tlnp | grep ':{port}'` 查看；"
+                )),
             }
         }
         #[cfg(not(unix))]
@@ -1284,7 +1280,7 @@ pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
     //    安全：删除前判断网卡是否由外部程序（如组网工具）持有，避免误删别人的网卡。
     let configured_tun = resolved_tun_interface_name();
     let mut candidates = vec![configured_tun.as_str(), "subout-tun", "tun0"];
-    candidates.sort();
+    candidates.sort_unstable();
     candidates.dedup();
     for iface in candidates {
         if let Some(link_out) = get_linux_cmd_output("ip", &["link", "show", iface])
@@ -1309,11 +1305,11 @@ pub fn clean_linux_tun_network(sudo_pass: Option<&str>) {
 // ---------------------------------------------------------------------------
 
 /// 从 /proc/net/tcp 或 /proc/net/tcp6 文本中解析出处于 LISTEN(state=0A)、
-/// 端口等于 target_port 的 socket inode 集合。
+/// 端口等于 `target_port` 的 socket inode 集合。
 ///
 /// 行格式（空白分隔）：
-///   sl local_address rem_address st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode ...
-/// local_address 形如 "0100007F:0820"（小端 IP:十六进制端口）。
+///   sl `local_address` `rem_address` st `tx_queue:rx_queue` tr:tm->when retrnsmt uid timeout inode ...
+/// `local_address` 形如 "0100007F:0820"（小端 IP:十六进制端口）。
 pub fn parse_listen_inodes(proc_net_tcp: &str, target_port: u16) -> Vec<u64> {
     let mut inodes = Vec::new();
     let port_hex = format!("{target_port:04X}");
@@ -1352,14 +1348,14 @@ pub enum SocketHolder {
 }
 
 /// 从一组 "socket:[inode]" 形式的 fd 链接文本中判定端口监听 socket 的持有者。
-/// 传入的 fd_entries 为 (pid, readlink 结果) 列表；本函数只做纯解析，便于单测。
+/// 传入的 `fd_entries` 为 (pid, readlink 结果) 列表；本函数只做纯解析，便于单测。
 ///
 /// 判定优先级：外部持有者 > 受管进程持有者 > 无法反查。
 /// 即使同一端口有多个 LISTEN socket，只要有一个属于外部进程就应报冲突。
-pub fn find_pid_by_socket_inode(
+pub fn find_pid_by_socket_inode<S: std::hash::BuildHasher>(
     fd_entries: &[(u32, String)],
     inodes: &[u64],
-    excluded_pids: &HashSet<u32>,
+    excluded_pids: &HashSet<u32, S>,
 ) -> Option<SocketHolder> {
     let mut managed_inode = None;
     for (pid, link) in fd_entries {
@@ -1476,6 +1472,7 @@ fn read_proc_identity(pid: u32) -> (Option<String>, Option<String>) {
 /// 判据来自 `ip -d link show dev <iface>` 的文本：
 /// - 网卡不存在 → 无需删除（返回 false 也无害，调用方先确认存在）。
 /// - 文本中出现非 subout 的 owner 标记（如 zerotier/tailscale/NodeBaby 等关键字）→ 视为外部持有。
+///
 /// 这是 best-effort 的启发式：拿不到命令输出时按"安全名"处理，避免影响既有清理逻辑。
 pub fn is_tun_interface_safe_to_delete(iface: &str) -> bool {
     // subout 专属名：始终可安全删除
@@ -1496,7 +1493,15 @@ pub fn is_tun_safe_from_link_info(iface: &str, link_info: &str) -> bool {
         return true;
     }
     let lower = link_info.to_lowercase();
-    for marker in ["zerotier", "tailscale", "nodebaby", "wireguard", "wg0", "zt0", "tinc"] {
+    for marker in [
+        "zerotier",
+        "tailscale",
+        "nodebaby",
+        "wireguard",
+        "wg0",
+        "zt0",
+        "tinc",
+    ] {
         if lower.contains(marker) {
             return false;
         }
@@ -1506,12 +1511,11 @@ pub fn is_tun_safe_from_link_info(iface: &str, link_info: &str) -> bool {
 
 /// 解析 running config，得到 subout 实际使用的 tun 网卡名（配置未指定则用平台默认）。
 fn resolved_tun_interface_name() -> String {
-    let config: Value = std::fs::read_to_string(
-        crate::service::SingBoxServiceManager::get_running_config_path(),
-    )
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(Value::Null);
+    let config: Value =
+        std::fs::read_to_string(crate::service::SingBoxServiceManager::get_running_config_path())
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(Value::Null);
     if let Some(inbounds) = config.get("inbounds").and_then(|i| i.as_array()) {
         for inbound in inbounds {
             if inbound.get("type").and_then(|t| t.as_str()) == Some("tun")
@@ -1621,7 +1625,7 @@ mod tests {
     #[test]
     fn test_is_tun_safe_from_link_info() {
         // subout 专属名：任何情况下都安全
-        assert!(super::is_tun_safe_from_link_info("subout-tun", "") );
+        assert!(super::is_tun_safe_from_link_info("subout-tun", ""));
         // 干净的 tun0（无外部工具关键字）：安全可删
         let clean = "3: tun0: <POINTOPOINT,MULTICAST,NOARP,UP> mtu 1500\n    link/none";
         assert!(super::is_tun_safe_from_link_info("tun0", clean));
@@ -1633,6 +1637,9 @@ mod tests {
         let tailscale = "6: tailscale0: <POINTOPOINT,UP>\n    tailscale";
         assert!(!super::is_tun_safe_from_link_info("tailscale0", tailscale));
         // 大小写不敏感
-        assert!(!super::is_tun_safe_from_link_info("tun0", "Owner: ZEROTIER One"));
+        assert!(!super::is_tun_safe_from_link_info(
+            "tun0",
+            "Owner: ZEROTIER One"
+        ));
     }
 }

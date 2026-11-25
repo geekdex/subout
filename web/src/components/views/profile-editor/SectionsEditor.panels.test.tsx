@@ -106,10 +106,13 @@ describe("split editor panels render independently", () => {
     },
   ];
 
-  it.each(cases)("$name panel renders its own section", ({ element, title }) => {
-    render(element());
-    expect(screen.getByText(title)).toBeDefined();
-  });
+  it.each(cases)(
+    "$name panel renders its own section",
+    ({ element, title }) => {
+      render(element());
+      expect(screen.getByText(title)).toBeDefined();
+    },
+  );
 });
 
 describe("split editor panels keep their onChange contracts", () => {
@@ -181,7 +184,9 @@ describe("split editor panels keep their onChange contracts", () => {
   const selectTriggerFor = (label: string): HTMLElement => {
     const labelEl = screen.getByText(label);
     const wrapper = labelEl.parentElement as HTMLElement;
-    return wrapper.querySelector('button[aria-haspopup="listbox"]') as HTMLElement;
+    return wrapper.querySelector(
+      'button[aria-haspopup="listbox"]',
+    ) as HTMLElement;
   };
 
   it("rule set row exposes http_client and persists the selected client", () => {
@@ -255,7 +260,9 @@ describe("split editor panels keep their onChange contracts", () => {
     expect(trigger.textContent).toContain("deleted-client (已失效)");
     fireEvent.click(trigger);
     expect(
-      screen.getAllByRole("option").some((o) => o.textContent === "deleted-client (已失效)"),
+      screen
+        .getAllByRole("option")
+        .some((o) => o.textContent === "deleted-client (已失效)"),
     ).toBe(true);
   });
 
@@ -283,7 +290,9 @@ describe("split editor panels keep their onChange contracts", () => {
     );
 
     // Batch trigger is the one showing the action placeholder.
-    const batchTrigger = screen.getByText("一键修改 http_client…").closest("button") as HTMLElement;
+    const batchTrigger = screen
+      .getByText("一键修改 http_client…")
+      .closest("button") as HTMLElement;
     fireEvent.click(batchTrigger);
     const directOption = screen
       .getAllByRole("option")
@@ -297,7 +306,11 @@ describe("split editor panels keep their onChange contracts", () => {
     ]);
 
     // Selecting 未指定 clears the field on every rule set.
-    fireEvent.click(screen.getByText("一键修改 http_client…").closest("button") as HTMLElement);
+    fireEvent.click(
+      screen
+        .getByText("一键修改 http_client…")
+        .closest("button") as HTMLElement,
+    );
     const unsetOption = screen
       .getAllByRole("option")
       .find((o) => o.textContent === "未指定 (清空)") as HTMLElement;
@@ -384,7 +397,11 @@ describe("split editor panels keep their onChange contracts", () => {
           tag: "tun-in",
           address: ["172.19.0.1/30"],
           auto_route: true,
-          route_exclude_address: ["100.64.0.0/10", "10.0.0.0/16", "192.168.0.0/16"],
+          route_exclude_address: [
+            "100.64.0.0/10",
+            "10.0.0.0/16",
+            "192.168.0.0/16",
+          ],
         },
       ],
     } as unknown as SingBoxVisualConfig;
@@ -398,8 +415,9 @@ describe("split editor panels keep their onChange contracts", () => {
     );
 
     expect(screen.getByText(/排除网段可能让 DNS 劫持失效/)).toBeDefined();
-    const warning = screen.getByText(/排除网段可能让 DNS 劫持失效/).parentElement!
-      .parentElement!;
+    const warning =
+      screen.getByText(/排除网段可能让 DNS 劫持失效/).parentElement!
+        .parentElement!;
     expect(warning.textContent).toContain("10.0.0.0/16");
     expect(warning.textContent).toContain("192.168.0.0/16");
     expect(warning.textContent).not.toContain("100.64.0.0/10");
@@ -448,8 +466,9 @@ describe("split editor panels keep their onChange contracts", () => {
       />,
     );
 
-    const warning = screen.getByText(/排除网段可能让 DNS 劫持失效/).parentElement!
-      .parentElement!;
+    const warning =
+      screen.getByText(/排除网段可能让 DNS 劫持失效/).parentElement!
+        .parentElement!;
     expect(warning.textContent).toContain("10.0.0.0/16");
     expect(warning.textContent).not.toContain("10.222.222.1/32");
   });
@@ -467,27 +486,25 @@ describe("split editor panels keep their onChange contracts", () => {
     } as unknown as SingBoxVisualConfig;
 
     const { rerender } = render(
-      <InboundsTabPanel
-        platform="linux"
-        config={config}
-        onChange={vi.fn()}
-      />,
+      <InboundsTabPanel platform="linux" config={config} onChange={vi.fn()} />,
     );
     expect(screen.queryByText(/排除网段可能让 DNS 劫持失效/)).toBeNull();
 
     rerender(
       <InboundsTabPanel
         platform="linux"
-        config={{
-          inbounds: [
-            {
-              type: "tun",
-              address: ["172.19.0.1/30"],
-              auto_route: false,
-              route_exclude_address: ["192.168.0.0/16"],
-            },
-          ],
-        } as unknown as SingBoxVisualConfig}
+        config={
+          {
+            inbounds: [
+              {
+                type: "tun",
+                address: ["172.19.0.1/30"],
+                auto_route: false,
+                route_exclude_address: ["192.168.0.0/16"],
+              },
+            ],
+          } as unknown as SingBoxVisualConfig
+        }
         onChange={vi.fn()}
       />,
     );

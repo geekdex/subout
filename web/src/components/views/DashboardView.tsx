@@ -224,7 +224,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 检测到影响 sing-box 运行的网络资源冲突
               </p>
               {resourceConflicts.map((c, idx) => (
-                <div key={`${c.kind}-${c.resource}-${idx}`} className="break-all">
+                <div
+                  key={`${c.kind}-${c.resource}-${idx}`}
+                  className="break-all"
+                >
                   <span className="font-mono text-rose-200">{c.resource}</span>
                   {" 被 "}
                   {c.holder_name

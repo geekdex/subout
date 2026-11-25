@@ -15,12 +15,12 @@ static OFFICIAL_SCHEMA: OnceLock<Value> = OnceLock::new();
 /// Valid encrypted resolvers (1.1.1.1, 8.8.8.8, 223.5.5.5, 1.12.12.12, ...) are
 /// intentionally absent so they are never flagged.
 const PLAINTEXT_ONLY_DNS_IPS: &[&str] = &[
-    "119.29.29.29",   // DNSPod public DNS — UDP only
+    "119.29.29.29",    // DNSPod public DNS — UDP only
     "114.114.114.114", // 114DNS — UDP only
-    "180.76.76.76",   // Baidu DNS — UDP only
+    "180.76.76.76",    // Baidu DNS — UDP only
 ];
 
-/// Returns true for encrypted DNS transports (DoH / DoT / DoH3 / DoQ).
+/// Returns true for encrypted DNS transports (`DoH` / `DoT` / `DoH3` / `DoQ`).
 fn is_encrypted_dns_type(t: &str) -> bool {
     matches!(t, "https" | "tls" | "h3" | "quic")
 }
@@ -404,7 +404,7 @@ fn validate_config_semantics(root: &serde_json::Map<String, Value>, errors: &mut
             ) && obj
                 .get("outbounds")
                 .and_then(Value::as_array)
-                .is_none_or(|m| m.is_empty())
+                .is_none_or(std::vec::Vec::is_empty)
             {
                 errors.push(format!(
                     "outbounds[{idx}].outbounds: 策略组成员为空；请至少添加一个成员，或移除该策略组"
@@ -481,13 +481,18 @@ fn validate_http_client_references_impl(
         .and_then(Value::as_str)
         .filter(|tag| !tag.is_empty())
     {
-        report(default_client, "route.default_http_client", &defined, errors);
+        report(
+            default_client,
+            "route.default_http_client",
+            &defined,
+            errors,
+        );
     }
 
     walk(&Value::Object(root.clone()), "", &defined, errors);
 }
 
-/// Narrow, standalone interface for the http_client reference check. Used by the
+/// Narrow, standalone interface for the `http_client` reference check. Used by the
 /// save/validate and service-start paths that shell out to `sing-box check` but do
 /// not otherwise run the full schema validator.
 pub fn validate_http_client_references(config: &Value) -> Vec<String> {
@@ -1333,7 +1338,10 @@ mod tests {
         });
         let mut errors = Vec::new();
         validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
-        assert!(errors.is_empty(), "udp + 119.29.29.29 is valid, got: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "udp + 119.29.29.29 is valid, got: {errors:?}"
+        );
     }
 
     #[test]
@@ -1455,7 +1463,9 @@ mod tests {
         let mut errors = Vec::new();
         validate_config_semantics(cfg.as_object().unwrap(), &mut errors);
         assert!(
-            errors.iter().any(|e| e.contains("route.default_http_client")),
+            errors
+                .iter()
+                .any(|e| e.contains("route.default_http_client")),
             "unexpected errors: {errors:?}"
         );
 
@@ -1526,7 +1536,8 @@ mod tests {
         });
         let errs = validate_singbox_config_for_platform(&cfg, Some("linux")).unwrap_err();
         assert!(
-            errs.iter().any(|e| e.contains("route.rule_set[0].http_client")),
+            errs.iter()
+                .any(|e| e.contains("route.rule_set[0].http_client")),
             "unexpected errors: {errs:?}"
         );
     }

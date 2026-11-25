@@ -495,307 +495,310 @@ export const RouteTabPanel: React.FC<RouteTabPanelProps> = ({
 
       {!quick && (
         <>
-      {/* BOTTOM PANE: Global Route Options + Reorderable Route Rules + Rule Sets */}
-      <div className="space-y-4">
-        {/* Global Route Options Card (Direct Rendering) */}
-        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-sky-400" />
-              <span>路由全局基础参数 (route)</span>
-            </h4>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Select
-              label="默认兜底出站 (route.final)"
-              value={route.final || ""}
-              onChange={(val) => updateRoute({ final: val || undefined })}
-              options={[
-                { value: "", label: "未指定 (空)" },
-                ...outboundTags.map((t) => ({
-                  value: t,
-                  label: t === "direct" ? "direct (直连)" : t,
-                })),
-                ...(route.final && !outboundTags.includes(route.final)
-                  ? [{ value: route.final, label: route.final }]
-                  : []),
-              ]}
-            />
-
-            <Select
-              label="默认域名解析器 (default_domain_resolver)"
-              value={resolverStr}
-              onChange={(val) =>
-                updateRoute({ default_domain_resolver: val || undefined })
-              }
-              options={[
-                { value: "", label: "未指定 (空)" },
-                ...dnsServerTags.map((t) => ({ value: t, label: t })),
-                ...(resolverStr && !dnsServerTags.includes(resolverStr)
-                  ? [{ value: resolverStr, label: resolverStr }]
-                  : []),
-              ]}
-            />
-
-            <Select
-              label="默认 HTTP 客户端 (default_http_client)"
-              value={route.default_http_client || ""}
-              onChange={(val) =>
-                updateRoute({ default_http_client: val || undefined })
-              }
-              options={[
-                { value: "", label: "未指定 (空)" },
-                ...httpClientTags.map((t) => ({ value: t, label: t })),
-              ]}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-              <span className="text-xs text-slate-300">
-                自动检测网卡 (auto_detect_interface)
-              </span>
-              <Switch
-                checked={Boolean(route.auto_detect_interface)}
-                onChange={(val) =>
-                  updateRoute({ auto_detect_interface: val || undefined })
-                }
-              />
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-              <span className="text-xs text-slate-300">
-                查找本地进程 (find_process)
-              </span>
-              <Switch
-                checked={Boolean(route.find_process)}
-                onChange={(val) =>
-                  updateRoute({ find_process: val || undefined })
-                }
-              />
-            </div>
-
-            {platform === "android" && (
-              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-                <span className="text-xs text-slate-300">
-                  接管 Android VPN (override_android_vpn)
-                </span>
-                <Switch
-                  checked={Boolean(route.override_android_vpn)}
-                  onChange={(val) =>
-                    updateRoute({ override_android_vpn: val || undefined })
-                  }
-                />
+          {/* BOTTOM PANE: Global Route Options + Reorderable Route Rules + Rule Sets */}
+          <div className="space-y-4">
+            {/* Global Route Options Card (Direct Rendering) */}
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-sky-400" />
+                  <span>路由全局基础参数 (route)</span>
+                </h4>
               </div>
-            )}
-          </div>
-        </div>
 
-        {/* Route Rules List (Reorderable + 2-Level Nested) */}
-        <RuleTreeEditor
-          kind="route"
-          platform={platform}
-          rules={rules}
-          onChange={(nextRules) =>
-            updateRoute({ rules: nextRules as RouteRuleItem[] })
-          }
-          outboundTags={outboundTags}
-          dnsServerTags={dnsServerTags}
-          inboundTags={inboundTags}
-          ruleSetTags={ruleSetTags}
-        />
-
-        {/* Rule Set Reorderable List */}
-        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="w-3.5 h-3.5 text-sky-400" />
-              <span className="text-xs font-bold text-slate-200">
-                已配置规则集列表 (route.rule_set)
-              </span>
-              <Badge variant="neutral" size="sm">
-                {ruleSets.length} 个
-              </Badge>
-            </div>
-            {ruleSets.length > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Select
-                  className="w-48"
-                  value=""
-                  placeholder="一键修改 http_client…"
+                  label="默认兜底出站 (route.final)"
+                  value={route.final || ""}
+                  onChange={(val) => updateRoute({ final: val || undefined })}
                   options={[
-                    { value: "__unset__", label: "未指定 (清空)" },
+                    { value: "", label: "未指定 (空)" },
+                    ...outboundTags.map((t) => ({
+                      value: t,
+                      label: t === "direct" ? "direct (直连)" : t,
+                    })),
+                    ...(route.final && !outboundTags.includes(route.final)
+                      ? [{ value: route.final, label: route.final }]
+                      : []),
+                  ]}
+                />
+
+                <Select
+                  label="默认域名解析器 (default_domain_resolver)"
+                  value={resolverStr}
+                  onChange={(val) =>
+                    updateRoute({ default_domain_resolver: val || undefined })
+                  }
+                  options={[
+                    { value: "", label: "未指定 (空)" },
+                    ...dnsServerTags.map((t) => ({ value: t, label: t })),
+                    ...(resolverStr && !dnsServerTags.includes(resolverStr)
+                      ? [{ value: resolverStr, label: resolverStr }]
+                      : []),
+                  ]}
+                />
+
+                <Select
+                  label="默认 HTTP 客户端 (default_http_client)"
+                  value={route.default_http_client || ""}
+                  onChange={(val) =>
+                    updateRoute({ default_http_client: val || undefined })
+                  }
+                  options={[
+                    { value: "", label: "未指定 (空)" },
                     ...httpClientTags.map((t) => ({ value: t, label: t })),
                   ]}
-                  onChange={(val) => {
-                    // `__unset__` is only a sentinel when no real client uses it as a tag.
-                    const clear = val === "__unset__" && !httpClientTags.includes(val);
-                    updateRoute({
-                      rule_set: ruleSets.map((rs) => ({
-                        ...rs,
-                        http_client: clear ? undefined : val,
-                      })),
-                    });
-                  }}
                 />
-                <button
-                  type="button"
-                  onClick={() => updateRoute({ rule_set: [] })}
-                  className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
-                >
-                  清空规则集
-                </button>
               </div>
-            )}
-          </div>
 
-          {ruleSets.length === 0 ? (
-            <div className="p-5 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
-              当前未添加任何规则集。可在上方工具栏一键点选官方规则集或点击「一键补齐已引用规则集」。
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {ruleSets.map((rs, idx) => (
-                <div
-                  key={`ruleset-${idx}`}
-                  className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
-                >
-                  <div className="sm:col-span-2">
-                    <Input
-                      label={`#${idx + 1} 标签 (tag)`}
-                      value={rs.tag || ""}
-                      onChange={(e) =>
-                        updateRuleSetAt(idx, { ...rs, tag: e.target.value })
-                      }
-                      placeholder="如: geosite-cn"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Select
-                      label="类型 (type)"
-                      value={rs.type || "remote"}
-                      onChange={(val) =>
-                        updateRuleSetAt(idx, {
-                          ...rs,
-                          type: val as RuleSetItem["type"],
-                        })
-                      }
-                      options={[
-                        { value: "remote", label: "远程 (remote)" },
-                        { value: "local", label: "本地 (local)" },
-                      ]}
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Select
-                      label="格式 (format)"
-                      value={rs.format || "binary"}
-                      onChange={(val) =>
-                        updateRuleSetAt(idx, {
-                          ...rs,
-                          format: val as RuleSetItem["format"],
-                        })
-                      }
-                      options={[
-                        { value: "binary", label: "二进制 (.srs)" },
-                        { value: "source", label: "源码 (.json)" },
-                      ]}
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    {rs.type === "local" ? (
-                      <Input
-                        label="本地路径 (path)"
-                        value={rs.path || ""}
-                        onChange={(e) =>
-                          updateRuleSetAt(idx, {
-                            ...rs,
-                            path: e.target.value,
-                            url: undefined,
-                          })
-                        }
-                        placeholder="/etc/sing-box/ruleset.srs"
-                      />
-                    ) : (
-                      <Input
-                        label="远程地址 (url)"
-                        value={rs.url || ""}
-                        onChange={(e) =>
-                          updateRuleSetAt(idx, {
-                            ...rs,
-                            url: e.target.value,
-                            path: undefined,
-                          })
-                        }
-                        placeholder="https://.../geosite-cn.srs"
-                      />
-                    )}
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Select
-                      label="HTTP 客户端 (http_client)"
-                      value={rs.http_client || ""}
-                      onChange={(val) =>
-                        updateRuleSetAt(idx, {
-                          ...rs,
-                          http_client: val || undefined,
-                        })
-                      }
-                      options={[
-                        { value: "", label: "未指定 (清空)" },
-                        ...httpClientTags.map((t) => ({ value: t, label: t })),
-                        // 保留已配置但不再存在于 http_clients 中的旧值，避免 Select 找不到选项时
-                        // 静默显示 placeholder，让用户能看见并自行修正（同 route.final 的写法）。
-                        ...(rs.http_client &&
-                        !httpClientTags.includes(rs.http_client)
-                          ? [
-                              {
-                                value: rs.http_client,
-                                label: `${rs.http_client} (已失效)`,
-                              },
-                            ]
-                          : []),
-                      ]}
-                    />
-                  </div>
-                  <div className="sm:col-span-2 flex items-center justify-end gap-1 pb-1">
-                    <button
-                      type="button"
-                      disabled={idx === 0}
-                      onClick={() => moveRuleSetTo(idx, idx - 1)}
-                      className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                      title="上移"
-                    >
-                      <ArrowUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={idx === ruleSets.length - 1}
-                      onClick={() => moveRuleSetTo(idx, idx + 1)}
-                      className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
-                      title="下移"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeRuleSetAt(idx)}
-                      className="p-1.5 rounded text-rose-400 hover:text-rose-300"
-                      title="删除规则集"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <span className="text-xs text-slate-300">
+                    自动检测网卡 (auto_detect_interface)
+                  </span>
+                  <Switch
+                    checked={Boolean(route.auto_detect_interface)}
+                    onChange={(val) =>
+                      updateRoute({ auto_detect_interface: val || undefined })
+                    }
+                  />
                 </div>
-              ))}
+
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                  <span className="text-xs text-slate-300">
+                    查找本地进程 (find_process)
+                  </span>
+                  <Switch
+                    checked={Boolean(route.find_process)}
+                    onChange={(val) =>
+                      updateRoute({ find_process: val || undefined })
+                    }
+                  />
+                </div>
+
+                {platform === "android" && (
+                  <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
+                    <span className="text-xs text-slate-300">
+                      接管 Android VPN (override_android_vpn)
+                    </span>
+                    <Switch
+                      checked={Boolean(route.override_android_vpn)}
+                      onChange={(val) =>
+                        updateRoute({ override_android_vpn: val || undefined })
+                      }
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+
+            {/* Route Rules List (Reorderable + 2-Level Nested) */}
+            <RuleTreeEditor
+              kind="route"
+              platform={platform}
+              rules={rules}
+              onChange={(nextRules) =>
+                updateRoute({ rules: nextRules as RouteRuleItem[] })
+              }
+              outboundTags={outboundTags}
+              dnsServerTags={dnsServerTags}
+              inboundTags={inboundTags}
+              ruleSetTags={ruleSetTags}
+            />
+
+            {/* Rule Set Reorderable List */}
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="text-xs font-bold text-slate-200">
+                    已配置规则集列表 (route.rule_set)
+                  </span>
+                  <Badge variant="neutral" size="sm">
+                    {ruleSets.length} 个
+                  </Badge>
+                </div>
+                {ruleSets.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Select
+                      className="w-48"
+                      value=""
+                      placeholder="一键修改 http_client…"
+                      options={[
+                        { value: "__unset__", label: "未指定 (清空)" },
+                        ...httpClientTags.map((t) => ({ value: t, label: t })),
+                      ]}
+                      onChange={(val) => {
+                        // `__unset__` is only a sentinel when no real client uses it as a tag.
+                        const clear =
+                          val === "__unset__" && !httpClientTags.includes(val);
+                        updateRoute({
+                          rule_set: ruleSets.map((rs) => ({
+                            ...rs,
+                            http_client: clear ? undefined : val,
+                          })),
+                        });
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateRoute({ rule_set: [] })}
+                      className="px-2 py-1 rounded text-[11px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20"
+                    >
+                      清空规则集
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {ruleSets.length === 0 ? (
+                <div className="p-5 rounded-lg bg-slate-950/50 border border-dashed border-slate-800 text-center text-xs text-slate-500">
+                  当前未添加任何规则集。可在上方工具栏一键点选官方规则集或点击「一键补齐已引用规则集」。
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {ruleSets.map((rs, idx) => (
+                    <div
+                      key={`ruleset-${idx}`}
+                      className="p-3 rounded-lg bg-slate-950/75 border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
+                    >
+                      <div className="sm:col-span-2">
+                        <Input
+                          label={`#${idx + 1} 标签 (tag)`}
+                          value={rs.tag || ""}
+                          onChange={(e) =>
+                            updateRuleSetAt(idx, { ...rs, tag: e.target.value })
+                          }
+                          placeholder="如: geosite-cn"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Select
+                          label="类型 (type)"
+                          value={rs.type || "remote"}
+                          onChange={(val) =>
+                            updateRuleSetAt(idx, {
+                              ...rs,
+                              type: val as RuleSetItem["type"],
+                            })
+                          }
+                          options={[
+                            { value: "remote", label: "远程 (remote)" },
+                            { value: "local", label: "本地 (local)" },
+                          ]}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Select
+                          label="格式 (format)"
+                          value={rs.format || "binary"}
+                          onChange={(val) =>
+                            updateRuleSetAt(idx, {
+                              ...rs,
+                              format: val as RuleSetItem["format"],
+                            })
+                          }
+                          options={[
+                            { value: "binary", label: "二进制 (.srs)" },
+                            { value: "source", label: "源码 (.json)" },
+                          ]}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        {rs.type === "local" ? (
+                          <Input
+                            label="本地路径 (path)"
+                            value={rs.path || ""}
+                            onChange={(e) =>
+                              updateRuleSetAt(idx, {
+                                ...rs,
+                                path: e.target.value,
+                                url: undefined,
+                              })
+                            }
+                            placeholder="/etc/sing-box/ruleset.srs"
+                          />
+                        ) : (
+                          <Input
+                            label="远程地址 (url)"
+                            value={rs.url || ""}
+                            onChange={(e) =>
+                              updateRuleSetAt(idx, {
+                                ...rs,
+                                url: e.target.value,
+                                path: undefined,
+                              })
+                            }
+                            placeholder="https://.../geosite-cn.srs"
+                          />
+                        )}
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Select
+                          label="HTTP 客户端 (http_client)"
+                          value={rs.http_client || ""}
+                          onChange={(val) =>
+                            updateRuleSetAt(idx, {
+                              ...rs,
+                              http_client: val || undefined,
+                            })
+                          }
+                          options={[
+                            { value: "", label: "未指定 (清空)" },
+                            ...httpClientTags.map((t) => ({
+                              value: t,
+                              label: t,
+                            })),
+                            // 保留已配置但不再存在于 http_clients 中的旧值，避免 Select 找不到选项时
+                            // 静默显示 placeholder，让用户能看见并自行修正（同 route.final 的写法）。
+                            ...(rs.http_client &&
+                            !httpClientTags.includes(rs.http_client)
+                              ? [
+                                  {
+                                    value: rs.http_client,
+                                    label: `${rs.http_client} (已失效)`,
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
+                      </div>
+                      <div className="sm:col-span-2 flex items-center justify-end gap-1 pb-1">
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => moveRuleSetTo(idx, idx - 1)}
+                          className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                          title="上移"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === ruleSets.length - 1}
+                          onClick={() => moveRuleSetTo(idx, idx + 1)}
+                          className="p-1.5 rounded text-slate-400 hover:text-slate-100 disabled:opacity-30"
+                          title="下移"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeRuleSetAt(idx)}
+                          className="p-1.5 rounded text-rose-400 hover:text-rose-300"
+                          title="删除规则集"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </>
       )}
     </div>
   );
 };
-

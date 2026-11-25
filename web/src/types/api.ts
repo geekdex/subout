@@ -50,7 +50,8 @@ export interface ServiceStatus {
 /** Where a log line came from: the sing-box kernel or subout's own runtime. */
 export type LogSource = "singbox" | "subout";
 
-export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic";
+export type LogLevel =
+  "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic";
 
 export interface ServiceLogEntry {
   timestamp: string;
@@ -84,10 +85,7 @@ export interface KernelInfo {
 }
 
 export type ResourceConflictKind =
-  | "port"
-  | "tun_interface"
-  | "dns"
-  | "policy_route";
+  "port" | "tun_interface" | "dns" | "policy_route";
 
 /** 通用资源占用项：sing-box 所需资源被系统其他程序占用（不硬编码具体工具名）*/
 export interface ResourceConflict {

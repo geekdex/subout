@@ -218,7 +218,9 @@ export const api = {
     const conflictType = (raw.conflict_type as string) || "running_processes";
     const resourceConflicts = Array.isArray(raw.resource_conflicts)
       ? (raw.resource_conflicts as Array<Record<string, unknown>>).map((c) => ({
-          kind: (c.kind as "port" | "tun_interface" | "dns" | "policy_route") || "port",
+          kind:
+            (c.kind as "port" | "tun_interface" | "dns" | "policy_route") ||
+            "port",
           resource: String(c.resource || ""),
           holder_pid: c.holder_pid != null ? Number(c.holder_pid) : null,
           holder_name: c.holder_name != null ? String(c.holder_name) : null,
@@ -231,13 +233,16 @@ export const api = {
     const mergedPids = Array.from(
       new Set([
         ...((raw.pids as number[]) || []),
-        ...resourceConflicts.map((c) => c.holder_pid).filter((p): p is number => p != null),
+        ...resourceConflicts
+          .map((c) => c.holder_pid)
+          .filter((p): p is number => p != null),
       ]),
     );
     // 仅这些类型允许一键接管；新的网络资源冲突类型一律不允许
     const takeoverAllowedTypes = ["systemd", "launchd", "running_processes"];
     const canAuto =
-      takeoverAllowedTypes.includes(conflictType) && Boolean(raw.can_auto_takeover ?? true);
+      takeoverAllowedTypes.includes(conflictType) &&
+      Boolean(raw.can_auto_takeover ?? true);
     return {
       has_conflict: hasConflict,
       conflict_type: conflictType,
@@ -328,9 +333,11 @@ export const api = {
       body: JSON.stringify({ url, timeout_ms: timeoutMs }),
     });
   },
-  async setRunMode(
-    mode: "local" | "hosting" | "hybrid",
-  ): Promise<{ success: boolean; run_mode: string; stopped_local_service?: boolean }> {
+  async setRunMode(mode: "local" | "hosting" | "hybrid"): Promise<{
+    success: boolean;
+    run_mode: string;
+    stopped_local_service?: boolean;
+  }> {
     return request("/api/system/run-mode", {
       method: "POST",
       body: JSON.stringify({ run_mode: mode }),

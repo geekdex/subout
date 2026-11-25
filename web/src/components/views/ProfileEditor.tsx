@@ -680,8 +680,9 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
             {editorView === "quick" && (
               <div className="space-y-4">
                 <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-200 leading-relaxed">
-                  快速视图只展示常用预设：平台入站、DNS 预设、节点组合导入、路由策略与日志级别。
-                  需要调整 sing-box 原始字段时切换到「专家模式」，当前配置不会丢失。
+                  快速视图只展示常用预设：平台入站、DNS
+                  预设、节点组合导入、路由策略与日志级别。 需要调整 sing-box
+                  原始字段时切换到「专家模式」，当前配置不会丢失。
                 </div>
                 <InboundsTabPanel
                   quick
@@ -710,9 +711,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
                 <QuickRoutingStrategies
                   config={visualState}
                   onChange={handleUpdateVisualState}
-                  proxyTag={
-                    outboundTags.find((t) => t !== "direct") || "proxy"
-                  }
+                  proxyTag={outboundTags.find((t) => t !== "direct") || "proxy"}
                 />
                 <RouteTabPanel
                   quick

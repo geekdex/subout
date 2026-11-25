@@ -25,7 +25,9 @@ pub async fn serve_subscription(
     // Use `!=` rather than `<`: the cursor is monotonic, but an externally
     // imported profile may carry a version from another database. Any mismatch
     // means the cached content is not known to match this system's resources.
-    let (final_content, effective_vcode) = if profile.version_code != latest_vcode {
+    let (final_content, effective_vcode) = if profile.version_code == latest_vcode {
+        (profile.content, profile.version_code)
+    } else {
         // Lazy Sync: Update nodes only, preserve route/dns/log/inbounds explicitly
         if let Ok(base_val) = serde_json::from_str::<serde_json::Value>(&profile.content) {
             match generator::sync_config_with_latest_resources(&conn, &base_val, &[]) {
@@ -46,8 +48,6 @@ pub async fn serve_subscription(
         } else {
             (profile.content, profile.version_code)
         }
-    } else {
-        (profile.content, profile.version_code)
     };
 
     let mut response = final_content.into_response();

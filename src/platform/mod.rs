@@ -43,8 +43,8 @@ pub struct ResourceHolderInfo {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TakeoverDiagnoseResult {
     pub has_conflict: bool,
-    /// "systemd" | "launchd" | "respawn_script" | "running_processes"
-    /// | "port_occupied_by_external" | "tun_interface_occupied" | "dns_takeover" | "policy_route_conflict"
+    /// "systemd" | "launchd" | "`respawn_script`" | "`running_processes`"
+    /// | "`port_occupied_by_external`" | "`tun_interface_occupied`" | "`dns_takeover`" | "`policy_route_conflict`"
     pub conflict_type: Option<String>,
     pub conflict_name: Option<String>,
     pub suggestion_command: Option<String>,
@@ -106,8 +106,7 @@ pub fn collect_inbound_listeners(config: &Value) -> Vec<(String, u16)> {
         if inbound
             .get("type")
             .and_then(|t| t.as_str())
-            .map(|t| t == "tun")
-            .unwrap_or(false)
+            .is_some_and(|t| t == "tun")
         {
             // tun 入站的 listen_port 语义不同，单独在 TUN 检测里处理
             continue;
@@ -249,7 +248,7 @@ pub trait PlatformStrategy: Send + Sync {
         running_config_path: &Path,
     ) -> Vec<ConflictingProcessInfo>;
     /// 通用资源占用诊断：sing-box 需要的端口/TUN 网卡/DNS/路由是否被外部程序占用。
-    /// 按实际占用判定，不硬编码具体工具名；exclude_pid 用于排除 Subout 自己管理的进程。
+    /// `按实际占用判定，不硬编码具体工具名；exclude_pid` 用于排除 Subout 自己管理的进程。
     /// `config_override` 为 Some 时优先使用它（来自数据库的当前配置），
     /// 否则回退读取 `running_config_path` 文件。诊断接口传 Some 以避免读取过期文件。
     fn detect_resource_conflicts<'a>(
@@ -560,8 +559,8 @@ mod tests {
         assert!(!listeners.iter().any(|(_, p)| *p == 2080));
     }
 
-    /// 回归：各平台的 diagnose_takeover_conflict 不得自行取配置路径，
-    /// 必须使用调用方（service.rs）传入的 running_config_path，
+    /// 回归：各平台的 `diagnose_takeover_conflict` 不得自行取配置路径，
+    /// 必须使用调用方（service.rs）传入的 `running_config_path`，
     /// 保证进程归属过滤与资源占用检测共用同一个来源。
     #[test]
     fn test_platform_diagnose_does_not_self_fetch_config_path() {
@@ -578,8 +577,7 @@ mod tests {
             let end = src[start..]
                 .find("\n    fn ")
                 .or_else(|| src[start..].find("\n    /// "))
-                .map(|i| start + i)
-                .unwrap_or(src.len());
+                .map_or(src.len(), |i| start + i);
             let body = &src[start..end];
             assert!(
                 !body.contains("get_running_config_path()"),

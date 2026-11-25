@@ -412,7 +412,60 @@ fn test_rule_criteria(
         return Some(format!("协议 ({protocol})"));
     }
 
+    // 10. DNS query_type matching (for domain resolution in site-test: A / AAAA / CNAME)
+    let query_types = get_str_list(rule.get("query_type"));
+    if !query_types.is_empty()
+        && ip.is_none()
+        && query_types.iter().any(|qt| {
+            let qt = qt.trim();
+            qt.eq_ignore_ascii_case("A")
+                || qt.eq_ignore_ascii_case("AAAA")
+                || qt.eq_ignore_ascii_case("CNAME")
+        })
+    {
+        return Some(format!("查询类型 ({})", query_types.join("/")));
+    }
+
     None
+}
+
+/// Evaluates rule criteria recursively, supporting both leaf rules and nested `type: "logical"` rules.
+fn evaluate_rule_criteria(
+    rule: &Value,
+    domain: &str,
+    ip: Option<IpAddr>,
+    port: u16,
+    protocol: &str,
+    is_private_ip: bool,
+) -> Option<String> {
+    let rule_type = rule.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if rule_type == "logical" {
+        let mode = rule.get("mode").and_then(|m| m.as_str()).unwrap_or("or");
+        let sub_rules = rule.get("rules").and_then(|r| r.as_array())?;
+        if sub_rules.is_empty() {
+            return None;
+        }
+
+        if mode.eq_ignore_ascii_case("and") {
+            let mut matched_reasons = Vec::new();
+            for sub in sub_rules {
+                let desc = evaluate_rule_criteria(sub, domain, ip, port, protocol, is_private_ip)?;
+                matched_reasons.push(desc);
+            }
+            return Some(matched_reasons.join(" + "));
+        }
+
+        for sub in sub_rules {
+            if let Some(desc) =
+                evaluate_rule_criteria(sub, domain, ip, port, protocol, is_private_ip)
+            {
+                return Some(desc);
+            }
+        }
+        return None;
+    }
+
+    test_rule_criteria(rule, domain, ip, port, protocol, is_private_ip)
 }
 
 /// Evaluates a rule (which could be leaf or logical `type: "logical"`).
@@ -446,7 +499,7 @@ fn evaluate_rule(
         if mode.eq_ignore_ascii_case("and") {
             let mut matched_reasons = Vec::new();
             for sub in sub_rules {
-                let desc = test_rule_criteria(sub, domain, ip, port, protocol, is_private_ip)?;
+                let desc = evaluate_rule_criteria(sub, domain, ip, port, protocol, is_private_ip)?;
                 matched_reasons.push(desc);
             }
             let target = target_opt
@@ -461,7 +514,9 @@ fn evaluate_rule(
         }
         // "or" mode (default)
         for sub in sub_rules {
-            if let Some(desc) = test_rule_criteria(sub, domain, ip, port, protocol, is_private_ip) {
+            if let Some(desc) =
+                evaluate_rule_criteria(sub, domain, ip, port, protocol, is_private_ip)
+            {
                 let target = target_opt
                     .or_else(|| sub.get(target_field).and_then(|v| v.as_str()))?
                     .to_string();
@@ -858,5 +913,48 @@ mod tests {
         assert_eq!(gpt_trace.dns_server, "remote-dns (FakeIP)");
         assert_eq!(gpt_trace.route_rule, "域名后缀 (chatgpt.com)");
         assert_eq!(gpt_trace.outbound, "us_self (vless 节点)");
+    }
+
+    #[test]
+    fn test_trace_rules_nested_logical_with_query_type() {
+        let config = json!({
+            "dns": {
+                "servers": [
+                    { "tag": "local-dns", "type": "udp", "server": "192.168.9.253" },
+                    { "tag": "remote-dns", "type": "fakeip" }
+                ],
+                "rules": [
+                    {
+                        "server": "remote-dns",
+                        "type": "logical",
+                        "mode": "and",
+                        "rules": [
+                            { "query_type": ["A", "AAAA", "CNAME"] },
+                            {
+                                "type": "logical",
+                                "mode": "or",
+                                "rules": [
+                                    { "rule_set": ["geosite-google"] },
+                                    { "domain_suffix": ["google.com"] }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+                "final": "local-dns"
+            },
+            "outbounds": [
+                { "tag": "direct", "type": "direct" }
+            ],
+            "route": {
+                "rules": [],
+                "final": "direct"
+            }
+        });
+
+        let trace = trace_rules_for_url(&config, "https://www.google.com");
+        assert_eq!(trace.dns_server, "remote-dns (FakeIP)");
+        assert!(trace.dns_rule.contains("查询类型 (A/AAAA/CNAME)"));
+        assert!(trace.dns_rule.contains("geosite-google"));
     }
 }

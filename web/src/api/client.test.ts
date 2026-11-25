@@ -33,9 +33,9 @@ describe("api.setWebPassword", () => {
   });
 
   it("surfaces a descriptive backend error instead of a generic 404", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("当前密码不正确", { status: 400 }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("当前密码不正确", { status: 400 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(api.setWebPassword("wrong", "new-pass")).rejects.toMatchObject(
