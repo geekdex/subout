@@ -217,42 +217,19 @@ impl PlatformStrategy for LinuxPlatform {
                     excluded_pids.extend(collect_descendant_pids(&[managed]));
                 }
 
-                // 1) 端口占用：/proc/net/tcp(6) 找 LISTEN socket inode，再反查 PID
+                // 1) 端口占用：/proc/net/tcp(6) 找 LISTEN socket inode，再反查 PID。
+                // 必须同时按「地址 + 端口」匹配：只按端口会把 systemd-resolved 在
+                // 127.0.0.53:53 的监听误判为占用了 192.168.0.254:53 等具体地址。
                 let fd_entries = collect_socket_fd_entries();
-                for (listen, port) in collect_inbound_listeners(&config) {
-                    let mut inodes = Vec::new();
-                    for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
-                        if let Ok(text) = std::fs::read_to_string(path) {
-                            inodes.extend(parse_listen_inodes(&text, port));
-                        }
-                    }
-                    match find_pid_by_socket_inode(&fd_entries, &inodes, &excluded_pids) {
-                        Some(SocketHolder::External { pid, inode }) => {
-                            let (name, cmdline) = read_proc_identity(pid);
-                            results.push(ResourceHolderInfo {
-                                kind: ResourceConflictKind::Port,
-                                resource: format!("{listen}:{port}"),
-                                holder_pid: Some(pid),
-                                holder_name: name.or_else(|| Some("未知进程".to_string())),
-                                holder_cmdline: cmdline,
-                                evidence: format!("/proc/net/tcp inode:{inode}"),
-                            });
-                        }
-                        // 端口由 Subout 自己/受管进程持有，或已无监听者——预期行为，不是冲突，跳过。
-                        Some(SocketHolder::Managed { .. }) | None => {}
-                        // 确有监听 socket，但无法反查持有者（权限/竞态）——给出自查命令。
-                        Some(SocketHolder::Unknown { .. }) => {
-                            results.push(ResourceHolderInfo {
-                                kind: ResourceConflictKind::Port,
-                                resource: format!("{listen}:{port}"),
-                                holder_pid: None,
-                                holder_name: None,
-                                holder_cmdline: None,
-                                evidence: format!("ss -tlnp | grep ':{port}'"),
-                            });
-                        }
-                    }
-                }
+                let proc_tcp = std::fs::read_to_string("/proc/net/tcp").unwrap_or_default();
+                let proc_tcp6 = std::fs::read_to_string("/proc/net/tcp6").unwrap_or_default();
+                results.extend(detect_port_conflicts(
+                    &config,
+                    &proc_tcp,
+                    &proc_tcp6,
+                    &fd_entries,
+                    &excluded_pids,
+                ));
 
                 // 2) TUN 网卡占用：若目标网卡存在且被判定为外部工具持有
                 let tun_name = resolved_tun_interface_name();
@@ -1333,6 +1310,152 @@ pub fn parse_listen_inodes(proc_net_tcp: &str, target_port: u16) -> Vec<u64> {
     inodes
 }
 
+/// 把 /proc/net/tcp(6) 中形如 "0100007F:0820" 的 local_address 拆成
+/// (IP 字节序列, 端口)。IP 字节序按 /proc 的原始顺序返回（即小端呈现的字节，
+/// 对 IPv4 需反转才是人可读顺序；对 IPv6 则是 4 个 32 位小端字的字节拼接）。
+fn parse_proc_local_address(local: &str) -> Option<(Vec<u8>, u16)> {
+    let (ip_hex, port_hex) = local.split_once(':')?;
+    if ip_hex.len() != 8 && ip_hex.len() != 32 {
+        return None;
+    }
+    let ip = (0..ip_hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&ip_hex[i..i + 2], 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    let port = u16::from_str_radix(port_hex, 16).ok()?;
+    Some((ip, port))
+}
+
+/// 配置中的 `listen` 地址是否与 /proc/net/tcp(6) 的 local_address 指向同一地址。
+///
+/// - 通配地址（`""` / `0.0.0.0` / `::` / `[::]`）匹配任意 IP；
+/// - IPv4 用点分十进制解析并与 /proc 的 4 字节（小端）比较；
+/// - IPv6 用 `Ipv6Addr` 解析（允许去掉 `%zone`，因为 /proc 不含作用域）；
+///   比较时把 16 字节按每 4 字节小端字还原为网络序后比较。
+///
+/// 解析失败时返回 `None`，调用方应保守地视为"可能匹配"（宁可误报也不要漏报冲突）。
+fn listen_matches_proc_addr(listen: &str, proc_ip: &[u8], proc_is_ipv6: bool) -> Option<bool> {
+    let addr = listen.trim().trim_matches(['[', ']']);
+    // 去掉 IPv6 zone id，例如 fe80::1%eth0 -> fe80::1
+    let addr_no_zone = addr.split('%').next().unwrap_or(addr);
+    if addr_no_zone.is_empty() || addr_no_zone.eq_ignore_ascii_case("any") {
+        return Some(true);
+    }
+    // 通配地址按协议族匹配：0.0.0.0 只匹配 IPv4，:: 只匹配 IPv6。
+    // 具体地址同样必须协议族一致，否则 IPv4 监听会被 /proc/net/tcp6 条目错误命中。
+    if addr_no_zone == "0.0.0.0" {
+        return Some(!proc_is_ipv6);
+    }
+    if addr_no_zone == "::" {
+        return Some(proc_is_ipv6);
+    }
+    let listen_is_ipv6 = addr_no_zone.contains(':');
+    if listen_is_ipv6 != proc_is_ipv6 {
+        return Some(false);
+    }
+
+    if !proc_is_ipv6 {
+        let ipv4: std::net::Ipv4Addr = addr_no_zone.parse().ok()?;
+        let want = ipv4.octets();
+        // /proc/net/tcp 的 IPv4 地址按 32 位小端呈现：0100007F == 127.0.0.1
+        let got = [proc_ip[3], proc_ip[2], proc_ip[1], proc_ip[0]];
+        return Some(want == got);
+    }
+
+    let ipv6: std::net::Ipv6Addr = addr_no_zone.parse().ok()?;
+    let want = ipv6.octets();
+    if proc_ip.len() != 16 {
+        return Some(false);
+    }
+    // /proc/net/tcp6 每行 IP 是 4 个 32 位小端字，按字内反转还原网络序
+    let mut got = [0u8; 16];
+    for (i, chunk) in proc_ip.chunks_exact(4).enumerate() {
+        got[i * 4..i * 4 + 4].copy_from_slice(&[chunk[3], chunk[2], chunk[1], chunk[0]]);
+    }
+    Some(want == got)
+}
+
+/// 与 `parse_listen_inodes` 类似，但额外按 `listen` 地址精确过滤。
+///
+/// 用途：诊断某个具体入站的端口是否被外部占用。不能只按端口判断，
+/// 否则 `systemd-resolved` 在 `127.0.0.53:53` 的监听会被误判为占用了
+/// `192.168.0.254:53` 或 `fe80::...:53`。
+///
+/// `proc_net_tcp` 与 `proc_net_tcp6` 分别对应 /proc/net/tcp 和 /proc/net/tcp6。
+pub fn parse_listen_inodes_for(
+    proc_net_tcp: &str,
+    proc_net_tcp6: &str,
+    target_port: u16,
+    listen: &str,
+) -> Vec<u64> {
+    let mut inodes = Vec::new();
+    for (text, is_ipv6) in [(proc_net_tcp, false), (proc_net_tcp6, true)] {
+        for line in text.lines().skip(1) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 10 || parts[3] != "0A" {
+                continue; // 仅 LISTEN
+            }
+            let Some((ip, port)) = parse_proc_local_address(parts[1]) else {
+                continue;
+            };
+            if port != target_port {
+                continue;
+            }
+            // 地址无法解析时保守处理：认为可能匹配，避免漏报真实冲突。
+            let matches = listen_matches_proc_addr(listen, &ip, is_ipv6).unwrap_or(true);
+            if matches && let Ok(inode) = parts[9].parse::<u64>() {
+                inodes.push(inode);
+            }
+        }
+    }
+    inodes
+}
+
+/// 根据注入的 /proc/net/tcp(6) 文本与 fd 表，检测配置中每个入站端口是否被外部占用。
+///
+/// 从 `detect_resource_conflicts` 中抽出，便于用 mock 数据做可复现的回归测试，
+/// 特别是"回环地址的 53 端口不得被误报为具体 IP 的 53 端口冲突"这一场景。
+#[cfg(unix)]
+fn detect_port_conflicts<S: std::hash::BuildHasher>(
+    config: &Value,
+    proc_tcp: &str,
+    proc_tcp6: &str,
+    fd_entries: &[(u32, String)],
+    excluded_pids: &HashSet<u32, S>,
+) -> Vec<ResourceHolderInfo> {
+    let mut results = Vec::new();
+    for (listen, port) in collect_inbound_listeners(config) {
+        let inodes = parse_listen_inodes_for(proc_tcp, proc_tcp6, port, &listen);
+        match find_pid_by_socket_inode(fd_entries, &inodes, excluded_pids) {
+            Some(SocketHolder::External { pid, inode }) => {
+                let (name, cmdline) = read_proc_identity(pid);
+                results.push(ResourceHolderInfo {
+                    kind: ResourceConflictKind::Port,
+                    resource: format!("{listen}:{port}"),
+                    holder_pid: Some(pid),
+                    holder_name: name.or_else(|| Some("未知进程".to_string())),
+                    holder_cmdline: cmdline,
+                    evidence: format!("/proc/net/tcp inode:{inode}"),
+                });
+            }
+            // 端口由 Subout 自己/受管进程持有，或已无监听者——预期行为，不是冲突，跳过。
+            Some(SocketHolder::Managed { .. }) | None => {}
+            // 确有监听 socket，但无法反查持有者（权限/竞态）——给出自查命令。
+            Some(SocketHolder::Unknown { .. }) => {
+                results.push(ResourceHolderInfo {
+                    kind: ResourceConflictKind::Port,
+                    resource: format!("{listen}:{port}"),
+                    holder_pid: None,
+                    holder_name: None,
+                    holder_cmdline: None,
+                    evidence: format!("ss -tlnp | grep ':{port}'"),
+                });
+            }
+        }
+    }
+    results
+}
+
 /// 端口监听 socket 的持有者分类。
 ///
 /// 关键：必须把"由 Subout 自己/受管进程持有"与"反查不到持有者"区分开。
@@ -1563,6 +1686,98 @@ mod tests {
         // 端口 8080
         let inodes2 = super::parse_listen_inodes(sample, 8080);
         assert_eq!(inodes2, vec![22222]);
+    }
+
+    #[test]
+    fn test_parse_listen_inodes_for_filters_by_address() {
+        // 端口 53 = 0x0035。
+        // 127.0.0.53 在小端表示中是 3500007F；192.168.0.254 是 FE00A8C0。
+        // fe80::dce8:d1ff:feca:4b05 的 /proc 表示为 4 个 32 位小端字拼接：
+        //   000080FE 00000000 FFD1E8DC 054BCAFE
+        let tcp = r"  sl  local_address rem_address   st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode
+   0: 3500007F:0035 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 11111 1 0000000000000000 100 0 0 10 0
+   1: FE00A8C0:0035 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 22222 1 0000000000000000 100 0 0 10 0
+";
+        // fe80::dce8:d1ff:feca:4b05 在 /proc/net/tcp6 中为 000080FE00000000FFD1E8DC054BCAFE
+        let tcp6 = r"  sl  local_address rem_address   st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode
+   0: 000080FE00000000FFD1E8DC054BCAFE:0035 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 33333 1 0000000000000000 100 0 0 10 0
+";
+
+        // 配置监听 192.168.0.254:53 —— 只应匹配第二条（22222），不会把回环的 127.0.0.53 算进来。
+        assert_eq!(
+            super::parse_listen_inodes_for(tcp, tcp6, 53, "192.168.0.254"),
+            vec![22222]
+        );
+        // 配置监听 fe80::dce8:d1ff:feca:4b05%eth0:53 —— 匹配 tcp6 那条，且 zone 被忽略。
+        assert_eq!(
+            super::parse_listen_inodes_for(tcp, tcp6, 53, "fe80::dce8:d1ff:feca:4b05%eth0"),
+            vec![33333]
+        );
+        // 配置监听回环 127.0.0.53:53 —— 匹配第一条。
+        assert_eq!(
+            super::parse_listen_inodes_for(tcp, tcp6, 53, "127.0.0.53"),
+            vec![11111]
+        );
+        // 通配监听 0.0.0.0:53 —— 匹配所有 v4 监听（11111、22222）。
+        assert_eq!(
+            super::parse_listen_inodes_for(tcp, tcp6, 53, "0.0.0.0"),
+            vec![11111, 22222]
+        );
+        // 不同端口应无匹配。
+        assert!(super::parse_listen_inodes_for(tcp, tcp6, 54, "192.168.0.254").is_empty());
+    }
+
+    /// 回归测试：复现真实误报场景 —— systemd-resolved 在 127.0.0.53:53 / 127.0.0.54:53
+    /// 监听，但配置监听的是 192.168.0.254:53 与 fe80::...%eth0:53。
+    /// 旧实现只按端口匹配，会把回环监听的 inode 反查成"占用者未知"并报冲突；
+    /// 按地址精确匹配后，这两个入站都不应产生任何冲突。
+    #[test]
+    fn test_detect_port_conflicts_ignores_loopback_dns_for_specific_listen() {
+        use serde_json::json;
+
+        // /proc/net/tcp：systemd-resolved 在回环 127.0.0.53 与 127.0.0.54 监听 53。
+        // 127.0.0.53 -> 3500007F；127.0.0.54 -> 3600007F（小端）。
+        let tcp = r"  sl  local_address rem_address   st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode
+   0: 3500007F:0035 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 11111 1 0000000000000000 100 0 0 10 0
+   1: 3600007F:0035 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 22222 1 0000000000000000 100 0 0 10 0
+";
+        let tcp6 = "  sl  local_address rem_address   st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode\n";
+
+        // 这些 inode 归属于 systemd-resolved（PID 314），不在排除集合中——
+        // 旧实现会因为它们监听 53 端口而误报"占用者未知"的外部冲突。
+        let fd_entries = vec![
+            (314u32, "socket:[11111]".to_string()),
+            (314u32, "socket:[22222]".to_string()),
+        ];
+        let excluded = HashSet::<u32>::new();
+
+        let config = json!({
+            "inbounds": [
+                {"type": "direct", "tag": "dns-in-udp", "listen": "192.168.0.254", "listen_port": 53, "network": "udp"},
+                {"type": "direct", "tag": "dns-in-tcp", "listen": "192.168.0.254", "listen_port": 53, "network": "tcp"},
+                {"type": "direct", "tag": "dns-in-udp6", "listen": "fe80::dce8:d1ff:feca:4b05%eth0", "listen_port": 53, "network": "udp"},
+                {"type": "direct", "tag": "dns-in-tcp6", "listen": "fe80::dce8:d1ff:feca:4b05%eth0", "listen_port": 53, "network": "tcp"}
+            ]
+        });
+
+        let conflicts = super::detect_port_conflicts(&config, tcp, tcp6, &fd_entries, &excluded);
+        assert!(
+            conflicts.is_empty(),
+            "回环 DNS 监听不得被误报为具体 IP / link-local 地址的 53 端口冲突，实际: {conflicts:?}"
+        );
+
+        // 对照组：如果配置真的监听 127.0.0.53:53，则应当如实报出冲突，
+        // 证明修复没有把"所有 53 端口冲突"一刀切地吞掉。
+        let config_loopback = json!({
+            "inbounds": [
+                {"type": "direct", "tag": "dns-in", "listen": "127.0.0.53", "listen_port": 53, "network": "udp"}
+            ]
+        });
+        let loopback_conflicts =
+            super::detect_port_conflicts(&config_loopback, tcp, tcp6, &fd_entries, &excluded);
+        assert_eq!(loopback_conflicts.len(), 1);
+        assert_eq!(loopback_conflicts[0].resource, "127.0.0.53:53");
+        assert_eq!(loopback_conflicts[0].holder_pid, Some(314));
     }
 
     #[test]
